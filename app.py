@@ -117,6 +117,7 @@ def main():
         ],
         format_func=lambda x: x[0],
         horizontal=True,
+        index=1,  # Default: Order ID numerico
         key="sort_method"
     )
 
