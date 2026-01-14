@@ -215,6 +215,27 @@ class ExcelParser:
             except Exception as e:
                 errors.append(f"xlrd: {str(e)}")
 
+        # Metodo 3b: Prova openpyxl anche per XLS (a volte funziona)
+        if real_type == 'xls':
+            try:
+                df = pd.read_excel(BytesIO(file_bytes), engine='openpyxl')
+                if not df.empty:
+                    return df
+            except Exception as e:
+                errors.append(f"openpyxl (xls fallback): {str(e)}")
+
+        # Metodo 3c: Prova HTML per file XLS corrotti (comune con export web)
+        if real_type == 'xls':
+            for encoding in ['utf-8', 'latin-1', 'cp1252', 'iso-8859-1']:
+                try:
+                    html_str = file_bytes.decode(encoding, errors='ignore')
+                    dfs = pd.read_html(StringIO(html_str))
+                    if dfs and not dfs[0].empty:
+                        return dfs[0]
+                except Exception:
+                    pass
+            errors.append("HTML (xls fallback): nessun encoding valido")
+
         # Metodo 4: CSV fallback
         if real_type in ('csv', 'unknown'):
             for sep in [',', ';', '\t']:
