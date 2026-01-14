@@ -1,6 +1,7 @@
 """
 Excel Parser Module
 Gestisce la lettura e il parsing dei file Excel/XLS da ShippyPro.
+Supporta anche file HTML mascherati da XLS (export tipico di ShippyPro).
 """
 
 import re
@@ -9,7 +10,7 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
-from io import BytesIO
+from io import BytesIO, StringIO
 
 import pandas as pd
 
@@ -41,7 +42,7 @@ class ExcelParserError(Exception):
 class ExcelParser:
     """
     Parser per file Excel/XLS da ShippyPro.
-    Supporta formati .xlsx e .xls (legacy).
+    Supporta formati .xlsx, .xls (legacy), e HTML mascherato da XLS.
     """
 
     # Nomi colonne attesi (case-insensitive)
@@ -118,6 +119,30 @@ class ExcelParser:
 
         return None
 
+    def _detect_file_type(self, file_bytes: bytes) -> str:
+        """
+        Rileva il tipo reale del file dai magic bytes.
+
+        Args:
+            file_bytes: Primi bytes del file
+
+        Returns:
+            Tipo di file: 'xlsx', 'xls', 'html', 'csv', 'unknown'
+        """
+        # Check magic bytes
+        if file_bytes[:4] == b'PK\x03\x04':
+            return 'xlsx'  # ZIP format (XLSX)
+        elif file_bytes[:8] == b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1':
+            return 'xls'  # OLE2 format (XLS)
+        elif file_bytes[:5].lower() in (b'<html', b'<!doc', b'<tabl', b'<?xml'):
+            return 'html'
+        elif b'<html' in file_bytes[:1000].lower() or b'<table' in file_bytes[:1000].lower():
+            return 'html'
+        elif b',' in file_bytes[:1000] and b'\n' in file_bytes[:1000]:
+            return 'csv'
+        else:
+            return 'unknown'
+
     def _try_read_excel(
         self,
         file_input: bytes | BytesIO | str,
@@ -138,60 +163,95 @@ class ExcelParser:
         """
         errors = []
 
-        # Prepara l'input per pandas
+        # Prepara l'input
         if isinstance(file_input, bytes):
-            input_data = BytesIO(file_input)
+            file_bytes = file_input
         elif isinstance(file_input, BytesIO):
-            input_data = file_input
-            input_data.seek(0)
+            file_input.seek(0)
+            file_bytes = file_input.read()
+            file_input.seek(0)
         else:
-            input_data = file_input
+            with open(file_input, 'rb') as f:
+                file_bytes = f.read()
 
-        is_xls = filename.lower().endswith('.xls')
+        # Rileva tipo reale del file
+        real_type = self._detect_file_type(file_bytes)
 
-        # Metodo 1: openpyxl (per xlsx)
-        if not is_xls:
+        # Metodo 1: Se è HTML (comune per ShippyPro export)
+        if real_type == 'html':
             try:
-                if isinstance(input_data, BytesIO):
-                    input_data.seek(0)
-                df = pd.read_excel(input_data, engine='openpyxl')
+                html_str = file_bytes.decode('utf-8', errors='ignore')
+                dfs = pd.read_html(StringIO(html_str))
+                if dfs and not dfs[0].empty:
+                    return dfs[0]
+            except Exception as e:
+                errors.append(f"HTML: {str(e)}")
+
+            # Prova con encoding diversi
+            for encoding in ['latin-1', 'cp1252', 'iso-8859-1']:
+                try:
+                    html_str = file_bytes.decode(encoding, errors='ignore')
+                    dfs = pd.read_html(StringIO(html_str))
+                    if dfs and not dfs[0].empty:
+                        return dfs[0]
+                except Exception:
+                    pass
+
+        # Metodo 2: XLSX con openpyxl
+        if real_type in ('xlsx', 'unknown'):
+            try:
+                df = pd.read_excel(BytesIO(file_bytes), engine='openpyxl')
                 if not df.empty:
                     return df
             except Exception as e:
                 errors.append(f"openpyxl: {str(e)}")
 
-        # Metodo 2: xlrd (per xls legacy)
-        try:
-            if isinstance(input_data, BytesIO):
-                input_data.seek(0)
-            df = pd.read_excel(input_data, engine='xlrd')
-            if not df.empty:
-                return df
-        except Exception as e:
-            errors.append(f"xlrd: {str(e)}")
-
-        # Metodo 3: Conversione con LibreOffice (solo per file su disco)
-        if isinstance(file_input, str) and Path(file_input).exists():
+        # Metodo 3: XLS con xlrd
+        if real_type in ('xls', 'unknown'):
             try:
-                df = self._convert_with_libreoffice(file_input)
+                df = pd.read_excel(BytesIO(file_bytes), engine='xlrd')
                 if not df.empty:
                     return df
             except Exception as e:
-                errors.append(f"LibreOffice: {str(e)}")
+                errors.append(f"xlrd: {str(e)}")
 
-        # Metodo 4: Fallback con engine=None (auto-detect)
+        # Metodo 4: CSV fallback
+        if real_type in ('csv', 'unknown'):
+            for sep in [',', ';', '\t']:
+                for encoding in ['utf-8', 'latin-1', 'cp1252']:
+                    try:
+                        df = pd.read_csv(
+                            BytesIO(file_bytes),
+                            sep=sep,
+                            encoding=encoding
+                        )
+                        if not df.empty and len(df.columns) > 1:
+                            return df
+                    except Exception:
+                        pass
+            errors.append("CSV: nessun formato valido trovato")
+
+        # Metodo 5: Auto-detect pandas
         try:
-            if isinstance(input_data, BytesIO):
-                input_data.seek(0)
-            df = pd.read_excel(input_data)
+            df = pd.read_excel(BytesIO(file_bytes))
             if not df.empty:
                 return df
         except Exception as e:
             errors.append(f"auto: {str(e)}")
 
+        # Metodo 6: Forza lettura HTML come ultima risorsa
+        try:
+            html_str = file_bytes.decode('utf-8', errors='replace')
+            dfs = pd.read_html(StringIO(html_str))
+            if dfs and not dfs[0].empty:
+                return dfs[0]
+        except Exception as e:
+            errors.append(f"HTML fallback: {str(e)}")
+
         raise ExcelParserError(
-            f"Impossibile leggere il file Excel. Errori:\n" +
-            "\n".join(f"  - {e}" for e in errors)
+            f"Impossibile leggere il file Excel.\n"
+            f"Tipo rilevato: {real_type}\n"
+            f"Errori:\n" + "\n".join(f"  - {e}" for e in errors)
         )
 
     def _convert_with_libreoffice(self, filepath: str) -> pd.DataFrame:
@@ -255,6 +315,9 @@ class ExcelParser:
 
         # Leggi il file
         df = self._try_read_excel(file_input, filename)
+
+        # Pulisci nomi colonne (rimuovi spazi extra, newlines)
+        df.columns = [str(col).strip().replace('\n', ' ') for col in df.columns]
 
         # Trova le colonne necessarie
         order_id_col = self._find_column(df, 'order_id')
