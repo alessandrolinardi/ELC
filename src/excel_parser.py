@@ -215,6 +215,15 @@ class ExcelParser:
             except Exception as e:
                 errors.append(f"xlrd: {str(e)}")
 
+        # Metodo 3a: Prova calamine (parser Rust, più robusto)
+        if real_type in ('xls', 'xlsx', 'unknown'):
+            try:
+                df = pd.read_excel(BytesIO(file_bytes), engine='calamine')
+                if not df.empty:
+                    return df
+            except Exception as e:
+                errors.append(f"calamine: {str(e)}")
+
         # Metodo 3b: Prova openpyxl anche per XLS (a volte funziona)
         if real_type == 'xls':
             try:
