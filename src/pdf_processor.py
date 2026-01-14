@@ -224,20 +224,18 @@ class PDFProcessor:
         Returns:
             Nuovo PDF con pagine riordinate come bytes
         """
-        src_doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-        new_doc = fitz.open()
+        doc = fitz.open(stream=pdf_bytes, filetype="pdf")
 
         try:
-            for page_idx in page_order:
-                new_doc.insert_pdf(src_doc, from_page=page_idx, to_page=page_idx)
+            # Usa select() che è MOLTO più veloce di insert_pdf in loop
+            doc.select(page_order)
 
-            # Salva in memoria
+            # Salva in memoria (senza compressione pesante per velocità)
             output = BytesIO()
-            new_doc.save(output, garbage=4, deflate=True)
+            doc.save(output, garbage=3, deflate=False)
             return output.getvalue()
         finally:
-            src_doc.close()
-            new_doc.close()
+            doc.close()
 
 
 def extract_tracking_from_page(text: str) -> tuple[Optional[str], Optional[str]]:
