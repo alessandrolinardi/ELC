@@ -1,0 +1,17 @@
+{
+  "addresses": [
+    {
+      "id": "addr_001",
+      "name": "Sede Milano",
+      "is_default": true,
+      "company": "Estée Lauder",
+      "street": "Via Turati 3",
+      "zip": "20121",
+      "city": "Milano",
+      "province": "MI",
+      "reference": "02 1234567",
+      "created_at": "2026-01-15T10:00:00Z",
+      "updated_at": "2026-01-15T10:00:00Z"
+    }
+  ]
+}

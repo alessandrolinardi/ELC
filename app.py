@@ -16,6 +16,11 @@ from src.excel_parser import ExcelParser, ExcelParserError
 from src.matcher import Matcher, UnmatchedReason
 from src.sorter import Sorter, SortMethod
 from src.zip_validator import ZipValidator, ValidationReport
+from src.address_book import (
+    load_addresses, save_addresses, get_address_by_id, get_default_address,
+    add_address, update_address, delete_address, set_default_address,
+    get_address_display_name, get_address_summary, Address
+)
 
 
 # ============================================================================
@@ -740,6 +745,92 @@ def send_pickup_request(
         return False, f"Errore: {str(e)}"
 
 
+def address_book_management():
+    """Address book management UI (expander)."""
+    with st.expander("📒 Gestione Rubrica Indirizzi", expanded=False):
+        addresses = load_addresses()
+
+        # Add new address form
+        if st.session_state.get('show_add_address_form', False):
+            st.markdown("#### ➕ Nuovo Indirizzo")
+            with st.form("add_address_form"):
+                new_name = st.text_input("Nome indirizzo *", placeholder="Es: Magazzino Bologna")
+                new_company = st.text_input("Azienda *", value="Estée Lauder")
+                new_street = st.text_input("Indirizzo *", placeholder="Via Emilia 50")
+
+                col1, col2, col3 = st.columns([1, 2, 1])
+                with col1:
+                    new_zip = st.text_input("CAP *", placeholder="40100", max_chars=5)
+                with col2:
+                    new_city = st.text_input("Città *", placeholder="Bologna")
+                with col3:
+                    new_province = st.text_input("Provincia", placeholder="BO", max_chars=2)
+
+                new_reference = st.text_input("Riferimento/Telefono", placeholder="051 123456")
+                new_is_default = st.checkbox("Imposta come predefinito")
+
+                col_save, col_cancel = st.columns(2)
+                with col_save:
+                    if st.form_submit_button("💾 Salva", use_container_width=True):
+                        if not new_name or not new_company or not new_street or not new_zip or not new_city:
+                            st.error("❌ Compila tutti i campi obbligatori")
+                        elif not new_zip.isdigit() or len(new_zip) != 5:
+                            st.error("❌ CAP deve essere di 5 cifre")
+                        else:
+                            result = add_address(
+                                name=new_name,
+                                company=new_company,
+                                street=new_street,
+                                zip_code=new_zip,
+                                city=new_city,
+                                province=new_province or "",
+                                reference=new_reference or "",
+                                is_default=new_is_default
+                            )
+                            if result:
+                                st.session_state.show_add_address_form = False
+                                st.success("✅ Indirizzo aggiunto!")
+                                st.rerun()
+                            else:
+                                st.error("❌ Nome indirizzo già esistente")
+                with col_cancel:
+                    if st.form_submit_button("Annulla", use_container_width=True):
+                        st.session_state.show_add_address_form = False
+                        st.rerun()
+        else:
+            if st.button("➕ Aggiungi indirizzo", use_container_width=True):
+                st.session_state.show_add_address_form = True
+                st.rerun()
+
+        # List existing addresses
+        if addresses:
+            st.markdown("---")
+            for addr in addresses:
+                with st.container():
+                    col_info, col_actions = st.columns([3, 1])
+
+                    with col_info:
+                        prefix = "⭐" if addr.is_default else "📍"
+                        default_label = " **(PREDEFINITO)**" if addr.is_default else ""
+                        st.markdown(f"**{prefix} {addr.name}**{default_label}")
+                        st.caption(f"{addr.company}")
+                        st.caption(f"{addr.street}, {addr.zip} {addr.city} ({addr.province})")
+                        if addr.reference:
+                            st.caption(f"Rif: {addr.reference}")
+
+                    with col_actions:
+                        if not addr.is_default:
+                            if st.button("⭐", key=f"default_{addr.id}", help="Imposta predefinito"):
+                                set_default_address(addr.id)
+                                st.rerun()
+                        if len(addresses) > 1:
+                            if st.button("🗑️", key=f"delete_{addr.id}", help="Elimina"):
+                                delete_address(addr.id)
+                                st.rerun()
+
+                    st.markdown("---")
+
+
 def pickup_request_page():
     """Page for Courier Pickup Request feature."""
     st.markdown("# 🚚 Richiesta Ritiro Corriere")
@@ -748,15 +839,18 @@ def pickup_request_page():
     # User guide
     st.info(
         "**Come usare questo strumento:**\n"
-        "- Compila il form con i dettagli del ritiro\n"
-        "- La richiesta verrà inviata via email al team logistica"
+        "- Seleziona un indirizzo dalla rubrica o inseriscine uno nuovo\n"
+        "- Compila i dettagli del ritiro e invia la richiesta"
     )
 
     st.markdown("---")
 
-    # Initialize session state for tracking successful submissions
+    # Initialize session state
     if 'pickup_request_sent' not in st.session_state:
         st.session_state.pickup_request_sent = False
+    if 'selected_address_id' not in st.session_state:
+        default_addr = get_default_address()
+        st.session_state.selected_address_id = default_addr.id if default_addr else None
 
     # Show success message and reset button if request was sent
     if st.session_state.pickup_request_sent:
@@ -766,6 +860,44 @@ def pickup_request_page():
             st.session_state.pickup_request_sent = False
             st.rerun()
         return
+
+    # Address book management (expander)
+    address_book_management()
+
+    # Load addresses for selection
+    addresses = load_addresses()
+
+    # Build address options for dropdown
+    address_options = {get_address_display_name(addr): addr.id for addr in addresses}
+    address_options["➕ Nuovo indirizzo (inserimento manuale)"] = "new"
+
+    # Get current selection
+    current_selection = None
+    for display_name, addr_id in address_options.items():
+        if addr_id == st.session_state.selected_address_id:
+            current_selection = display_name
+            break
+    if current_selection is None:
+        current_selection = list(address_options.keys())[0] if addresses else "➕ Nuovo indirizzo (inserimento manuale)"
+
+    # Address selection (outside form for reactivity)
+    st.markdown("### 📍 Indirizzo Ritiro")
+    selected_display = st.selectbox(
+        "Seleziona indirizzo:",
+        options=list(address_options.keys()),
+        index=list(address_options.keys()).index(current_selection) if current_selection in address_options else 0,
+        key="address_selector"
+    )
+    selected_address_id = address_options[selected_display]
+    st.session_state.selected_address_id = selected_address_id
+
+    # Get selected address data
+    selected_address = get_address_by_id(selected_address_id) if selected_address_id != "new" else None
+    is_from_book = selected_address is not None
+
+    # Show address preview if from book
+    if is_from_book:
+        st.info(f"📍 **{selected_address.company}** - {get_address_summary(selected_address)}")
 
     # Form
     with st.form("pickup_request_form"):
@@ -804,51 +936,69 @@ def pickup_request_page():
                 key="time_end"
             )
 
-        # Address section
-        st.markdown("### 📍 Indirizzo Ritiro")
+        # Address fields - pre-filled if from book, editable if new
+        st.markdown("### 📍 Dettagli Indirizzo")
 
-        company = st.text_input(
-            "Azienda *",
-            value="Estée Lauder",
-            key="company"
-        )
+        if is_from_book:
+            st.caption("🔒 Indirizzo selezionato dalla rubrica")
+            company = selected_address.company
+            address = selected_address.street
+            zip_code = selected_address.zip
+            city = selected_address.city
+            province = selected_address.province
+            reference = selected_address.reference
 
-        address = st.text_input(
-            "Indirizzo *",
-            placeholder="Via Turati 3",
-            key="address"
-        )
-
-        col_zip, col_city, col_province = st.columns([1, 2, 1])
-
-        with col_zip:
-            zip_code = st.text_input(
-                "CAP *",
-                placeholder="20121",
-                max_chars=5,
-                key="zip_code"
+            # Show read-only display
+            col1, col2 = st.columns(2)
+            with col1:
+                st.text_input("Azienda", value=company, disabled=True, key="company_display")
+                st.text_input("Indirizzo", value=address, disabled=True, key="address_display")
+            with col2:
+                st.text_input("CAP / Città", value=f"{zip_code} {city} ({province})", disabled=True, key="location_display")
+                st.text_input("Riferimento", value=reference, disabled=True, key="reference_display")
+        else:
+            company = st.text_input(
+                "Azienda *",
+                value="Estée Lauder",
+                key="company"
             )
 
-        with col_city:
-            city = st.text_input(
-                "Città *",
-                placeholder="Milano",
-                key="city"
+            address = st.text_input(
+                "Indirizzo *",
+                placeholder="Via Turati 3",
+                key="address"
             )
 
-        with col_province:
-            province = st.text_input(
-                "Provincia",
-                placeholder="MI",
-                max_chars=2,
-                key="province"
-            )
+            col_zip, col_city, col_province = st.columns([1, 2, 1])
 
-        reference = st.text_input(
-            "Riferimento/Telefono",
-            placeholder="02 1234567",
-            key="reference"
-        )
+            with col_zip:
+                zip_code = st.text_input(
+                    "CAP *",
+                    placeholder="20121",
+                    max_chars=5,
+                    key="zip_code"
+                )
+
+            with col_city:
+                city = st.text_input(
+                    "Città *",
+                    placeholder="Milano",
+                    key="city"
+                )
+
+            with col_province:
+                province = st.text_input(
+                    "Provincia",
+                    placeholder="MI",
+                    max_chars=2,
+                    key="province"
+                )
+
+            reference = st.text_input(
+                "Riferimento/Telefono",
+                placeholder="02 1234567",
+                key="reference"
+            )
 
         # Package details section
         st.markdown("### 📦 Dettagli Colli")
