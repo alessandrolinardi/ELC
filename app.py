@@ -1,6 +1,6 @@
 """
-Label Sorter - Estée Lauder Logistics
-App Streamlit per riordinamento etichette di spedizione PDF.
+ELC Tools - Estée Lauder Logistics
+App Streamlit multi-funzione per la gestione delle spedizioni.
 """
 
 import io
@@ -8,19 +8,21 @@ import csv
 from datetime import datetime
 
 import streamlit as st
+import pandas as pd
 
 from src.pdf_processor import PDFProcessor
 from src.excel_parser import ExcelParser, ExcelParserError
 from src.matcher import Matcher, UnmatchedReason
 from src.sorter import Sorter, SortMethod
+from src.zip_validator import ZipValidator, ValidationReport
 
 
 # Configurazione pagina
 st.set_page_config(
-    page_title="Label Sorter - Estée Lauder",
+    page_title="ELC Tools - Estée Lauder",
     page_icon="📦",
     layout="centered",
-    initial_sidebar_state="collapsed"
+    initial_sidebar_state="expanded"
 )
 
 # CSS personalizzato
@@ -56,7 +58,6 @@ def generate_csv_report(match_report, sorted_result) -> str:
     output = io.StringIO()
     writer = csv.writer(output)
 
-    # Header
     writer.writerow([
         "Pagina Originale",
         "Tracking Estratto",
@@ -64,7 +65,6 @@ def generate_csv_report(match_report, sorted_result) -> str:
         "Motivo"
     ])
 
-    # Righe non matchate
     for result in match_report.unmatched:
         tracking = result.tracking if result.tracking else "(non estratto)"
         carrier = result.carrier if result.carrier else "-"
@@ -80,8 +80,8 @@ def generate_csv_report(match_report, sorted_result) -> str:
     return output.getvalue()
 
 
-def main():
-    # Header
+def label_sorter_page():
+    """Page for Label Sorter feature."""
     st.markdown("# 📦 Label Sorter")
     st.markdown("*Riordina le etichette di spedizione secondo l'ordine degli ordini*")
     st.markdown("---")
@@ -127,19 +127,18 @@ def main():
         "🚀 Elabora",
         type="primary",
         disabled=not (pdf_file and excel_file),
-        use_container_width=True
+        use_container_width=True,
+        key="label_sorter_process"
     )
 
     # Elaborazione
     if process_button and pdf_file and excel_file:
-        # Container per i log di debug
         status_container = st.container()
 
         with status_container:
             st.markdown("### 🔄 Elaborazione in corso...")
 
             try:
-                # Inizializza processori
                 pdf_processor = PDFProcessor()
                 excel_parser = ExcelParser()
 
@@ -153,7 +152,6 @@ def main():
                     pdf_data = pdf_processor.process_pdf(pdf_bytes)
                     st.write(f"✓ Pagine trovate: {pdf_data.total_pages}")
 
-                    # Mostra primi tracking estratti
                     extracted = [(p.page_number, p.tracking, p.carrier) for p in pdf_data.pages[:5] if p.tracking]
                     if extracted:
                         st.write(f"✓ Primi tracking estratti: {extracted}")
@@ -174,7 +172,6 @@ def main():
                         st.write(f"✓ Ordini trovati: {len(excel_data.orders)}")
                         st.write(f"✓ Colonne: {', '.join(excel_data.columns_found[:5])}...")
 
-                        # Mostra primi ordini
                         if excel_data.orders:
                             first_orders = [(o.order_id, o.tracking) for o in excel_data.orders[:3]]
                             st.write(f"✓ Primi ordini: {first_orders}")
@@ -185,7 +182,6 @@ def main():
                         st.error(f"Errore: {str(e)}")
                         st.stop()
 
-                # Mostra warning Excel se presenti
                 if excel_data.warnings:
                     with st.expander(f"⚠️ {len(excel_data.warnings)} avvisi lettura Excel"):
                         for warning in excel_data.warnings:
@@ -239,31 +235,19 @@ def main():
         st.markdown("---")
         st.markdown("## ✅ Risultato")
 
-        # Statistiche
         col_stat1, col_stat2, col_stat3 = st.columns(3)
 
         with col_stat1:
-            st.metric(
-                label="Etichette elaborate",
-                value=pdf_data.total_pages
-            )
+            st.metric(label="Etichette elaborate", value=pdf_data.total_pages)
 
         with col_stat2:
-            st.metric(
-                label="Matchate",
-                value=f"{sorted_result.matched_count} ({match_report.match_rate}%)"
-            )
+            st.metric(label="Matchate", value=f"{sorted_result.matched_count} ({match_report.match_rate}%)")
 
         with col_stat3:
-            st.metric(
-                label="Non matchate",
-                value=sorted_result.unmatched_count
-            )
+            st.metric(label="Non matchate", value=sorted_result.unmatched_count)
 
-        # Download buttons
         st.markdown("### 📥 Download")
         col_dl1, col_dl2 = st.columns(2)
-
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
         with col_dl1:
@@ -285,14 +269,10 @@ def main():
                 use_container_width=True
             )
 
-        # Dettaglio non matchate
         if match_report.unmatched:
             st.markdown("### ⚠️ Etichette non matchate")
-            st.markdown(
-                "*Queste etichette sono state inserite in fondo al PDF*"
-            )
+            st.markdown("*Queste etichette sono state inserite in fondo al PDF*")
 
-            # Tabella non matchate
             unmatched_data = []
             for result in match_report.unmatched:
                 unmatched_data.append({
@@ -302,22 +282,215 @@ def main():
                     "Motivo": result.unmatched_reason.value if result.unmatched_reason else "Sconosciuto"
                 })
 
-            st.dataframe(
-                unmatched_data,
-                use_container_width=True,
-                hide_index=True
-            )
+            st.dataframe(unmatched_data, use_container_width=True, hide_index=True)
         else:
             st.success("🎉 Tutte le etichette sono state matchate!")
 
-    # Footer
+
+def zip_validator_page():
+    """Page for ZIP Code Validator feature."""
+    st.markdown("# 📍 ZIP Code Validator")
+    st.markdown("*Valida e correggi i CAP negli indirizzi di spedizione*")
     st.markdown("---")
-    st.markdown(
-        "<div style='text-align: center; color: #888; font-size: 0.8rem;'>"
-        "Label Sorter v1.0 - Estée Lauder Logistics"
+
+    # Upload
+    st.markdown("### 📊 File Indirizzi")
+    excel_file = st.file_uploader(
+        "Carica il file Excel con gli indirizzi",
+        type=["xlsx", "xls"],
+        key="zip_excel_uploader",
+        help="File con colonne: Street 1, City, Zip, Country"
+    )
+
+    # Settings
+    col1, col2 = st.columns(2)
+
+    with col1:
+        confidence_threshold = st.slider(
+            "Soglia confidenza per auto-correzione",
+            min_value=50,
+            max_value=100,
+            value=90,
+            step=5,
+            help="ZIP corretti automaticamente solo se confidenza ≥ soglia"
+        )
+
+    with col2:
+        country_filter = st.selectbox(
+            "Filtra per paese",
+            options=["Solo IT", "Tutti"],
+            index=0,
+            help="Attualmente la validazione supporta solo indirizzi italiani"
+        )
+
+    # Process button
+    st.markdown("---")
+    process_button = st.button(
+        "🔍 Avvia Validazione",
+        type="primary",
+        disabled=not excel_file,
+        use_container_width=True,
+        key="zip_validator_process"
+    )
+
+    if process_button and excel_file:
+        try:
+            # Read Excel
+            with st.status("📊 Lettura file...", expanded=True) as status:
+                excel_bytes = excel_file.read()
+                st.write(f"✓ File caricato: {len(excel_bytes):,} bytes")
+
+                # Try to read with pandas
+                try:
+                    df = pd.read_excel(io.BytesIO(excel_bytes), engine='openpyxl')
+                except:
+                    try:
+                        df = pd.read_excel(io.BytesIO(excel_bytes), engine='calamine')
+                    except:
+                        df = pd.read_excel(io.BytesIO(excel_bytes))
+
+                st.write(f"✓ Righe trovate: {len(df)}")
+                st.write(f"✓ Colonne: {', '.join(df.columns[:8].tolist())}...")
+
+                status.update(label=f"✅ File letto ({len(df)} righe)", state="complete")
+
+            # Filter by country if needed
+            if country_filter == "Solo IT":
+                country_col = None
+                for col in df.columns:
+                    if col.lower().strip() in ['country', 'paese', 'nazione']:
+                        country_col = col
+                        break
+
+                if country_col:
+                    original_count = len(df)
+                    df_filtered = df[df[country_col].str.upper().isin(['IT', 'ITALY'])]
+                    if len(df_filtered) < len(df):
+                        st.info(f"ℹ️ Filtrati {original_count - len(df_filtered)} indirizzi non italiani")
+                    df = df_filtered
+
+            if len(df) == 0:
+                st.warning("⚠️ Nessun indirizzo italiano trovato nel file")
+                st.stop()
+
+            # Validate
+            validator = ZipValidator(confidence_threshold=confidence_threshold)
+
+            # Progress container
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+
+            def update_progress(current, total, message):
+                progress_bar.progress(current / total)
+                status_text.text(f"⏳ {message} ({current}/{total})")
+
+            with st.spinner(f"Validazione {len(df)} indirizzi... (circa {len(df) * 1.1:.0f} secondi)"):
+                report = validator.process_dataframe(df, progress_callback=update_progress)
+
+            progress_bar.progress(100)
+            status_text.text("✅ Validazione completata!")
+
+            # Results
+            st.markdown("---")
+            st.markdown("## ✅ Risultato")
+
+            col1, col2, col3, col4 = st.columns(4)
+
+            with col1:
+                st.metric("✓ Validi", report.valid_count)
+
+            with col2:
+                st.metric("🔄 Corretti", report.corrected_count)
+
+            with col3:
+                st.metric("⚠️ Da rivedere", report.review_count)
+
+            with col4:
+                st.metric("⏭️ Saltati", report.skipped_count)
+
+            # Preview changes
+            if report.corrected_count > 0 or report.review_count > 0:
+                st.markdown("### 📋 Dettaglio modifiche")
+
+                preview_data = []
+                for r in report.results:
+                    if not r.is_valid:
+                        preview_data.append({
+                            "Città": r.city[:20],
+                            "Via": r.street[:25] + "..." if len(r.street) > 25 else r.street,
+                            "ZIP Orig.": r.original_zip,
+                            "ZIP Sugg.": r.suggested_zip or "-",
+                            "Conf.": f"{r.confidence}%",
+                            "Stato": "🔄 Corretto" if r.auto_corrected else "⚠️ Rivedere"
+                        })
+
+                if preview_data:
+                    st.dataframe(preview_data, use_container_width=True, hide_index=True)
+
+            # Downloads
+            st.markdown("### 📥 Download")
+            col_dl1, col_dl2 = st.columns(2)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+            # Re-read original file for corrected output
+            excel_file.seek(0)
+            original_df = pd.read_excel(excel_file)
+
+            with col_dl1:
+                corrected_excel = validator.generate_corrected_excel(original_df, report)
+                st.download_button(
+                    label="📄 Scarica File Corretto",
+                    data=corrected_excel,
+                    file_name=f"indirizzi_corretti_{timestamp}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
+
+            with col_dl2:
+                review_excel = validator.generate_review_report(report)
+                st.download_button(
+                    label="📋 Scarica Report Revisione",
+                    data=review_excel,
+                    file_name=f"report_revisione_{timestamp}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
+
+        except Exception as e:
+            st.error(f"❌ Errore: {str(e)}")
+            st.exception(e)
+
+
+def main():
+    # Sidebar navigation
+    st.sidebar.markdown("# 🛠️ ELC Tools")
+    st.sidebar.markdown("Strumenti per la logistica Estée Lauder")
+    st.sidebar.markdown("---")
+
+    feature = st.sidebar.radio(
+        "Seleziona funzionalità:",
+        options=[
+            "📦 Label Sorter",
+            "📍 ZIP Validator"
+        ],
+        index=0,
+        key="feature_selector"
+    )
+
+    st.sidebar.markdown("---")
+    st.sidebar.markdown(
+        "<div style='font-size: 0.8rem; color: #888;'>"
+        "ELC Tools v1.1<br>"
+        "Estée Lauder Logistics"
         "</div>",
         unsafe_allow_html=True
     )
+
+    # Route to selected feature
+    if feature == "📦 Label Sorter":
+        label_sorter_page()
+    elif feature == "📍 ZIP Validator":
+        zip_validator_page()
 
 
 if __name__ == "__main__":
