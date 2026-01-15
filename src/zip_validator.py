@@ -335,9 +335,14 @@ class ZipValidator:
             # 2 digits different = still likely correction needed
             confidence = 92
             reason = f"2 digits different ({working_zip} → {suggested_zip})"
+        elif diff_count >= 3 and not is_city_only:
+            # 3+ digits different BUT full address match (city confirmed)
+            # Higher confidence because API found the exact street+city
+            confidence = 91
+            reason = f"{diff_count} digits different, city confirmed ({working_zip} → {suggested_zip})"
         else:
-            # 3+ digits different = less certain
-            confidence = 88
+            # 3+ digits different with city-only match = less certain
+            confidence = 85
             reason = f"{diff_count} digits different - verify manually"
 
         # Add note if original was cleaned
