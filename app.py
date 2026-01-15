@@ -17,6 +17,35 @@ from src.sorter import Sorter, SortMethod
 from src.zip_validator import ZipValidator, ValidationReport
 
 
+# ============================================================================
+# SECURITY LIMITS - Prevent abuse and DoS
+# ============================================================================
+MAX_FILE_SIZE_MB = 50  # Maximum file size in MB
+MAX_PDF_PAGES = 500    # Maximum pages in PDF
+MAX_EXCEL_ROWS = 1000  # Maximum rows in Excel for ZIP validation
+MAX_ZIP_VALIDATIONS_PER_SESSION = 500  # Limit API calls to Nominatim
+
+
+def check_file_size(file, max_mb: int = MAX_FILE_SIZE_MB) -> bool:
+    """Check if uploaded file exceeds size limit."""
+    if file is None:
+        return True
+    file.seek(0, 2)  # Seek to end
+    size_mb = file.tell() / (1024 * 1024)
+    file.seek(0)  # Reset to beginning
+    return size_mb <= max_mb
+
+
+def get_file_size_mb(file) -> float:
+    """Get file size in MB."""
+    if file is None:
+        return 0
+    file.seek(0, 2)
+    size_mb = file.tell() / (1024 * 1024)
+    file.seek(0)
+    return size_mb
+
+
 # Configurazione pagina
 st.set_page_config(
     page_title="ELC Tools - Estée Lauder",
@@ -133,6 +162,14 @@ def label_sorter_page():
 
     # Elaborazione
     if process_button and pdf_file and excel_file:
+        # Security checks
+        if not check_file_size(pdf_file, MAX_FILE_SIZE_MB):
+            st.error(f"❌ File PDF troppo grande. Massimo: {MAX_FILE_SIZE_MB}MB")
+            st.stop()
+        if not check_file_size(excel_file, MAX_FILE_SIZE_MB):
+            st.error(f"❌ File Excel troppo grande. Massimo: {MAX_FILE_SIZE_MB}MB")
+            st.stop()
+
         status_container = st.container()
 
         with status_container:
@@ -151,6 +188,11 @@ def label_sorter_page():
                     st.write("Estrazione pagine e tracking...")
                     pdf_data = pdf_processor.process_pdf(pdf_bytes)
                     st.write(f"✓ Pagine trovate: {pdf_data.total_pages}")
+
+                    # Security check: page limit
+                    if pdf_data.total_pages > MAX_PDF_PAGES:
+                        st.error(f"❌ Troppe pagine nel PDF ({pdf_data.total_pages}). Massimo: {MAX_PDF_PAGES}")
+                        st.stop()
 
                     extracted = [(p.page_number, p.tracking, p.carrier) for p in pdf_data.pages[:5] if p.tracking]
                     if extracted:
@@ -334,6 +376,11 @@ def zip_validator_page():
     )
 
     if process_button and excel_file:
+        # Security check: file size
+        if not check_file_size(excel_file, MAX_FILE_SIZE_MB):
+            st.error(f"❌ File troppo grande. Massimo: {MAX_FILE_SIZE_MB}MB")
+            st.stop()
+
         try:
             # Read Excel
             with st.status("📊 Lettura file...", expanded=True) as status:
@@ -351,6 +398,12 @@ def zip_validator_page():
 
                 st.write(f"✓ Righe trovate: {len(df)}")
                 st.write(f"✓ Colonne: {', '.join(df.columns[:8].tolist())}...")
+
+                # Security check: row limit for API calls
+                if len(df) > MAX_EXCEL_ROWS:
+                    st.error(f"❌ Troppe righe ({len(df)}). Massimo: {MAX_EXCEL_ROWS} per limitare chiamate API.")
+                    st.info("💡 Suggerimento: dividi il file in batch più piccoli.")
+                    st.stop()
 
                 status.update(label=f"✅ File letto ({len(df)} righe)", state="complete")
 
