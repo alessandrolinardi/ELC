@@ -120,6 +120,58 @@ class ZipValidator:
 
         return sum(1 for a, b in zip(zip1, zip2) if a != b)
 
+    def _is_transposition(self, zip1: str, zip2: str) -> bool:
+        """
+        Check if two zip codes are transpositions (same digits, different order).
+
+        Examples:
+            01870 vs 00187 -> True (same digits rearranged)
+            50124 vs 50122 -> False (different digits)
+
+        Args:
+            zip1: First zip code
+            zip2: Second zip code
+
+        Returns:
+            True if same digits in different order
+        """
+        if len(zip1) != len(zip2):
+            return False
+
+        # Check if both have the same digits (sorted)
+        return sorted(zip1) == sorted(zip2)
+
+    def _is_adjacent_swap(self, zip1: str, zip2: str) -> bool:
+        """
+        Check if two zip codes differ by a single adjacent digit swap.
+
+        Examples:
+            50214 vs 50124 -> True (2 and 1 swapped)
+            50122 vs 50212 -> True (1 and 2 swapped)
+
+        Args:
+            zip1: First zip code
+            zip2: Second zip code
+
+        Returns:
+            True if single adjacent swap
+        """
+        if len(zip1) != len(zip2):
+            return False
+
+        diff_positions = [i for i in range(len(zip1)) if zip1[i] != zip2[i]]
+
+        # Must have exactly 2 different positions that are adjacent
+        if len(diff_positions) != 2:
+            return False
+
+        i, j = diff_positions
+        if j - i != 1:  # Must be adjacent
+            return False
+
+        # Check if swapping fixes it
+        return zip1[i] == zip2[j] and zip1[j] == zip2[i]
+
     def _is_valid_italian_zip_format(self, zip_code: str) -> bool:
         """Check if zip code has valid Italian CAP format (5 digits)."""
         return bool(re.match(r'^\d{5}$', str(zip_code).strip()))
@@ -257,14 +309,24 @@ class ZipValidator:
                 return False, suggested_zip, 95, f"Typo fixed: '{original_zip_raw}' → '{suggested_zip}'"
             return True, working_zip, 100, "Exact match"
 
-        # Calculate confidence based on how many digits differ
+        # Calculate confidence based on type of error
         diff_count = self._count_different_digits(working_zip, suggested_zip)
         is_city_only = result.get('_city_only', False)
+        is_transposition = self._is_transposition(working_zip, suggested_zip)
+        is_adjacent_swap = self._is_adjacent_swap(working_zip, suggested_zip)
 
-        # Confidence logic based on difference
+        # Confidence logic - prioritize by error type
         if is_city_only:
             confidence = 70
             reason = "City-level match only (street not found)"
+        elif is_adjacent_swap:
+            # Adjacent digit swap = very likely typo = highest confidence
+            confidence = 96
+            reason = f"Adjacent digits swapped ({working_zip} → {suggested_zip})"
+        elif is_transposition:
+            # Same digits, different order = likely mistyped = high confidence
+            confidence = 95
+            reason = f"Digits transposed ({working_zip} → {suggested_zip})"
         elif diff_count == 1:
             # Only 1 digit different = likely typo = high confidence
             confidence = 95
