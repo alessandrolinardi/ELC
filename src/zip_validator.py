@@ -72,6 +72,54 @@ class ZipValidator:
         self.session = requests.Session()
         self.session.headers.update({'User-Agent': self.USER_AGENT})
 
+    def _clean_zip_code(self, zip_code: str) -> tuple[str, bool]:
+        """
+        Clean zip code by replacing common typos (letters for numbers).
+
+        Args:
+            zip_code: Original zip code
+
+        Returns:
+            Tuple of (cleaned_zip, was_cleaned)
+        """
+        original = str(zip_code).strip()
+
+        # Common letter-to-number replacements
+        replacements = {
+            'o': '0', 'O': '0',  # o/O → 0
+            'l': '1', 'I': '1', 'i': '1',  # l/I/i → 1
+            'z': '2', 'Z': '2',  # z/Z → 2
+            's': '5', 'S': '5',  # s/S → 5
+            'b': '8', 'B': '8',  # b/B → 8
+            'g': '9', 'G': '9',  # g/G → 9
+        }
+
+        cleaned = original
+        for char, replacement in replacements.items():
+            cleaned = cleaned.replace(char, replacement)
+
+        # Remove any remaining non-digit characters
+        cleaned = re.sub(r'[^\d]', '', cleaned)
+
+        was_cleaned = cleaned != original.replace(' ', '')
+        return cleaned, was_cleaned
+
+    def _count_different_digits(self, zip1: str, zip2: str) -> int:
+        """
+        Count how many digits are different between two zip codes.
+
+        Args:
+            zip1: First zip code
+            zip2: Second zip code
+
+        Returns:
+            Number of different digits (0-5 for Italian CAP)
+        """
+        if len(zip1) != len(zip2):
+            return max(len(zip1), len(zip2))
+
+        return sum(1 for a, b in zip(zip1, zip2) if a != b)
+
     def _is_valid_italian_zip_format(self, zip_code: str) -> bool:
         """Check if zip code has valid Italian CAP format (5 digits)."""
         return bool(re.match(r'^\d{5}$', str(zip_code).strip()))
@@ -149,15 +197,29 @@ class ZipValidator:
         Returns:
             Tuple of (is_valid, suggested_zip, confidence, reason)
         """
-        original_zip = str(original_zip).strip()
+        original_zip_raw = str(original_zip).strip()
 
         # Only validate Italian addresses for now
         if country.upper() not in ('IT', 'ITALY'):
-            return True, original_zip, 100, "Non-IT country - skipped"
+            return True, original_zip_raw, 100, "Non-IT country - skipped"
 
-        # Format check
-        if not self._is_valid_italian_zip_format(original_zip):
-            return False, None, 0, "Invalid format (must be 5 digits)"
+        # Try to clean up the zip code (handle typos like 'o' instead of '0')
+        cleaned_zip, was_cleaned = self._clean_zip_code(original_zip_raw)
+
+        # Format check on cleaned version
+        if not self._is_valid_italian_zip_format(cleaned_zip):
+            # If even cleaned version is invalid, try to get suggestion anyway
+            result = self._query_nominatim(street or "", city, "Italy")
+            if result:
+                suggested = result.get('address', {}).get('postcode')
+                if suggested:
+                    if ';' in suggested:
+                        suggested = suggested.split(';')[0]
+                    return False, suggested, 75, f"Invalid format '{original_zip_raw}' - suggested from address"
+            return False, None, 0, f"Invalid format '{original_zip_raw}' (must be 5 digits)"
+
+        # Use cleaned zip for comparison
+        working_zip = cleaned_zip
 
         # Query Nominatim
         result = self._query_nominatim(street or "", city, "Italy")
@@ -172,36 +234,53 @@ class ZipValidator:
             city_lower = city.lower().strip()
             if city_lower in self.ITALIAN_CAP_RANGES:
                 cap_start, cap_end = self.ITALIAN_CAP_RANGES[city_lower]
-                if cap_start <= original_zip <= cap_end:
-                    return True, original_zip, 75, "Within city CAP range"
+                if cap_start <= working_zip <= cap_end:
+                    return True, working_zip, 75, "Within city CAP range"
             return False, None, 50, "No postal code in API response"
 
         # Handle multiple postcodes (e.g., "50121;50122")
         if ';' in suggested_zip:
             suggested_zips = suggested_zip.split(';')
-            if original_zip in suggested_zips:
-                return True, original_zip, 100, "Exact match (one of multiple)"
-            suggested_zip = suggested_zips[0]  # Use first one
+            if working_zip in suggested_zips:
+                return True, working_zip, 100, "Exact match (one of multiple)"
+            # Check if any of the suggested matches closely
+            for sz in suggested_zips:
+                if self._count_different_digits(working_zip, sz) == 1:
+                    suggested_zip = sz
+                    break
+            else:
+                suggested_zip = suggested_zips[0]
 
         # Exact match
-        if original_zip == suggested_zip:
-            return True, original_zip, 100, "Exact match"
+        if working_zip == suggested_zip:
+            if was_cleaned:
+                return False, suggested_zip, 95, f"Typo fixed: '{original_zip_raw}' → '{suggested_zip}'"
+            return True, working_zip, 100, "Exact match"
 
-        # Check if city-only match (lower confidence)
+        # Calculate confidence based on how many digits differ
+        diff_count = self._count_different_digits(working_zip, suggested_zip)
         is_city_only = result.get('_city_only', False)
 
-        # Check province (first 2 digits)
-        same_province = original_zip[:2] == suggested_zip[:2]
-
+        # Confidence logic based on difference
         if is_city_only:
             confidence = 70
             reason = "City-level match only (street not found)"
-        elif same_province:
-            confidence = 85
-            reason = "Same province, different CAP"
-        else:
+        elif diff_count == 1:
+            # Only 1 digit different = likely typo = high confidence
+            confidence = 95
+            reason = f"Typo: 1 digit different ({working_zip} → {suggested_zip})"
+        elif diff_count == 2:
+            # 2 digits different = still likely correction needed
             confidence = 92
-            reason = "Different province - likely incorrect"
+            reason = f"2 digits different ({working_zip} → {suggested_zip})"
+        else:
+            # 3+ digits different = less certain
+            confidence = 88
+            reason = f"{diff_count} digits different - verify manually"
+
+        # Add note if original was cleaned
+        if was_cleaned:
+            reason = f"Cleaned '{original_zip_raw}' → '{working_zip}'. " + reason
 
         return False, suggested_zip, confidence, reason
 

@@ -1,0 +1,13 @@
+[server]
+# Maximum upload size in MB
+maxUploadSize = 50
+
+# Enable XSRF protection
+enableXsrfProtection = true
+
+# Enable CORS protection
+enableCORS = false
+
+[browser]
+# Disable file watching in production (security + performance)
+gatherUsageStats = false
