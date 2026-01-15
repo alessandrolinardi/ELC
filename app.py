@@ -5,7 +5,10 @@ App Streamlit multi-funzione per la gestione delle spedizioni.
 
 import io
 import csv
-from datetime import datetime
+import smtplib
+from datetime import datetime, date, time, timedelta
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 import streamlit as st
 import pandas as pd
@@ -626,6 +629,385 @@ def zip_validator_page():
             st.rerun()
 
 
+def send_pickup_email(
+    carrier: str,
+    pickup_date: date,
+    time_start: time,
+    time_end: time,
+    company: str,
+    address: str,
+    zip_code: str,
+    city: str,
+    province: str,
+    reference: str,
+    num_packages: int,
+    weight_per_package: float,
+    length: float,
+    width: float,
+    height: float,
+    use_pallet: bool,
+    num_pallets: int,
+    notes: str
+) -> tuple[bool, str]:
+    """
+    Send pickup request email.
+
+    Returns:
+        Tuple of (success, message)
+    """
+    # Calculate totals
+    total_weight = num_packages * weight_per_package
+    shipment_type = "FREIGHT" if total_weight > 70 else "NORMAL"
+
+    # Format date
+    date_str = pickup_date.strftime("%d/%m/%Y")
+    time_start_str = time_start.strftime("%H:%M")
+    time_end_str = time_end.strftime("%H:%M")
+    timestamp = datetime.now().strftime("%d/%m/%Y %H:%M")
+
+    # Build subject
+    subject = f"{carrier} - {date_str} - {shipment_type}"
+
+    # Build dimensions string
+    dimensions_str = f"{length} x {width} x {height} cm" if length and width and height else "Non specificate"
+
+    # Build HTML body
+    html_body = f"""
+    <h2>Richiesta Ritiro {carrier}</h2>
+
+    <h3>📅 Data e Orario</h3>
+    <ul>
+        <li><strong>Data:</strong> {date_str}</li>
+        <li><strong>Finestra ritiro:</strong> {time_start_str} - {time_end_str}</li>
+    </ul>
+
+    <h3>📍 Indirizzo Ritiro</h3>
+    <ul>
+        <li><strong>Azienda:</strong> {company}</li>
+        <li><strong>Indirizzo:</strong> {address}</li>
+        <li><strong>CAP:</strong> {zip_code}</li>
+        <li><strong>Città:</strong> {city} ({province})</li>
+        <li><strong>Riferimento:</strong> {reference}</li>
+    </ul>
+
+    <h3>📦 Dettagli Merce</h3>
+    <ul>
+        <li><strong>Numero colli:</strong> {num_packages}</li>
+        <li><strong>Peso singolo collo:</strong> {weight_per_package} kg</li>
+        <li><strong>Dimensioni collo:</strong> {dimensions_str}</li>
+        <li><strong>Peso totale:</strong> {total_weight} kg</li>
+        <li><strong>Tipo spedizione:</strong> {shipment_type} ({total_weight} kg {">" if total_weight > 70 else "<"} 70 kg)</li>
+    </ul>
+
+    <h3>🎨 Pallet</h3>
+    <ul>
+        <li><strong>Raggruppamento pallet:</strong> {"Sì" if use_pallet else "No"}</li>
+        {"<li><strong>Numero pallet:</strong> " + str(num_pallets) + "</li>" if use_pallet else ""}
+    </ul>
+
+    <h3>📝 Note</h3>
+    <p>{notes if notes else "Nessuna nota"}</p>
+
+    <hr>
+    <p><em>Richiesta inviata tramite ELC Tools - {timestamp}</em></p>
+    """
+
+    try:
+        # Get email configuration from secrets
+        if "email" not in st.secrets:
+            return False, "Configurazione email mancante in secrets.toml"
+
+        smtp_server = st.secrets["email"]["smtp_server"]
+        smtp_port = st.secrets["email"]["smtp_port"]
+        sender_email = st.secrets["email"]["sender_email"]
+        sender_password = st.secrets["email"]["sender_password"]
+        recipient = st.secrets["email"]["recipient"]
+
+        # Create message
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"] = sender_email
+        msg["To"] = recipient
+
+        # Attach HTML body
+        html_part = MIMEText(html_body, "html")
+        msg.attach(html_part)
+
+        # Send email
+        with smtplib.SMTP(smtp_server, smtp_port) as server:
+            server.starttls()
+            server.login(sender_email, sender_password)
+            server.sendmail(sender_email, recipient, msg.as_string())
+
+        return True, f"Email inviata a: {recipient}"
+
+    except KeyError as e:
+        return False, f"Configurazione email incompleta: {e}"
+    except smtplib.SMTPAuthenticationError:
+        return False, "Errore autenticazione SMTP. Verifica le credenziali."
+    except smtplib.SMTPException as e:
+        return False, f"Errore invio email: {str(e)}"
+    except Exception as e:
+        return False, f"Errore: {str(e)}"
+
+
+def pickup_request_page():
+    """Page for Courier Pickup Request feature."""
+    st.markdown("# 🚚 Richiesta Ritiro Corriere")
+    st.markdown("*Richiedi un ritiro merce ai corrieri*")
+
+    # User guide
+    st.info(
+        "**Come usare questo strumento:**\n"
+        "- Compila il form con i dettagli del ritiro\n"
+        "- La richiesta verrà inviata via email al team logistica"
+    )
+
+    st.markdown("---")
+
+    # Form
+    with st.form("pickup_request_form"):
+        # Carrier selection
+        st.markdown("### 🚛 Corriere")
+        carrier = st.radio(
+            "Seleziona il corriere:",
+            options=["FedEx", "DHL", "UPS"],
+            horizontal=True,
+            key="carrier"
+        )
+
+        # Date and time section
+        st.markdown("### 📅 Data e Orario")
+        col_date, col_time_start, col_time_end = st.columns(3)
+
+        with col_date:
+            pickup_date = st.date_input(
+                "Data ritiro *",
+                value=date.today() + timedelta(days=1),
+                min_value=date.today(),
+                key="pickup_date"
+            )
+
+        with col_time_start:
+            time_start = st.time_input(
+                "Orario inizio *",
+                value=time(9, 0),
+                key="time_start"
+            )
+
+        with col_time_end:
+            time_end = st.time_input(
+                "Orario fine *",
+                value=time(18, 0),
+                key="time_end"
+            )
+
+        # Address section
+        st.markdown("### 📍 Indirizzo Ritiro")
+
+        company = st.text_input(
+            "Azienda *",
+            value="Estée Lauder",
+            key="company"
+        )
+
+        address = st.text_input(
+            "Indirizzo *",
+            placeholder="Via Turati 3",
+            key="address"
+        )
+
+        col_zip, col_city, col_province = st.columns([1, 2, 1])
+
+        with col_zip:
+            zip_code = st.text_input(
+                "CAP *",
+                placeholder="20121",
+                max_chars=5,
+                key="zip_code"
+            )
+
+        with col_city:
+            city = st.text_input(
+                "Città *",
+                placeholder="Milano",
+                key="city"
+            )
+
+        with col_province:
+            province = st.text_input(
+                "Provincia",
+                placeholder="MI",
+                max_chars=2,
+                key="province"
+            )
+
+        reference = st.text_input(
+            "Riferimento/Telefono",
+            placeholder="02 1234567",
+            key="reference"
+        )
+
+        # Package details section
+        st.markdown("### 📦 Dettagli Colli")
+
+        col_packages, col_weight = st.columns(2)
+
+        with col_packages:
+            num_packages = st.number_input(
+                "Numero colli *",
+                min_value=1,
+                value=1,
+                step=1,
+                key="num_packages"
+            )
+
+        with col_weight:
+            weight_per_package = st.number_input(
+                "Peso singolo collo (kg) *",
+                min_value=0.1,
+                value=1.0,
+                step=0.5,
+                key="weight_per_package"
+            )
+
+        st.markdown("**Dimensioni singolo collo (cm):** *(opzionale)*")
+        col_l, col_w, col_h = st.columns(3)
+
+        with col_l:
+            length = st.number_input(
+                "Lunghezza",
+                min_value=0.0,
+                value=0.0,
+                step=1.0,
+                key="length"
+            )
+
+        with col_w:
+            width = st.number_input(
+                "Larghezza",
+                min_value=0.0,
+                value=0.0,
+                step=1.0,
+                key="width"
+            )
+
+        with col_h:
+            height = st.number_input(
+                "Altezza",
+                min_value=0.0,
+                value=0.0,
+                step=1.0,
+                key="height"
+            )
+
+        # Pallet section
+        st.markdown("### 🎨 Pallet")
+
+        use_pallet = st.checkbox(
+            "Raggruppamento su pallet",
+            key="use_pallet"
+        )
+
+        num_pallets = 0
+        if use_pallet:
+            num_pallets = st.number_input(
+                "Numero pallet *",
+                min_value=1,
+                value=1,
+                step=1,
+                key="num_pallets"
+            )
+
+        # Notes section
+        st.markdown("### 📝 Note")
+        notes = st.text_area(
+            "Note aggiuntive",
+            placeholder="Eventuali note per il corriere...",
+            key="notes"
+        )
+
+        # Summary section
+        st.markdown("### 📊 Riepilogo")
+        total_weight = num_packages * weight_per_package
+        shipment_type = "FREIGHT" if total_weight > 70 else "NORMAL"
+
+        col_summary1, col_summary2 = st.columns(2)
+        with col_summary1:
+            st.metric("Peso totale", f"{total_weight:.1f} kg")
+        with col_summary2:
+            st.metric("Tipo spedizione", f"{shipment_type}")
+
+        if total_weight > 70:
+            st.warning("⚠️ Peso superiore a 70 kg - Spedizione FREIGHT")
+
+        # Submit button
+        st.markdown("---")
+        submitted = st.form_submit_button(
+            "📧 Invia Richiesta",
+            type="primary",
+            use_container_width=True
+        )
+
+        if submitted:
+            # Validation
+            errors = []
+
+            if not address:
+                errors.append("Indirizzo obbligatorio")
+
+            if not zip_code:
+                errors.append("CAP obbligatorio")
+            elif not zip_code.isdigit() or len(zip_code) != 5:
+                errors.append("CAP deve essere di 5 cifre")
+
+            if not city:
+                errors.append("Città obbligatoria")
+
+            if time_end <= time_start:
+                errors.append("Orario fine deve essere successivo all'orario inizio")
+
+            # Dimensions validation: if one is filled, all must be
+            dims = [length, width, height]
+            dims_filled = [d > 0 for d in dims]
+            if any(dims_filled) and not all(dims_filled):
+                errors.append("Se inserisci le dimensioni, compila tutte e tre (L x W x H)")
+
+            if errors:
+                for error in errors:
+                    st.error(f"❌ {error}")
+            else:
+                # Send email
+                with st.spinner("Invio richiesta in corso..."):
+                    success, message = send_pickup_email(
+                        carrier=carrier,
+                        pickup_date=pickup_date,
+                        time_start=time_start,
+                        time_end=time_end,
+                        company=company,
+                        address=address,
+                        zip_code=zip_code,
+                        city=city,
+                        province=province or "",
+                        reference=reference or "",
+                        num_packages=num_packages,
+                        weight_per_package=weight_per_package,
+                        length=length,
+                        width=width,
+                        height=height,
+                        use_pallet=use_pallet,
+                        num_pallets=num_pallets,
+                        notes=notes or ""
+                    )
+
+                if success:
+                    st.success(f"✅ Richiesta inviata con successo!")
+                    st.info(f"📧 {message}")
+                    st.info(f"📋 Subject: {carrier} - {pickup_date.strftime('%d/%m/%Y')} - {shipment_type}")
+                else:
+                    st.error(f"❌ {message}")
+
+
 def main():
     # Sidebar navigation
     st.sidebar.markdown("# 🛠️ ELC Tools")
@@ -636,7 +1018,8 @@ def main():
         "Seleziona funzionalità:",
         options=[
             "📦 Label Sorter",
-            "📍 ZIP Validator"
+            "📍 ZIP Validator",
+            "🚚 Richiesta Ritiro"
         ],
         index=0,
         key="feature_selector"
@@ -645,7 +1028,7 @@ def main():
     st.sidebar.markdown("---")
     st.sidebar.markdown(
         "<div style='font-size: 0.8rem; color: #888;'>"
-        "ELC Tools v1.1<br>"
+        "ELC Tools v1.2<br>"
         "Estée Lauder Logistics"
         "</div>",
         unsafe_allow_html=True
@@ -656,6 +1039,8 @@ def main():
         label_sorter_page()
     elif feature == "📍 ZIP Validator":
         zip_validator_page()
+    elif feature == "🚚 Richiesta Ritiro":
+        pickup_request_page()
 
 
 if __name__ == "__main__":
