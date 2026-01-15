@@ -363,6 +363,15 @@ def zip_validator_page():
     """Page for ZIP Code Validator feature."""
     st.markdown("# 📍 ZIP Code Validator")
     st.markdown("*Valida e correggi i CAP negli indirizzi di spedizione*")
+
+    # User guide
+    st.info(
+        "**Come usare questo strumento:**\n"
+        "- Carica un file Excel con il formato corretto. "
+        "[Scarica il template](https://docs.google.com/spreadsheets/d/1eKfU6G-wzpNa8HZDcuddpJAZHEzWUKJUFw-y5LFDKOU/edit?usp=sharing)\n"
+        "- Al termine della validazione, scarica il file corretto e caricalo su ShippyPro"
+    )
+
     st.markdown("---")
 
     # Initialize session state for persisting results
