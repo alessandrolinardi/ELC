@@ -568,7 +568,7 @@ def zip_validator_page():
                     })
 
             if preview_data:
-                PREVIEW_ROWS = 7
+                PREVIEW_ROWS = 5  # Show first 5 rows, then expander for rest
                 total_rows = len(preview_data)
 
                 if total_rows <= PREVIEW_ROWS:
