@@ -287,7 +287,12 @@ class ZipValidator:
             if city_lower in self.ITALIAN_CAP_RANGES:
                 cap_start, cap_end = self.ITALIAN_CAP_RANGES[city_lower]
                 if cap_start <= working_zip <= cap_end:
-                    return True, working_zip, 75, "Within city CAP range"
+                    # ZIP is within city range but we couldn't verify the specific street
+                    # Mark as NOT valid - needs manual review
+                    return False, working_zip, 70, f"Street not found - ZIP in city range ({cap_start}-{cap_end})"
+                else:
+                    # ZIP is outside city range - likely wrong
+                    return False, cap_start, 80, f"ZIP outside city range ({cap_start}-{cap_end})"
             return False, None, 50, "No postal code in API response"
 
         # Handle multiple postcodes (e.g., "50121;50122")
