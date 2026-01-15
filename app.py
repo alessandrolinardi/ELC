@@ -113,6 +113,28 @@ def label_sorter_page():
     """Page for Label Sorter feature."""
     st.markdown("# 📦 Label Sorter")
     st.markdown("*Riordina le etichette di spedizione secondo l'ordine degli ordini*")
+
+    # User guide
+    with st.expander("📖 Come usare questo strumento", expanded=False):
+        st.markdown("""
+**1. Scarica le etichette da ordinare**
+- Scarica il PDF con le etichette generate che vuoi riordinare
+
+**2. Esporta l'Excel da ShippyPro**
+- Vai su **Etichette generate**
+- Filtra gli ordini interessati
+- Seleziona gli ordini
+- Clicca sul menu a tendina **Crea documenti**
+- Clicca su **Crea lista ordini XLS**
+
+**3. Carica i file**
+- Carica il PDF delle etichette e il file Excel esportato
+- Scegli la modalità di ordinamento
+
+**4. Scarica il risultato**
+- Scarica il nuovo PDF con le etichette ordinate
+        """)
+
     st.markdown("---")
 
     # Initialize session state for persisting results
