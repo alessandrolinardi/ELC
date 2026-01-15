@@ -537,7 +537,25 @@ def zip_validator_page():
                     })
 
             if preview_data:
-                st.dataframe(preview_data, use_container_width=True, hide_index=True)
+                PREVIEW_ROWS = 7
+                total_rows = len(preview_data)
+
+                if total_rows <= PREVIEW_ROWS:
+                    # Show all rows if within limit
+                    st.dataframe(preview_data, use_container_width=True, hide_index=True)
+                else:
+                    # Show preview with count
+                    st.dataframe(preview_data[:PREVIEW_ROWS], use_container_width=True, hide_index=True)
+                    st.caption(f"Mostrati {PREVIEW_ROWS} di {total_rows} record")
+
+                    # Expandable full view
+                    with st.expander(f"📋 Mostra tutti i {total_rows} record"):
+                        st.dataframe(
+                            preview_data,
+                            use_container_width=True,
+                            hide_index=True,
+                            height=400  # Scrollable height
+                        )
 
         # Downloads - now using pre-generated files from session state
         st.markdown("### 📥 Download")
