@@ -115,6 +115,10 @@ def label_sorter_page():
     st.markdown("*Riordina le etichette di spedizione secondo l'ordine degli ordini*")
     st.markdown("---")
 
+    # Initialize session state for persisting results
+    if 'label_sorter_results' not in st.session_state:
+        st.session_state.label_sorter_results = None
+
     # Sezione Upload
     col1, col2 = st.columns(2)
 
@@ -124,7 +128,8 @@ def label_sorter_page():
             "Carica il PDF con le etichette",
             type=["pdf"],
             key="pdf_uploader",
-            help="Un PDF con una etichetta per pagina (DHL, FedEx, UPS)"
+            help="Un PDF con una etichetta per pagina (DHL, FedEx, UPS)",
+            on_change=lambda: st.session_state.update({'label_sorter_results': None})
         )
 
     with col2:
@@ -133,7 +138,8 @@ def label_sorter_page():
             "Carica il file Excel degli ordini",
             type=["xlsx", "xls"],
             key="excel_uploader",
-            help="Export da ShippyPro con ID Ordine, Tracking, Corriere"
+            help="Export da ShippyPro con ID Ordine, Tracking, Corriere",
+            on_change=lambda: st.session_state.update({'label_sorter_results': None})
         )
 
     # Metodo di ordinamento
@@ -268,12 +274,31 @@ def label_sorter_page():
 
                 st.success("🎉 Elaborazione completata con successo!")
 
+                # Generate CSV report and store results in session state
+                csv_report = generate_csv_report(match_report, sorted_result)
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+                st.session_state.label_sorter_results = {
+                    'reordered_pdf': reordered_pdf,
+                    'csv_report': csv_report,
+                    'match_report': match_report,
+                    'sorted_result': sorted_result,
+                    'pdf_data': pdf_data,
+                    'timestamp': timestamp
+                }
+
             except Exception as e:
                 st.error(f"❌ Errore durante l'elaborazione: {str(e)}")
                 st.exception(e)
                 st.stop()
 
-        # Risultati
+    # Display results from session state (persists across reruns)
+    if st.session_state.label_sorter_results:
+        results = st.session_state.label_sorter_results
+        match_report = results['match_report']
+        sorted_result = results['sorted_result']
+        pdf_data = results['pdf_data']
+
         st.markdown("---")
         st.markdown("## ✅ Risultato")
 
@@ -290,25 +315,25 @@ def label_sorter_page():
 
         st.markdown("### 📥 Download")
         col_dl1, col_dl2 = st.columns(2)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
         with col_dl1:
             st.download_button(
                 label="📄 Scarica PDF Riordinato",
-                data=reordered_pdf,
-                file_name=f"etichette_ordinate_{timestamp}.pdf",
+                data=results['reordered_pdf'],
+                file_name=f"etichette_ordinate_{results['timestamp']}.pdf",
                 mime="application/pdf",
-                use_container_width=True
+                use_container_width=True,
+                key="download_pdf"
             )
 
         with col_dl2:
-            csv_report = generate_csv_report(match_report, sorted_result)
             st.download_button(
                 label="📋 Scarica Report CSV",
-                data=csv_report,
-                file_name=f"report_non_matchate_{timestamp}.csv",
+                data=results['csv_report'],
+                file_name=f"report_non_matchate_{results['timestamp']}.csv",
                 mime="text/csv",
-                use_container_width=True
+                use_container_width=True,
+                key="download_csv"
             )
 
         if match_report.unmatched:
@@ -328,6 +353,11 @@ def label_sorter_page():
         else:
             st.success("🎉 Tutte le etichette sono state matchate!")
 
+        # Button to clear results and start over
+        if st.button("🔄 Nuova elaborazione", use_container_width=True, key="new_label_sort"):
+            st.session_state.label_sorter_results = None
+            st.rerun()
+
 
 def zip_validator_page():
     """Page for ZIP Code Validator feature."""
@@ -335,13 +365,18 @@ def zip_validator_page():
     st.markdown("*Valida e correggi i CAP negli indirizzi di spedizione*")
     st.markdown("---")
 
+    # Initialize session state for persisting results
+    if 'zip_validation_results' not in st.session_state:
+        st.session_state.zip_validation_results = None
+
     # Upload
     st.markdown("### 📊 File Indirizzi")
     excel_file = st.file_uploader(
         "Carica il file Excel con gli indirizzi",
         type=["xlsx", "xls"],
         key="zip_excel_uploader",
-        help="File con colonne: Street 1, City, Zip, Country"
+        help="File con colonne: Street 1, City, Zip, Country",
+        on_change=lambda: st.session_state.update({'zip_validation_results': None})
     )
 
     # Settings
@@ -443,75 +478,95 @@ def zip_validator_page():
             progress_bar.progress(100)
             status_text.text("✅ Validazione completata!")
 
-            # Results
-            st.markdown("---")
-            st.markdown("## ✅ Risultato")
-
-            col1, col2, col3, col4 = st.columns(4)
-
-            with col1:
-                st.metric("✓ Validi", report.valid_count)
-
-            with col2:
-                st.metric("🔄 Corretti", report.corrected_count)
-
-            with col3:
-                st.metric("⚠️ Da rivedere", report.review_count)
-
-            with col4:
-                st.metric("⏭️ Saltati", report.skipped_count)
-
-            # Preview changes
-            if report.corrected_count > 0 or report.review_count > 0:
-                st.markdown("### 📋 Dettaglio modifiche")
-
-                preview_data = []
-                for r in report.results:
-                    if not r.is_valid:
-                        preview_data.append({
-                            "Città": r.city[:20],
-                            "Via": r.street[:25] + "..." if len(r.street) > 25 else r.street,
-                            "ZIP Orig.": r.original_zip,
-                            "ZIP Sugg.": r.suggested_zip or "-",
-                            "Conf.": f"{r.confidence}%",
-                            "Stato": "🔄 Corretto" if r.auto_corrected else "⚠️ Rivedere"
-                        })
-
-                if preview_data:
-                    st.dataframe(preview_data, use_container_width=True, hide_index=True)
-
-            # Downloads
-            st.markdown("### 📥 Download")
-            col_dl1, col_dl2 = st.columns(2)
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
             # Re-read original file for corrected output
             excel_file.seek(0)
             original_df = pd.read_excel(excel_file)
 
-            with col_dl1:
-                corrected_excel = validator.generate_corrected_excel(original_df, report)
-                st.download_button(
-                    label="📄 Scarica File Corretto",
-                    data=corrected_excel,
-                    file_name=f"indirizzi_corretti_{timestamp}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True
-                )
+            # Generate files and store in session state
+            corrected_excel = validator.generate_corrected_excel(original_df, report)
+            review_excel = validator.generate_review_report(report)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-            with col_dl2:
-                review_excel = validator.generate_review_report(report)
-                st.download_button(
-                    label="📋 Scarica Report Revisione",
-                    data=review_excel,
-                    file_name=f"report_revisione_{timestamp}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    use_container_width=True
-                )
+            st.session_state.zip_validation_results = {
+                'report': report,
+                'corrected_excel': corrected_excel,
+                'review_excel': review_excel,
+                'timestamp': timestamp
+            }
 
         except Exception as e:
             st.error(f"❌ Errore: {str(e)}")
             st.exception(e)
+
+    # Display results from session state (persists across reruns)
+    if st.session_state.zip_validation_results:
+        results = st.session_state.zip_validation_results
+        report = results['report']
+
+        st.markdown("---")
+        st.markdown("## ✅ Risultato")
+
+        col1, col2, col3, col4 = st.columns(4)
+
+        with col1:
+            st.metric("✓ Validi", report.valid_count)
+
+        with col2:
+            st.metric("🔄 Corretti", report.corrected_count)
+
+        with col3:
+            st.metric("⚠️ Da rivedere", report.review_count)
+
+        with col4:
+            st.metric("⏭️ Saltati", report.skipped_count)
+
+        # Preview changes
+        if report.corrected_count > 0 or report.review_count > 0:
+            st.markdown("### 📋 Dettaglio modifiche")
+
+            preview_data = []
+            for r in report.results:
+                if not r.is_valid:
+                    preview_data.append({
+                        "Città": r.city[:20],
+                        "Via": r.street[:25] + "..." if len(r.street) > 25 else r.street,
+                        "ZIP Orig.": r.original_zip,
+                        "ZIP Sugg.": r.suggested_zip or "-",
+                        "Conf.": f"{r.confidence}%",
+                        "Stato": "🔄 Corretto" if r.auto_corrected else "⚠️ Rivedere"
+                    })
+
+            if preview_data:
+                st.dataframe(preview_data, use_container_width=True, hide_index=True)
+
+        # Downloads - now using pre-generated files from session state
+        st.markdown("### 📥 Download")
+        col_dl1, col_dl2 = st.columns(2)
+
+        with col_dl1:
+            st.download_button(
+                label="📄 Scarica File Corretto",
+                data=results['corrected_excel'],
+                file_name=f"indirizzi_corretti_{results['timestamp']}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+                key="download_corrected"
+            )
+
+        with col_dl2:
+            st.download_button(
+                label="📋 Scarica Report Revisione",
+                data=results['review_excel'],
+                file_name=f"report_revisione_{results['timestamp']}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                use_container_width=True,
+                key="download_review"
+            )
+
+        # Button to clear results and start over
+        if st.button("🔄 Nuova validazione", use_container_width=True):
+            st.session_state.zip_validation_results = None
+            st.rerun()
 
 
 def main():
