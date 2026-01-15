@@ -754,6 +754,19 @@ def pickup_request_page():
 
     st.markdown("---")
 
+    # Initialize session state for tracking successful submissions
+    if 'pickup_request_sent' not in st.session_state:
+        st.session_state.pickup_request_sent = False
+
+    # Show success message and reset button if request was sent
+    if st.session_state.pickup_request_sent:
+        st.success("✅ Richiesta inviata con successo!")
+        st.info("📧 Richiesta inviata tramite Zapier")
+        if st.button("🔄 Nuova richiesta", use_container_width=True):
+            st.session_state.pickup_request_sent = False
+            st.rerun()
+        return
+
     # Form
     with st.form("pickup_request_form"):
         # Carrier selection
@@ -992,9 +1005,8 @@ def pickup_request_page():
                     )
 
                 if success:
-                    st.success(f"✅ Richiesta inviata con successo!")
-                    st.info(f"📧 {message}")
-                    st.info(f"📋 Subject: {carrier} - {pickup_date.strftime('%d/%m/%Y')} - {shipment_type}")
+                    st.session_state.pickup_request_sent = True
+                    st.rerun()
                 else:
                     st.error(f"❌ {message}")
 
