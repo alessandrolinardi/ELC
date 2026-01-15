@@ -453,14 +453,20 @@ def zip_validator_page():
                 excel_bytes = excel_file.read()
                 st.write(f"✓ File caricato: {len(excel_bytes):,} bytes")
 
-                # Try to read with pandas
+                # Try to read with pandas - store working engine for consistency
+                excel_engine = None
                 try:
                     df = pd.read_excel(io.BytesIO(excel_bytes), engine='openpyxl')
+                    excel_engine = 'openpyxl'
                 except:
                     try:
                         df = pd.read_excel(io.BytesIO(excel_bytes), engine='calamine')
+                        excel_engine = 'calamine'
                     except:
                         df = pd.read_excel(io.BytesIO(excel_bytes))
+
+                # Store original df before any filtering
+                original_df = df.copy()
 
                 st.write(f"✓ Righe trovate: {len(df)}")
                 st.write(f"✓ Colonne: {', '.join(df.columns[:8].tolist())}...")
@@ -509,11 +515,7 @@ def zip_validator_page():
             progress_bar.progress(100)
             status_text.text("✅ Validazione completata!")
 
-            # Re-read original file for corrected output
-            excel_file.seek(0)
-            original_df = pd.read_excel(excel_file)
-
-            # Generate files and store in session state
+            # Generate files and store in session state (using original_df stored before filtering)
             corrected_excel = validator.generate_corrected_excel(original_df, report)
             review_excel = validator.generate_review_report(report)
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
