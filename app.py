@@ -5,10 +5,8 @@ App Streamlit multi-funzione per la gestione delle spedizioni.
 
 import io
 import csv
-import smtplib
+import requests
 from datetime import datetime, date, time, timedelta
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 
 import streamlit as st
 import pandas as pd
@@ -629,7 +627,7 @@ def zip_validator_page():
             st.rerun()
 
 
-def send_pickup_email(
+def send_pickup_request(
     carrier: str,
     pickup_date: date,
     time_start: time,
@@ -650,7 +648,7 @@ def send_pickup_email(
     notes: str
 ) -> tuple[bool, str]:
     """
-    Send pickup request email.
+    Send pickup request via Zapier webhook.
 
     Returns:
         Tuple of (success, message)
@@ -659,94 +657,85 @@ def send_pickup_email(
     total_weight = num_packages * weight_per_package
     shipment_type = "FREIGHT" if total_weight > 70 else "NORMAL"
 
-    # Format date
+    # Format date/time
     date_str = pickup_date.strftime("%d/%m/%Y")
     time_start_str = time_start.strftime("%H:%M")
     time_end_str = time_end.strftime("%H:%M")
     timestamp = datetime.now().strftime("%d/%m/%Y %H:%M")
 
-    # Build subject
+    # Build subject for email
     subject = f"{carrier} - {date_str} - {shipment_type}"
 
     # Build dimensions string
-    dimensions_str = f"{length} x {width} x {height} cm" if length and width and height else "Non specificate"
+    dimensions_str = f"{length} x {width} x {height} cm"
 
-    # Build HTML body
-    html_body = f"""
-    <h2>Richiesta Ritiro {carrier}</h2>
+    # Prepare payload for Zapier
+    payload = {
+        # Email fields
+        "subject": subject,
+        "timestamp": timestamp,
 
-    <h3>📅 Data e Orario</h3>
-    <ul>
-        <li><strong>Data:</strong> {date_str}</li>
-        <li><strong>Finestra ritiro:</strong> {time_start_str} - {time_end_str}</li>
-    </ul>
+        # Carrier
+        "carrier": carrier,
 
-    <h3>📍 Indirizzo Ritiro</h3>
-    <ul>
-        <li><strong>Azienda:</strong> {company}</li>
-        <li><strong>Indirizzo:</strong> {address}</li>
-        <li><strong>CAP:</strong> {zip_code}</li>
-        <li><strong>Città:</strong> {city} ({province})</li>
-        <li><strong>Riferimento:</strong> {reference}</li>
-    </ul>
+        # Date/Time
+        "pickup_date": date_str,
+        "time_start": time_start_str,
+        "time_end": time_end_str,
+        "time_window": f"{time_start_str} - {time_end_str}",
 
-    <h3>📦 Dettagli Merce</h3>
-    <ul>
-        <li><strong>Numero colli:</strong> {num_packages}</li>
-        <li><strong>Peso singolo collo:</strong> {weight_per_package} kg</li>
-        <li><strong>Dimensioni collo:</strong> {dimensions_str}</li>
-        <li><strong>Peso totale:</strong> {total_weight} kg</li>
-        <li><strong>Tipo spedizione:</strong> {shipment_type} ({total_weight} kg {">" if total_weight > 70 else "<"} 70 kg)</li>
-    </ul>
+        # Address
+        "company": company,
+        "address": address,
+        "zip_code": zip_code,
+        "city": city,
+        "province": province,
+        "full_address": f"{address}, {zip_code} {city} ({province})",
+        "reference": reference,
 
-    <h3>🎨 Pallet</h3>
-    <ul>
-        <li><strong>Raggruppamento pallet:</strong> {"Sì" if use_pallet else "No"}</li>
-        {"<li><strong>Numero pallet:</strong> " + str(num_pallets) + "</li>" if use_pallet else ""}
-    </ul>
+        # Package details
+        "num_packages": num_packages,
+        "weight_per_package": weight_per_package,
+        "dimensions": dimensions_str,
+        "length": length,
+        "width": width,
+        "height": height,
+        "total_weight": total_weight,
+        "shipment_type": shipment_type,
 
-    <h3>📝 Note</h3>
-    <p>{notes if notes else "Nessuna nota"}</p>
+        # Pallet
+        "use_pallet": "Sì" if use_pallet else "No",
+        "num_pallets": num_pallets if use_pallet else 0,
 
-    <hr>
-    <p><em>Richiesta inviata tramite ELC Tools - {timestamp}</em></p>
-    """
+        # Notes
+        "notes": notes if notes else "Nessuna nota"
+    }
 
     try:
-        # Get email configuration from secrets
-        if "email" not in st.secrets:
-            return False, "Configurazione email mancante in secrets.toml"
+        # Get Zapier webhook URL from secrets
+        if "zapier" not in st.secrets:
+            return False, "Configurazione Zapier mancante. Aggiungi [zapier] webhook_url in Secrets."
 
-        smtp_server = st.secrets["email"]["smtp_server"]
-        smtp_port = st.secrets["email"]["smtp_port"]
-        sender_email = st.secrets["email"]["sender_email"]
-        sender_password = st.secrets["email"]["sender_password"]
-        recipient = st.secrets["email"]["recipient"]
+        webhook_url = st.secrets["zapier"]["webhook_url"]
 
-        # Create message
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = subject
-        msg["From"] = sender_email
-        msg["To"] = recipient
+        # Send POST request to Zapier
+        response = requests.post(
+            webhook_url,
+            json=payload,
+            timeout=10
+        )
 
-        # Attach HTML body
-        html_part = MIMEText(html_body, "html")
-        msg.attach(html_part)
-
-        # Send email
-        with smtplib.SMTP(smtp_server, smtp_port) as server:
-            server.starttls()
-            server.login(sender_email, sender_password)
-            server.sendmail(sender_email, recipient, msg.as_string())
-
-        return True, f"Email inviata a: {recipient}"
+        if response.status_code == 200:
+            return True, "Richiesta inviata tramite Zapier"
+        else:
+            return False, f"Errore Zapier: HTTP {response.status_code}"
 
     except KeyError as e:
-        return False, f"Configurazione email incompleta: {e}"
-    except smtplib.SMTPAuthenticationError:
-        return False, "Errore autenticazione SMTP. Verifica le credenziali."
-    except smtplib.SMTPException as e:
-        return False, f"Errore invio email: {str(e)}"
+        return False, f"Configurazione mancante: {e}"
+    except requests.exceptions.Timeout:
+        return False, "Timeout connessione a Zapier"
+    except requests.exceptions.RequestException as e:
+        return False, f"Errore connessione: {str(e)}"
     except Exception as e:
         return False, f"Errore: {str(e)}"
 
@@ -871,12 +860,12 @@ def pickup_request_page():
                 key="weight_per_package"
             )
 
-        st.markdown("**Dimensioni singolo collo (cm):** *(opzionale)*")
+        st.markdown("**Dimensioni singolo collo (cm):** *")
         col_l, col_w, col_h = st.columns(3)
 
         with col_l:
             length = st.number_input(
-                "Lunghezza",
+                "Lunghezza *",
                 min_value=0.0,
                 value=0.0,
                 step=1.0,
@@ -885,7 +874,7 @@ def pickup_request_page():
 
         with col_w:
             width = st.number_input(
-                "Larghezza",
+                "Larghezza *",
                 min_value=0.0,
                 value=0.0,
                 step=1.0,
@@ -894,7 +883,7 @@ def pickup_request_page():
 
         with col_h:
             height = st.number_input(
-                "Altezza",
+                "Altezza *",
                 min_value=0.0,
                 value=0.0,
                 step=1.0,
@@ -967,19 +956,21 @@ def pickup_request_page():
             if time_end <= time_start:
                 errors.append("Orario fine deve essere successivo all'orario inizio")
 
-            # Dimensions validation: if one is filled, all must be
-            dims = [length, width, height]
-            dims_filled = [d > 0 for d in dims]
-            if any(dims_filled) and not all(dims_filled):
-                errors.append("Se inserisci le dimensioni, compila tutte e tre (L x W x H)")
+            # Dimensions validation: all required
+            if length <= 0:
+                errors.append("Lunghezza obbligatoria")
+            if width <= 0:
+                errors.append("Larghezza obbligatoria")
+            if height <= 0:
+                errors.append("Altezza obbligatoria")
 
             if errors:
                 for error in errors:
                     st.error(f"❌ {error}")
             else:
-                # Send email
+                # Send request via Zapier
                 with st.spinner("Invio richiesta in corso..."):
-                    success, message = send_pickup_email(
+                    success, message = send_pickup_request(
                         carrier=carrier,
                         pickup_date=pickup_date,
                         time_start=time_start,
