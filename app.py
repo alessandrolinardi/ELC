@@ -115,6 +115,10 @@ def label_sorter_page():
     st.markdown("*Riordina le etichette di spedizione secondo l'ordine degli ordini*")
     st.markdown("---")
 
+    # Initialize session state for persisting results
+    if 'label_sorter_results' not in st.session_state:
+        st.session_state.label_sorter_results = None
+
     # Sezione Upload
     col1, col2 = st.columns(2)
 
@@ -124,7 +128,8 @@ def label_sorter_page():
             "Carica il PDF con le etichette",
             type=["pdf"],
             key="pdf_uploader",
-            help="Un PDF con una etichetta per pagina (DHL, FedEx, UPS)"
+            help="Un PDF con una etichetta per pagina (DHL, FedEx, UPS)",
+            on_change=lambda: st.session_state.update({'label_sorter_results': None})
         )
 
     with col2:
@@ -133,7 +138,8 @@ def label_sorter_page():
             "Carica il file Excel degli ordini",
             type=["xlsx", "xls"],
             key="excel_uploader",
-            help="Export da ShippyPro con ID Ordine, Tracking, Corriere"
+            help="Export da ShippyPro con ID Ordine, Tracking, Corriere",
+            on_change=lambda: st.session_state.update({'label_sorter_results': None})
         )
 
     # Metodo di ordinamento
@@ -268,12 +274,31 @@ def label_sorter_page():
 
                 st.success("🎉 Elaborazione completata con successo!")
 
+                # Generate CSV report and store results in session state
+                csv_report = generate_csv_report(match_report, sorted_result)
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+                st.session_state.label_sorter_results = {
+                    'reordered_pdf': reordered_pdf,
+                    'csv_report': csv_report,
+                    'match_report': match_report,
+                    'sorted_result': sorted_result,
+                    'pdf_data': pdf_data,
+                    'timestamp': timestamp
+                }
+
             except Exception as e:
                 st.error(f"❌ Errore durante l'elaborazione: {str(e)}")
                 st.exception(e)
                 st.stop()
 
-        # Risultati
+    # Display results from session state (persists across reruns)
+    if st.session_state.label_sorter_results:
+        results = st.session_state.label_sorter_results
+        match_report = results['match_report']
+        sorted_result = results['sorted_result']
+        pdf_data = results['pdf_data']
+
         st.markdown("---")
         st.markdown("## ✅ Risultato")
 
@@ -290,25 +315,25 @@ def label_sorter_page():
 
         st.markdown("### 📥 Download")
         col_dl1, col_dl2 = st.columns(2)
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
         with col_dl1:
             st.download_button(
                 label="📄 Scarica PDF Riordinato",
-                data=reordered_pdf,
-                file_name=f"etichette_ordinate_{timestamp}.pdf",
+                data=results['reordered_pdf'],
+                file_name=f"etichette_ordinate_{results['timestamp']}.pdf",
                 mime="application/pdf",
-                use_container_width=True
+                use_container_width=True,
+                key="download_pdf"
             )
 
         with col_dl2:
-            csv_report = generate_csv_report(match_report, sorted_result)
             st.download_button(
                 label="📋 Scarica Report CSV",
-                data=csv_report,
-                file_name=f"report_non_matchate_{timestamp}.csv",
+                data=results['csv_report'],
+                file_name=f"report_non_matchate_{results['timestamp']}.csv",
                 mime="text/csv",
-                use_container_width=True
+                use_container_width=True,
+                key="download_csv"
             )
 
         if match_report.unmatched:
@@ -327,6 +352,11 @@ def label_sorter_page():
             st.dataframe(unmatched_data, use_container_width=True, hide_index=True)
         else:
             st.success("🎉 Tutte le etichette sono state matchate!")
+
+        # Button to clear results and start over
+        if st.button("🔄 Nuova elaborazione", use_container_width=True, key="new_label_sort"):
+            st.session_state.label_sorter_results = None
+            st.rerun()
 
 
 def zip_validator_page():
