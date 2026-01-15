@@ -553,42 +553,48 @@ def zip_validator_page():
         with col4:
             st.metric("⏭️ Saltati", report.skipped_count)
 
-        # Preview changes
-        if report.corrected_count > 0 or report.review_count > 0:
-            st.markdown("### 📋 Dettaglio modifiche")
+        # Preview ALL results (valid, corrected, and needs review)
+        st.markdown("### 📋 Dettaglio validazione")
 
-            preview_data = []
-            for r in report.results:
-                if not r.is_valid:
-                    preview_data.append({
-                        "Città": r.city[:20],
-                        "Via": r.street[:25] + "..." if len(r.street) > 25 else r.street,
-                        "ZIP Orig.": r.original_zip,
-                        "ZIP Sugg.": r.suggested_zip or "-",
-                        "Conf.": f"{r.confidence}%",
-                        "Stato": "🔄 Corretto" if r.auto_corrected else "⚠️ Rivedere"
-                    })
+        preview_data = []
+        for r in report.results:
+            if r.is_valid:
+                stato = "✓ Valido"
+            elif r.auto_corrected:
+                stato = "🔄 Corretto"
+            else:
+                stato = "⚠️ Rivedere"
 
-            if preview_data:
-                PREVIEW_ROWS = 5  # Show first 5 rows, then expander for rest
-                total_rows = len(preview_data)
+            preview_data.append({
+                "Città": r.city[:20] if r.city else "-",
+                "Via": (r.street[:25] + "..." if len(r.street) > 25 else r.street) if r.street else "-",
+                "ZIP Orig.": r.original_zip,
+                "ZIP Sugg.": r.suggested_zip or "-",
+                "Conf.": f"{r.confidence}%" if r.confidence else "-",
+                "Stato": stato,
+                "Motivo": r.reason[:30] + "..." if len(r.reason) > 30 else r.reason
+            })
 
-                if total_rows <= PREVIEW_ROWS:
-                    # Show all rows if within limit
-                    st.dataframe(preview_data, use_container_width=True, hide_index=True)
-                else:
-                    # Show preview with count
-                    st.dataframe(preview_data[:PREVIEW_ROWS], use_container_width=True, hide_index=True)
-                    st.caption(f"Mostrati {PREVIEW_ROWS} di {total_rows} record")
+        if preview_data:
+            PREVIEW_ROWS = 5  # Show first 5 rows, then expander for rest
+            total_rows = len(preview_data)
 
-                    # Expandable full view
-                    with st.expander(f"📋 Mostra tutti i {total_rows} record"):
-                        st.dataframe(
-                            preview_data,
-                            use_container_width=True,
-                            hide_index=True,
-                            height=400  # Scrollable height
-                        )
+            if total_rows <= PREVIEW_ROWS:
+                # Show all rows if within limit
+                st.dataframe(preview_data, use_container_width=True, hide_index=True)
+            else:
+                # Show preview with count
+                st.dataframe(preview_data[:PREVIEW_ROWS], use_container_width=True, hide_index=True)
+                st.caption(f"Mostrati {PREVIEW_ROWS} di {total_rows} record")
+
+                # Expandable full view
+                with st.expander(f"📋 Mostra tutti i {total_rows} record"):
+                    st.dataframe(
+                        preview_data,
+                        use_container_width=True,
+                        hide_index=True,
+                        height=400  # Scrollable height
+                    )
 
         # Downloads - now using pre-generated files from session state
         st.markdown("### 📥 Download")
