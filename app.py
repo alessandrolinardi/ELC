@@ -113,6 +113,28 @@ def label_sorter_page():
     """Page for Label Sorter feature."""
     st.markdown("# 📦 Label Sorter")
     st.markdown("*Riordina le etichette di spedizione secondo l'ordine degli ordini*")
+
+    # User guide
+    with st.expander("📖 Come usare questo strumento", expanded=False):
+        st.markdown("""
+**1. Scarica le etichette da ordinare**
+- Scarica il PDF con le etichette generate che vuoi riordinare
+
+**2. Esporta l'Excel da ShippyPro**
+- Vai su **Etichette generate**
+- Filtra gli ordini interessati
+- Seleziona gli ordini
+- Clicca sul menu a tendina **Crea documenti**
+- Clicca su **Crea lista ordini XLS**
+
+**3. Carica i file**
+- Carica il PDF delle etichette e il file Excel esportato
+- Scegli la modalità di ordinamento
+
+**4. Scarica il risultato**
+- Scarica il nuovo PDF con le etichette ordinate
+        """)
+
     st.markdown("---")
 
     # Initialize session state for persisting results
@@ -363,6 +385,15 @@ def zip_validator_page():
     """Page for ZIP Code Validator feature."""
     st.markdown("# 📍 ZIP Code Validator")
     st.markdown("*Valida e correggi i CAP negli indirizzi di spedizione*")
+
+    # User guide
+    st.info(
+        "**Come usare questo strumento:**\n"
+        "- Carica un file Excel con il formato corretto. "
+        "[Scarica il template](https://docs.google.com/spreadsheets/d/1eKfU6G-wzpNa8HZDcuddpJAZHEzWUKJUFw-y5LFDKOU/edit?usp=sharing)\n"
+        "- Al termine della validazione, scarica il file corretto e caricalo su ShippyPro"
+    )
+
     st.markdown("---")
 
     # Initialize session state for persisting results
@@ -537,7 +568,25 @@ def zip_validator_page():
                     })
 
             if preview_data:
-                st.dataframe(preview_data, use_container_width=True, hide_index=True)
+                PREVIEW_ROWS = 7
+                total_rows = len(preview_data)
+
+                if total_rows <= PREVIEW_ROWS:
+                    # Show all rows if within limit
+                    st.dataframe(preview_data, use_container_width=True, hide_index=True)
+                else:
+                    # Show preview with count
+                    st.dataframe(preview_data[:PREVIEW_ROWS], use_container_width=True, hide_index=True)
+                    st.caption(f"Mostrati {PREVIEW_ROWS} di {total_rows} record")
+
+                    # Expandable full view
+                    with st.expander(f"📋 Mostra tutti i {total_rows} record"):
+                        st.dataframe(
+                            preview_data,
+                            use_container_width=True,
+                            hide_index=True,
+                            height=400  # Scrollable height
+                        )
 
         # Downloads - now using pre-generated files from session state
         st.markdown("### 📥 Download")
