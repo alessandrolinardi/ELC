@@ -871,12 +871,12 @@ def pickup_request_page():
                 key="weight_per_package"
             )
 
-        st.markdown("**Dimensioni singolo collo (cm):** *(opzionale)*")
+        st.markdown("**Dimensioni singolo collo (cm):** *")
         col_l, col_w, col_h = st.columns(3)
 
         with col_l:
             length = st.number_input(
-                "Lunghezza",
+                "Lunghezza *",
                 min_value=0.0,
                 value=0.0,
                 step=1.0,
@@ -885,7 +885,7 @@ def pickup_request_page():
 
         with col_w:
             width = st.number_input(
-                "Larghezza",
+                "Larghezza *",
                 min_value=0.0,
                 value=0.0,
                 step=1.0,
@@ -894,7 +894,7 @@ def pickup_request_page():
 
         with col_h:
             height = st.number_input(
-                "Altezza",
+                "Altezza *",
                 min_value=0.0,
                 value=0.0,
                 step=1.0,
@@ -967,11 +967,13 @@ def pickup_request_page():
             if time_end <= time_start:
                 errors.append("Orario fine deve essere successivo all'orario inizio")
 
-            # Dimensions validation: if one is filled, all must be
-            dims = [length, width, height]
-            dims_filled = [d > 0 for d in dims]
-            if any(dims_filled) and not all(dims_filled):
-                errors.append("Se inserisci le dimensioni, compila tutte e tre (L x W x H)")
+            # Dimensions validation: all required
+            if length <= 0:
+                errors.append("Lunghezza obbligatoria")
+            if width <= 0:
+                errors.append("Larghezza obbligatoria")
+            if height <= 0:
+                errors.append("Altezza obbligatoria")
 
             if errors:
                 for error in errors:
