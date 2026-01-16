@@ -19,7 +19,7 @@ from src.zip_validator import ZipValidator, ValidationReport
 from src.address_book import (
     load_addresses, save_addresses, get_address_by_id, get_default_address,
     add_address, update_address, delete_address, set_default_address,
-    get_address_display_name, get_address_summary, Address
+    get_address_display_name, get_address_summary, Address, is_sheets_configured
 )
 
 
@@ -849,6 +849,13 @@ def pickup_request_page():
         "- Seleziona un indirizzo dalla rubrica o inseriscine uno nuovo\n"
         "- Compila i dettagli del ritiro e invia la richiesta"
     )
+
+    # Check if Google Sheets is configured
+    if not is_sheets_configured():
+        st.warning(
+            "⚠️ **Rubrica non configurata**: La rubrica indirizzi richiede Google Sheets. "
+            "Configura le credenziali in Streamlit Secrets per salvare gli indirizzi."
+        )
 
     st.markdown("---")
 

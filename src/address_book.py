@@ -1,17 +1,25 @@
 """
-Address Book module for managing pickup addresses.
+Address Book module for managing pickup addresses using Google Sheets.
 """
 
-import json
 import uuid
 from datetime import datetime
-from pathlib import Path
 from typing import Optional
 from dataclasses import dataclass, asdict
 
+import streamlit as st
+import gspread
+from google.oauth2.service_account import Credentials
 
-# Path to the addresses JSON file
-ADDRESSES_FILE = Path(__file__).parent.parent / "data" / "addresses.json"
+
+# Google Sheets configuration
+SCOPES = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive"
+]
+
+# Column headers for the sheet
+COLUMNS = ["id", "name", "company", "street", "zip", "city", "province", "reference", "is_default", "created_at", "updated_at"]
 
 
 @dataclass
@@ -33,6 +41,22 @@ class Address:
         """Convert to dictionary."""
         return asdict(self)
 
+    def to_row(self) -> list:
+        """Convert to a row for Google Sheets."""
+        return [
+            self.id,
+            self.name,
+            self.company,
+            self.street,
+            self.zip,
+            self.city,
+            self.province,
+            self.reference,
+            "TRUE" if self.is_default else "FALSE",
+            self.created_at,
+            self.updated_at
+        ]
+
     @classmethod
     def from_dict(cls, data: dict) -> "Address":
         """Create Address from dictionary."""
@@ -50,34 +74,111 @@ class Address:
             updated_at=data.get("updated_at", "")
         )
 
+    @classmethod
+    def from_row(cls, row: list) -> "Address":
+        """Create Address from a Google Sheets row."""
+        # Ensure row has enough elements
+        while len(row) < len(COLUMNS):
+            row.append("")
 
-def _ensure_file_exists() -> None:
-    """Ensure the addresses file exists with default structure."""
-    if not ADDRESSES_FILE.exists():
-        ADDRESSES_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with open(ADDRESSES_FILE, "w", encoding="utf-8") as f:
-            json.dump({"addresses": []}, f, indent=2)
+        return cls(
+            id=str(row[0]) if row[0] else "",
+            name=str(row[1]) if row[1] else "",
+            company=str(row[2]) if row[2] else "",
+            street=str(row[3]) if row[3] else "",
+            zip=str(row[4]) if row[4] else "",
+            city=str(row[5]) if row[5] else "",
+            province=str(row[6]) if row[6] else "",
+            reference=str(row[7]) if row[7] else "",
+            is_default=str(row[8]).upper() == "TRUE" if row[8] else False,
+            created_at=str(row[9]) if row[9] else "",
+            updated_at=str(row[10]) if row[10] else ""
+        )
+
+
+def _get_gspread_client():
+    """Get authenticated gspread client using Streamlit secrets."""
+    try:
+        # Get credentials from Streamlit secrets
+        if "gcp_service_account" not in st.secrets:
+            return None
+
+        creds_dict = dict(st.secrets["gcp_service_account"])
+        creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
+        return gspread.authorize(creds)
+    except Exception:
+        return None
+
+
+def _get_worksheet():
+    """Get the addresses worksheet."""
+    try:
+        client = _get_gspread_client()
+        if client is None:
+            return None
+
+        # Get spreadsheet ID from secrets
+        if "google_sheets" not in st.secrets or "spreadsheet_id" not in st.secrets["google_sheets"]:
+            return None
+
+        spreadsheet_id = st.secrets["google_sheets"]["spreadsheet_id"]
+        spreadsheet = client.open_by_key(spreadsheet_id)
+
+        # Get or create the "Addresses" worksheet
+        try:
+            worksheet = spreadsheet.worksheet("Addresses")
+        except gspread.WorksheetNotFound:
+            # Create the worksheet with headers
+            worksheet = spreadsheet.add_worksheet(title="Addresses", rows=100, cols=len(COLUMNS))
+            worksheet.append_row(COLUMNS)
+
+        return worksheet
+    except Exception:
+        return None
+
+
+def _clear_cache():
+    """Clear the addresses cache."""
+    if 'addresses_cache' in st.session_state:
+        del st.session_state['addresses_cache']
 
 
 def load_addresses() -> list[Address]:
     """
-    Load all addresses from the JSON file.
+    Load all addresses from Google Sheets.
 
     Returns:
         List of Address objects
     """
-    _ensure_file_exists()
+    # Check cache first
+    if 'addresses_cache' in st.session_state:
+        return st.session_state['addresses_cache']
+
     try:
-        with open(ADDRESSES_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return [Address.from_dict(addr) for addr in data.get("addresses", [])]
-    except (json.JSONDecodeError, IOError):
+        worksheet = _get_worksheet()
+        if worksheet is None:
+            return []
+
+        # Get all records (skip header row)
+        all_values = worksheet.get_all_values()
+        if len(all_values) <= 1:  # Only header or empty
+            return []
+
+        addresses = []
+        for row in all_values[1:]:  # Skip header
+            if row and row[0]:  # Has an ID
+                addresses.append(Address.from_row(row))
+
+        # Cache the result
+        st.session_state['addresses_cache'] = addresses
+        return addresses
+    except Exception:
         return []
 
 
 def save_addresses(addresses: list[Address]) -> bool:
     """
-    Save addresses to the JSON file.
+    Save all addresses to Google Sheets (full replacement).
 
     Args:
         addresses: List of Address objects to save
@@ -85,13 +186,26 @@ def save_addresses(addresses: list[Address]) -> bool:
     Returns:
         True if successful, False otherwise
     """
-    _ensure_file_exists()
     try:
-        data = {"addresses": [addr.to_dict() for addr in addresses]}
-        with open(ADDRESSES_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+        worksheet = _get_worksheet()
+        if worksheet is None:
+            return False
+
+        # Clear existing data (keep header)
+        worksheet.clear()
+
+        # Write header
+        worksheet.append_row(COLUMNS)
+
+        # Write all addresses
+        for addr in addresses:
+            worksheet.append_row(addr.to_row())
+
+        # Clear cache
+        _clear_cache()
+
         return True
-    except IOError:
+    except Exception:
         return False
 
 
@@ -328,3 +442,17 @@ def get_address_summary(address: Address) -> str:
     """
     province_str = f" ({address.province})" if address.province else ""
     return f"{address.street}, {address.zip} {address.city}{province_str}"
+
+
+def is_sheets_configured() -> bool:
+    """
+    Check if Google Sheets is properly configured.
+
+    Returns:
+        True if configured, False otherwise
+    """
+    return (
+        "gcp_service_account" in st.secrets and
+        "google_sheets" in st.secrets and
+        "spreadsheet_id" in st.secrets.get("google_sheets", {})
+    )
