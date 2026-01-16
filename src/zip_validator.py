@@ -1,6 +1,6 @@
 """
-Zip Code Validator Module
-Validates and corrects zip codes using OpenStreetMap Nominatim API.
+Address Validator Module
+Validates and corrects addresses (ZIP codes and streets) using OpenStreetMap Nominatim API.
 """
 
 import time
@@ -9,13 +9,14 @@ from dataclasses import dataclass
 from typing import Optional, Callable
 from io import BytesIO
 import re
+from difflib import SequenceMatcher
 
 import pandas as pd
 
 
 @dataclass
 class ValidationResult:
-    """Result of a single zip code validation."""
+    """Result of a single address validation."""
     row_index: int
     name: str
     city: str
@@ -26,6 +27,11 @@ class ValidationResult:
     reason: str
     is_valid: bool
     auto_corrected: bool = False
+    # Street validation fields
+    street_verified: bool = False
+    suggested_street: Optional[str] = None
+    street_confidence: int = 0
+    street_auto_corrected: bool = False
 
 
 @dataclass
@@ -37,15 +43,19 @@ class ValidationReport:
     review_count: int
     skipped_count: int
     results: list[ValidationResult]
+    # Street stats
+    street_verified_count: int = 0
+    street_corrected_count: int = 0
 
 
 class ZipValidator:
     """
-    Validates zip codes using OpenStreetMap Nominatim API.
+    Validates addresses using OpenStreetMap Nominatim API.
+    Validates both ZIP codes and street names.
     """
 
     NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
-    USER_AGENT = "ELC-ZipValidator/1.0 (shipping label tool)"
+    USER_AGENT = "ELC-AddressValidator/2.0 (shipping label tool)"
     REQUEST_DELAY = 1.1  # seconds between requests (Nominatim limit)
 
     # Italian CAP ranges for major cities (for additional validation)
@@ -61,16 +71,86 @@ class ZipValidator:
         'venice': ('30100', '30176'),
     }
 
-    def __init__(self, confidence_threshold: int = 90):
+    # Common Italian street prefixes for normalization
+    STREET_PREFIXES = [
+        'via', 'viale', 'piazza', 'piazzale', 'corso', 'largo', 'vicolo',
+        'strada', 'contrada', 'borgata', 'traversa', 'salita', 'discesa',
+        'lungomare', 'lungotevere', 'lungarno', 'circonvallazione'
+    ]
+
+    def __init__(self, confidence_threshold: int = 90, street_confidence_threshold: int = 85):
         """
         Initialize validator.
 
         Args:
-            confidence_threshold: Minimum confidence for auto-correction (default 90%)
+            confidence_threshold: Minimum confidence for auto-correction of ZIP (default 90%)
+            street_confidence_threshold: Minimum confidence for auto-correction of street (default 85%)
         """
         self.confidence_threshold = confidence_threshold
+        self.street_confidence_threshold = street_confidence_threshold
         self.session = requests.Session()
         self.session.headers.update({'User-Agent': self.USER_AGENT})
+
+    def _normalize_street(self, street: str) -> str:
+        """
+        Normalize street name for comparison.
+        Removes common prefixes and standardizes format.
+        """
+        if not street:
+            return ""
+
+        normalized = street.lower().strip()
+
+        # Remove common prefixes for comparison
+        for prefix in self.STREET_PREFIXES:
+            if normalized.startswith(prefix + ' '):
+                normalized = normalized[len(prefix) + 1:]
+                break
+            if normalized.startswith(prefix + '.'):
+                normalized = normalized[len(prefix) + 1:]
+                break
+
+        # Remove punctuation and extra spaces
+        normalized = re.sub(r'[.,;:]', ' ', normalized)
+        normalized = re.sub(r'\s+', ' ', normalized).strip()
+
+        return normalized
+
+    def _extract_street_name(self, street: str) -> tuple[str, str]:
+        """
+        Extract street prefix and name separately.
+
+        Returns:
+            Tuple of (prefix, name)
+        """
+        if not street:
+            return "", ""
+
+        street_lower = street.lower().strip()
+
+        for prefix in self.STREET_PREFIXES:
+            if street_lower.startswith(prefix + ' '):
+                return prefix, street[len(prefix) + 1:].strip()
+            if street_lower.startswith(prefix + '.'):
+                return prefix, street[len(prefix) + 1:].strip()
+
+        return "", street
+
+    def _string_similarity(self, s1: str, s2: str) -> float:
+        """
+        Calculate similarity ratio between two strings.
+
+        Returns:
+            Similarity score 0.0 to 1.0
+        """
+        if not s1 or not s2:
+            return 0.0
+
+        # Normalize both strings
+        n1 = self._normalize_street(s1)
+        n2 = self._normalize_street(s2)
+
+        return SequenceMatcher(None, n1, n2).ratio()
 
     def _clean_zip_code(self, zip_code: str) -> tuple[str, bool]:
         """
@@ -107,13 +187,6 @@ class ZipValidator:
     def _count_different_digits(self, zip1: str, zip2: str) -> int:
         """
         Count how many digits are different between two zip codes.
-
-        Args:
-            zip1: First zip code
-            zip2: Second zip code
-
-        Returns:
-            Number of different digits (0-5 for Italian CAP)
         """
         if len(zip1) != len(zip2):
             return max(len(zip1), len(zip2))
@@ -123,58 +196,60 @@ class ZipValidator:
     def _is_transposition(self, zip1: str, zip2: str) -> bool:
         """
         Check if two zip codes are transpositions (same digits, different order).
-
-        Examples:
-            01870 vs 00187 -> True (same digits rearranged)
-            50124 vs 50122 -> False (different digits)
-
-        Args:
-            zip1: First zip code
-            zip2: Second zip code
-
-        Returns:
-            True if same digits in different order
         """
         if len(zip1) != len(zip2):
             return False
 
-        # Check if both have the same digits (sorted)
         return sorted(zip1) == sorted(zip2)
 
     def _is_adjacent_swap(self, zip1: str, zip2: str) -> bool:
         """
         Check if two zip codes differ by a single adjacent digit swap.
-
-        Examples:
-            50214 vs 50124 -> True (2 and 1 swapped)
-            50122 vs 50212 -> True (1 and 2 swapped)
-
-        Args:
-            zip1: First zip code
-            zip2: Second zip code
-
-        Returns:
-            True if single adjacent swap
         """
         if len(zip1) != len(zip2):
             return False
 
         diff_positions = [i for i in range(len(zip1)) if zip1[i] != zip2[i]]
 
-        # Must have exactly 2 different positions that are adjacent
         if len(diff_positions) != 2:
             return False
 
         i, j = diff_positions
-        if j - i != 1:  # Must be adjacent
+        if j - i != 1:
             return False
 
-        # Check if swapping fixes it
         return zip1[i] == zip2[j] and zip1[j] == zip2[i]
 
     def _is_valid_italian_zip_format(self, zip_code: str) -> bool:
         """Check if zip code has valid Italian CAP format (5 digits)."""
         return bool(re.match(r'^\d{5}$', str(zip_code).strip()))
+
+    def _search_streets_in_city(self, city: str, limit: int = 50) -> list[dict]:
+        """
+        Search for streets in a city using Nominatim.
+
+        Args:
+            city: City name
+            limit: Maximum results to return
+
+        Returns:
+            List of address results with street information
+        """
+        try:
+            params = {
+                'city': city,
+                'country': 'Italy',
+                'format': 'json',
+                'addressdetails': 1,
+                'limit': limit
+            }
+
+            response = self.session.get(self.NOMINATIM_URL, params=params, timeout=10)
+            response.raise_for_status()
+            return response.json()
+
+        except Exception:
+            return []
 
     def _query_nominatim(self, street: str, city: str, country: str = "Italy") -> Optional[dict]:
         """
@@ -227,18 +302,64 @@ class ZipValidator:
 
             return None
 
-        except Exception as e:
+        except Exception:
             return None
 
-    def validate_zip(
+    def _search_similar_streets(self, street: str, city: str) -> list[tuple[str, float, dict]]:
+        """
+        Search for streets similar to the input in the given city.
+
+        Args:
+            street: Street to search for
+            city: City name
+
+        Returns:
+            List of (street_name, similarity_score, full_result) sorted by similarity
+        """
+        if not street or not city:
+            return []
+
+        try:
+            # Search with partial street name
+            street_prefix, street_name = self._extract_street_name(street)
+
+            # Try searching with free-form query
+            params = {
+                'q': f"{street}, {city}, Italy",
+                'format': 'json',
+                'addressdetails': 1,
+                'limit': 10
+            }
+
+            response = self.session.get(self.NOMINATIM_URL, params=params, timeout=10)
+            response.raise_for_status()
+            results = response.json()
+
+            matches = []
+            for result in results:
+                address = result.get('address', {})
+                found_street = address.get('road') or address.get('pedestrian') or address.get('footway')
+
+                if found_street:
+                    similarity = self._string_similarity(street, found_street)
+                    matches.append((found_street, similarity, result))
+
+            # Sort by similarity
+            matches.sort(key=lambda x: x[1], reverse=True)
+            return matches
+
+        except Exception:
+            return []
+
+    def validate_address(
         self,
         street: str,
         city: str,
         original_zip: str,
         country: str = "IT"
-    ) -> tuple[bool, Optional[str], int, str]:
+    ) -> tuple[bool, Optional[str], int, str, bool, Optional[str], int]:
         """
-        Validate a single zip code.
+        Validate a full address (ZIP and street).
 
         Args:
             street: Street address
@@ -247,60 +368,116 @@ class ZipValidator:
             country: Country code
 
         Returns:
-            Tuple of (is_valid, suggested_zip, confidence, reason)
+            Tuple of (
+                zip_valid, suggested_zip, zip_confidence, zip_reason,
+                street_verified, suggested_street, street_confidence
+            )
         """
         original_zip_raw = str(original_zip).strip()
+        original_street = str(street).strip() if street else ""
+
+        # Default street validation values
+        street_verified = False
+        suggested_street = None
+        street_confidence = 0
 
         # Only validate Italian addresses for now
         if country.upper() not in ('IT', 'ITALY'):
-            return True, original_zip_raw, 100, "Non-IT country - skipped"
+            return True, original_zip_raw, 100, "Non-IT country - skipped", True, original_street, 100
 
-        # Try to clean up the zip code (handle typos like 'o' instead of '0')
+        # Try to clean up the zip code
         cleaned_zip, was_cleaned = self._clean_zip_code(original_zip_raw)
 
         # Format check on cleaned version
         if not self._is_valid_italian_zip_format(cleaned_zip):
-            # If even cleaned version is invalid, try to get suggestion anyway
-            result = self._query_nominatim(street or "", city, "Italy")
+            result = self._query_nominatim(original_street or "", city, "Italy")
             if result:
                 suggested = result.get('address', {}).get('postcode')
                 if suggested:
                     if ';' in suggested:
                         suggested = suggested.split(';')[0]
-                    return False, suggested, 75, f"Invalid format '{original_zip_raw}' - suggested from address"
-            return False, None, 0, f"Invalid format '{original_zip_raw}' (must be 5 digits)"
+                    return False, suggested, 75, f"Invalid format '{original_zip_raw}' - suggested from address", False, None, 0
+            return False, None, 0, f"Invalid format '{original_zip_raw}' (must be 5 digits)", False, None, 0
 
-        # Use cleaned zip for comparison
         working_zip = cleaned_zip
 
-        # Query Nominatim
-        result = self._query_nominatim(street or "", city, "Italy")
+        # Query Nominatim with full address
+        result = self._query_nominatim(original_street or "", city, "Italy")
 
         if not result:
-            return False, None, 0, "Address not found in API"
+            return False, None, 0, "Address not found in API", False, None, 0
 
+        is_city_only = result.get('_city_only', False)
+
+        # Check street match
+        if original_street and not is_city_only:
+            address_data = result.get('address', {})
+            found_street = (
+                address_data.get('road') or
+                address_data.get('pedestrian') or
+                address_data.get('footway') or
+                address_data.get('residential')
+            )
+
+            if found_street:
+                similarity = self._string_similarity(original_street, found_street)
+
+                if similarity >= 0.95:
+                    # Excellent match
+                    street_verified = True
+                    street_confidence = 100
+                elif similarity >= 0.85:
+                    # Good match - likely minor typo
+                    street_verified = True
+                    suggested_street = found_street
+                    street_confidence = int(similarity * 100)
+                elif similarity >= 0.70:
+                    # Moderate match - suggest correction
+                    street_verified = False
+                    suggested_street = found_street
+                    street_confidence = int(similarity * 100)
+                else:
+                    # Low match - search for similar streets
+                    time.sleep(self.REQUEST_DELAY)
+                    similar = self._search_similar_streets(original_street, city)
+                    if similar:
+                        best_match, best_score, _ = similar[0]
+                        if best_score >= 0.70:
+                            suggested_street = best_match
+                            street_confidence = int(best_score * 100)
+            else:
+                # No street in response - search for similar
+                time.sleep(self.REQUEST_DELAY)
+                similar = self._search_similar_streets(original_street, city)
+                if similar:
+                    best_match, best_score, best_result = similar[0]
+                    if best_score >= 0.70:
+                        suggested_street = best_match
+                        street_confidence = int(best_score * 100)
+                        # Also get ZIP from best match if available
+                        if best_result:
+                            better_zip = best_result.get('address', {}).get('postcode')
+                            if better_zip and ';' not in better_zip:
+                                result = best_result
+
+        # Now validate ZIP
         suggested_zip = result.get('address', {}).get('postcode')
 
         if not suggested_zip:
-            # Try to get zip from city name lookup
             city_lower = city.lower().strip()
             if city_lower in self.ITALIAN_CAP_RANGES:
                 cap_start, cap_end = self.ITALIAN_CAP_RANGES[city_lower]
                 if cap_start <= working_zip <= cap_end:
-                    # ZIP is within city range but we couldn't verify the specific street
-                    # Mark as NOT valid - needs manual review
-                    return False, working_zip, 70, f"Street not found - ZIP in city range ({cap_start}-{cap_end})"
+                    return False, working_zip, 70, f"Street not found - ZIP in city range ({cap_start}-{cap_end})", street_verified, suggested_street, street_confidence
                 else:
-                    # ZIP is outside city range - likely wrong
-                    return False, cap_start, 80, f"ZIP outside city range ({cap_start}-{cap_end})"
-            return False, None, 50, "No postal code in API response"
+                    return False, cap_start, 80, f"ZIP outside city range ({cap_start}-{cap_end})", street_verified, suggested_street, street_confidence
+            return False, None, 50, "No postal code in API response", street_verified, suggested_street, street_confidence
 
-        # Handle multiple postcodes (e.g., "50121;50122")
+        # Handle multiple postcodes
         if ';' in suggested_zip:
             suggested_zips = suggested_zip.split(';')
             if working_zip in suggested_zips:
-                return True, working_zip, 100, "Exact match (one of multiple)"
-            # Check if any of the suggested matches closely
+                return True, working_zip, 100, "Exact match (one of multiple)", street_verified, suggested_street, street_confidence
             for sz in suggested_zips:
                 if self._count_different_digits(working_zip, sz) == 1:
                     suggested_zip = sz
@@ -311,50 +488,58 @@ class ZipValidator:
         # Exact match
         if working_zip == suggested_zip:
             if was_cleaned:
-                return False, suggested_zip, 95, f"Typo fixed: '{original_zip_raw}' → '{suggested_zip}'"
-            return True, working_zip, 100, "Exact match"
+                return False, suggested_zip, 95, f"Typo fixed: '{original_zip_raw}' → '{suggested_zip}'", street_verified, suggested_street, street_confidence
+            return True, working_zip, 100, "Exact match", street_verified, suggested_street, street_confidence
 
-        # Calculate confidence based on type of error
+        # Calculate confidence
         diff_count = self._count_different_digits(working_zip, suggested_zip)
-        is_city_only = result.get('_city_only', False)
         is_transposition = self._is_transposition(working_zip, suggested_zip)
         is_adjacent_swap = self._is_adjacent_swap(working_zip, suggested_zip)
 
-        # Confidence logic - prioritize by error type
         if is_city_only:
             confidence = 70
             reason = "City-level match only (street not found)"
         elif is_adjacent_swap:
-            # Adjacent digit swap = very likely typo = highest confidence
             confidence = 96
             reason = f"Adjacent digits swapped ({working_zip} → {suggested_zip})"
         elif is_transposition:
-            # Same digits, different order = likely mistyped = high confidence
             confidence = 95
             reason = f"Digits transposed ({working_zip} → {suggested_zip})"
         elif diff_count == 1:
-            # Only 1 digit different = likely typo = high confidence
             confidence = 95
             reason = f"Typo: 1 digit different ({working_zip} → {suggested_zip})"
         elif diff_count == 2:
-            # 2 digits different = still likely correction needed
             confidence = 92
             reason = f"2 digits different ({working_zip} → {suggested_zip})"
         elif diff_count >= 3 and not is_city_only:
-            # 3+ digits different BUT full address match (city confirmed)
-            # Higher confidence because API found the exact street+city
             confidence = 91
             reason = f"{diff_count} digits different, city confirmed ({working_zip} → {suggested_zip})"
         else:
-            # 3+ digits different with city-only match = less certain
             confidence = 85
             reason = f"{diff_count} digits different - verify manually"
 
-        # Add note if original was cleaned
         if was_cleaned:
             reason = f"Cleaned '{original_zip_raw}' → '{working_zip}'. " + reason
 
-        return False, suggested_zip, confidence, reason
+        return False, suggested_zip, confidence, reason, street_verified, suggested_street, street_confidence
+
+    def validate_zip(
+        self,
+        street: str,
+        city: str,
+        original_zip: str,
+        country: str = "IT"
+    ) -> tuple[bool, Optional[str], int, str]:
+        """
+        Validate a single zip code (backwards compatible method).
+
+        Returns:
+            Tuple of (is_valid, suggested_zip, confidence, reason)
+        """
+        zip_valid, suggested_zip, confidence, reason, _, _, _ = self.validate_address(
+            street, city, original_zip, country
+        )
+        return zip_valid, suggested_zip, confidence, reason
 
     def process_dataframe(
         self,
@@ -362,7 +547,7 @@ class ZipValidator:
         progress_callback: Optional[Callable[[int, int, str], None]] = None
     ) -> ValidationReport:
         """
-        Process entire DataFrame and validate all zip codes.
+        Process entire DataFrame and validate all addresses.
 
         Args:
             df: DataFrame with address data
@@ -376,8 +561,9 @@ class ZipValidator:
         corrected_count = 0
         review_count = 0
         skipped_count = 0
+        street_verified_count = 0
+        street_corrected_count = 0
 
-        # Find relevant columns (case-insensitive)
         col_map = self._map_columns(df)
 
         if not all(col_map.get(k) for k in ['city', 'zip', 'country']):
@@ -392,7 +578,6 @@ class ZipValidator:
             if progress_callback:
                 progress_callback(idx + 1, total, f"Validating row {idx + 1}...")
 
-            # Extract values
             name = str(row.get(col_map.get('name', ''), ''))
             street = str(row.get(col_map.get('street', ''), ''))
             city = str(row.get(col_map['city'], ''))
@@ -410,18 +595,28 @@ class ZipValidator:
                     suggested_zip=original_zip,
                     confidence=100,
                     reason="Non-IT country - skipped",
-                    is_valid=True
+                    is_valid=True,
+                    street_verified=True,
+                    street_confidence=100
                 ))
                 skipped_count += 1
                 continue
 
-            # Validate
-            is_valid, suggested_zip, confidence, reason = self.validate_zip(
-                street, city, original_zip, country
-            )
+            # Validate full address
+            (
+                is_valid, suggested_zip, confidence, reason,
+                street_verified, suggested_street, street_confidence
+            ) = self.validate_address(street, city, original_zip, country)
 
-            # Determine action
-            auto_correct = not is_valid and confidence >= self.confidence_threshold and suggested_zip
+            # Determine ZIP action
+            zip_auto_correct = not is_valid and confidence >= self.confidence_threshold and suggested_zip
+
+            # Determine street action
+            street_auto_correct = (
+                not street_verified and
+                suggested_street and
+                street_confidence >= self.street_confidence_threshold
+            )
 
             result = ValidationResult(
                 row_index=idx,
@@ -433,16 +628,26 @@ class ZipValidator:
                 confidence=confidence,
                 reason=reason,
                 is_valid=is_valid,
-                auto_corrected=auto_correct
+                auto_corrected=zip_auto_correct,
+                street_verified=street_verified,
+                suggested_street=suggested_street,
+                street_confidence=street_confidence,
+                street_auto_corrected=street_auto_correct
             )
             results.append(result)
 
+            # Count stats
             if is_valid:
                 valid_count += 1
-            elif auto_correct:
+            elif zip_auto_correct:
                 corrected_count += 1
             else:
                 review_count += 1
+
+            if street_verified:
+                street_verified_count += 1
+            elif street_auto_correct:
+                street_corrected_count += 1
 
             # Rate limiting
             time.sleep(self.REQUEST_DELAY)
@@ -453,7 +658,9 @@ class ZipValidator:
             corrected_count=corrected_count,
             review_count=review_count,
             skipped_count=skipped_count,
-            results=results
+            results=results,
+            street_verified_count=street_verified_count,
+            street_corrected_count=street_corrected_count
         )
 
     def _map_columns(self, df: pd.DataFrame) -> dict:
@@ -483,7 +690,7 @@ class ZipValidator:
         report: ValidationReport
     ) -> bytes:
         """
-        Generate corrected Excel with auto-corrections applied.
+        Generate corrected Excel with auto-corrections applied (ZIP and street).
 
         Args:
             original_df: Original DataFrame
@@ -495,11 +702,16 @@ class ZipValidator:
         df = original_df.copy()
         col_map = self._map_columns(df)
         zip_col = col_map.get('zip')
+        street_col = col_map.get('street')
 
-        if zip_col:
-            for result in report.results:
-                if result.auto_corrected and result.suggested_zip:
-                    df.at[result.row_index, zip_col] = result.suggested_zip
+        for result in report.results:
+            # Correct ZIP
+            if result.auto_corrected and result.suggested_zip and zip_col:
+                df.at[result.row_index, zip_col] = result.suggested_zip
+
+            # Correct street
+            if result.street_auto_corrected and result.suggested_street and street_col:
+                df.at[result.row_index, street_col] = result.suggested_street
 
         output = BytesIO()
         df.to_excel(output, index=False, engine='openpyxl')
@@ -515,21 +727,31 @@ class ZipValidator:
         Returns:
             Excel file as bytes
         """
-        review_items = [
-            {
-                'Row': r.row_index + 2,  # Excel row (1-indexed + header)
-                'Name': r.name,
-                'City': r.city,
-                'Street': r.street,
-                'Original ZIP': r.original_zip,
-                'Suggested ZIP': r.suggested_zip or '-',
-                'Confidence': f"{r.confidence}%",
-                'Reason': r.reason,
-                'Action': 'Auto-corrected' if r.auto_corrected else 'Manual review needed'
-            }
-            for r in report.results
-            if not r.is_valid
-        ]
+        review_items = []
+        for r in report.results:
+            if not r.is_valid or not r.street_verified:
+                review_items.append({
+                    'Row': r.row_index + 2,
+                    'Name': r.name,
+                    'City': r.city,
+                    'Original Street': r.street,
+                    'Suggested Street': r.suggested_street or '-',
+                    'Street Conf.': f"{r.street_confidence}%" if r.street_confidence else '-',
+                    'Street Action': (
+                        'Verified' if r.street_verified else
+                        'Auto-corrected' if r.street_auto_corrected else
+                        'Review needed'
+                    ),
+                    'Original ZIP': r.original_zip,
+                    'Suggested ZIP': r.suggested_zip or '-',
+                    'ZIP Conf.': f"{r.confidence}%",
+                    'ZIP Action': (
+                        'Valid' if r.is_valid else
+                        'Auto-corrected' if r.auto_corrected else
+                        'Review needed'
+                    ),
+                    'Reason': r.reason
+                })
 
         df = pd.DataFrame(review_items)
         output = BytesIO()
