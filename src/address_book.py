@@ -1,17 +1,14 @@
 """
-Address Book module for managing pickup addresses.
+Address Book module for managing pickup addresses using Supabase.
 """
 
-import json
 import uuid
 from datetime import datetime
-from pathlib import Path
 from typing import Optional
 from dataclasses import dataclass, asdict
 
-
-# Path to the addresses JSON file
-ADDRESSES_FILE = Path(__file__).parent.parent / "data" / "addresses.json"
+import streamlit as st
+from supabase import create_client, Client
 
 
 @dataclass
@@ -30,8 +27,20 @@ class Address:
     updated_at: str = ""
 
     def to_dict(self) -> dict:
-        """Convert to dictionary."""
-        return asdict(self)
+        """Convert to dictionary for Supabase."""
+        return {
+            "id": self.id,
+            "name": self.name,
+            "company": self.company,
+            "street": self.street,
+            "zip": self.zip,
+            "city": self.city,
+            "province": self.province,
+            "reference": self.reference,
+            "is_default": self.is_default,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at
+        }
 
     @classmethod
     def from_dict(cls, data: dict) -> "Address":
@@ -51,33 +60,57 @@ class Address:
         )
 
 
-def _ensure_file_exists() -> None:
-    """Ensure the addresses file exists with default structure."""
-    if not ADDRESSES_FILE.exists():
-        ADDRESSES_FILE.parent.mkdir(parents=True, exist_ok=True)
-        with open(ADDRESSES_FILE, "w", encoding="utf-8") as f:
-            json.dump({"addresses": []}, f, indent=2)
+def _get_supabase_client() -> Optional[Client]:
+    """Get Supabase client using Streamlit secrets."""
+    try:
+        if "supabase" not in st.secrets:
+            return None
+
+        url = st.secrets["supabase"]["url"]
+        key = st.secrets["supabase"]["key"]
+
+        return create_client(url, key)
+    except Exception:
+        return None
+
+
+def _clear_cache():
+    """Clear the addresses cache."""
+    if 'addresses_cache' in st.session_state:
+        del st.session_state['addresses_cache']
 
 
 def load_addresses() -> list[Address]:
     """
-    Load all addresses from the JSON file.
+    Load all addresses from Supabase.
 
     Returns:
         List of Address objects
     """
-    _ensure_file_exists()
+    # Check cache first
+    if 'addresses_cache' in st.session_state:
+        return st.session_state['addresses_cache']
+
     try:
-        with open(ADDRESSES_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return [Address.from_dict(addr) for addr in data.get("addresses", [])]
-    except (json.JSONDecodeError, IOError):
+        client = _get_supabase_client()
+        if client is None:
+            return []
+
+        response = client.table("addresses").select("*").order("name").execute()
+
+        addresses = [Address.from_dict(row) for row in response.data]
+
+        # Cache the result
+        st.session_state['addresses_cache'] = addresses
+        return addresses
+    except Exception:
         return []
 
 
 def save_addresses(addresses: list[Address]) -> bool:
     """
-    Save addresses to the JSON file.
+    Save all addresses to Supabase (used for bulk operations).
+    For single operations, use add/update/delete functions directly.
 
     Args:
         addresses: List of Address objects to save
@@ -85,13 +118,20 @@ def save_addresses(addresses: list[Address]) -> bool:
     Returns:
         True if successful, False otherwise
     """
-    _ensure_file_exists()
     try:
-        data = {"addresses": [addr.to_dict() for addr in addresses]}
-        with open(ADDRESSES_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+        client = _get_supabase_client()
+        if client is None:
+            return False
+
+        # Delete all existing and insert new (for bulk replacement)
+        client.table("addresses").delete().neq("id", "").execute()
+
+        for addr in addresses:
+            client.table("addresses").insert(addr.to_dict()).execute()
+
+        _clear_cache()
         return True
-    except IOError:
+    except Exception:
         return False
 
 
@@ -153,45 +193,50 @@ def add_address(
     Returns:
         The new address ID if successful, None otherwise
     """
-    addresses = load_addresses()
+    try:
+        client = _get_supabase_client()
+        if client is None:
+            return None
 
-    # Check for duplicate name
-    for addr in addresses:
-        if addr.name.lower() == name.lower():
-            return None  # Duplicate name
+        addresses = load_addresses()
 
-    # Generate new ID
-    new_id = f"addr_{uuid.uuid4().hex[:8]}"
-    now = datetime.now().isoformat() + "Z"
-
-    # If setting as default, clear other defaults
-    if is_default:
+        # Check for duplicate name
         for addr in addresses:
-            addr.is_default = False
+            if addr.name.lower() == name.lower():
+                return None  # Duplicate name
 
-    # If this is the first address, make it default
-    if not addresses:
-        is_default = True
+        # Generate new ID
+        new_id = f"addr_{uuid.uuid4().hex[:8]}"
+        now = datetime.now().isoformat() + "Z"
 
-    new_address = Address(
-        id=new_id,
-        name=name,
-        company=company,
-        street=street,
-        zip=zip_code,
-        city=city,
-        province=province,
-        reference=reference,
-        is_default=is_default,
-        created_at=now,
-        updated_at=now
-    )
+        # If setting as default, clear other defaults
+        if is_default:
+            client.table("addresses").update({"is_default": False}).eq("is_default", True).execute()
 
-    addresses.append(new_address)
+        # If this is the first address, make it default
+        if not addresses:
+            is_default = True
 
-    if save_addresses(addresses):
+        new_address = Address(
+            id=new_id,
+            name=name,
+            company=company,
+            street=street,
+            zip=zip_code,
+            city=city,
+            province=province,
+            reference=reference,
+            is_default=is_default,
+            created_at=now,
+            updated_at=now
+        )
+
+        client.table("addresses").insert(new_address.to_dict()).execute()
+        _clear_cache()
+
         return new_id
-    return None
+    except Exception:
+        return None
 
 
 def update_address(address_id: str, **kwargs) -> bool:
@@ -200,44 +245,52 @@ def update_address(address_id: str, **kwargs) -> bool:
 
     Args:
         address_id: The ID of the address to update
-        **kwargs: Fields to update (name, company, street, zip, city, province, reference, is_default)
+        **kwargs: Fields to update
 
     Returns:
         True if successful, False otherwise
     """
-    addresses = load_addresses()
+    try:
+        client = _get_supabase_client()
+        if client is None:
+            return False
 
-    # Find the address
-    target_idx = None
-    for i, addr in enumerate(addresses):
-        if addr.id == address_id:
-            target_idx = i
-            break
+        addresses = load_addresses()
 
-    if target_idx is None:
-        return False
-
-    # Check for duplicate name if name is being changed
-    new_name = kwargs.get("name")
-    if new_name:
-        for i, addr in enumerate(addresses):
-            if i != target_idx and addr.name.lower() == new_name.lower():
-                return False  # Duplicate name
-
-    # Handle default flag
-    if kwargs.get("is_default", False):
+        # Find the address
+        target = None
         for addr in addresses:
-            addr.is_default = False
+            if addr.id == address_id:
+                target = addr
+                break
 
-    # Update fields
-    target = addresses[target_idx]
-    for key, value in kwargs.items():
-        if hasattr(target, key) and key not in ("id", "created_at"):
-            setattr(target, key, value)
+        if target is None:
+            return False
 
-    target.updated_at = datetime.now().isoformat() + "Z"
+        # Check for duplicate name if name is being changed
+        new_name = kwargs.get("name")
+        if new_name:
+            for addr in addresses:
+                if addr.id != address_id and addr.name.lower() == new_name.lower():
+                    return False  # Duplicate name
 
-    return save_addresses(addresses)
+        # Handle default flag
+        if kwargs.get("is_default", False):
+            client.table("addresses").update({"is_default": False}).eq("is_default", True).execute()
+
+        # Add updated_at
+        kwargs["updated_at"] = datetime.now().isoformat() + "Z"
+
+        # Remove fields that shouldn't be updated
+        kwargs.pop("id", None)
+        kwargs.pop("created_at", None)
+
+        client.table("addresses").update(kwargs).eq("id", address_id).execute()
+        _clear_cache()
+
+        return True
+    except Exception:
+        return False
 
 
 def delete_address(address_id: str) -> bool:
@@ -250,29 +303,37 @@ def delete_address(address_id: str) -> bool:
     Returns:
         True if successful, False otherwise
     """
-    addresses = load_addresses()
+    try:
+        client = _get_supabase_client()
+        if client is None:
+            return False
 
-    # Don't allow deletion if it's the last address
-    if len(addresses) <= 1:
+        addresses = load_addresses()
+
+        # Don't allow deletion if it's the last address
+        if len(addresses) <= 1:
+            return False
+
+        # Check if it's the default address
+        was_default = False
+        for addr in addresses:
+            if addr.id == address_id:
+                was_default = addr.is_default
+                break
+
+        # Delete the address
+        client.table("addresses").delete().eq("id", address_id).execute()
+
+        # If deleted address was default, make first remaining address default
+        if was_default:
+            remaining = [a for a in addresses if a.id != address_id]
+            if remaining:
+                client.table("addresses").update({"is_default": True}).eq("id", remaining[0].id).execute()
+
+        _clear_cache()
+        return True
+    except Exception:
         return False
-
-    # Find and remove the address
-    was_default = False
-    new_addresses = []
-    for addr in addresses:
-        if addr.id == address_id:
-            was_default = addr.is_default
-        else:
-            new_addresses.append(addr)
-
-    if len(new_addresses) == len(addresses):
-        return False  # Address not found
-
-    # If deleted address was default, make first remaining address default
-    if was_default and new_addresses:
-        new_addresses[0].is_default = True
-
-    return save_addresses(new_addresses)
 
 
 def set_default_address(address_id: str) -> bool:
@@ -285,20 +346,21 @@ def set_default_address(address_id: str) -> bool:
     Returns:
         True if successful, False otherwise
     """
-    addresses = load_addresses()
+    try:
+        client = _get_supabase_client()
+        if client is None:
+            return False
 
-    found = False
-    for addr in addresses:
-        if addr.id == address_id:
-            addr.is_default = True
-            found = True
-        else:
-            addr.is_default = False
+        # Clear all defaults
+        client.table("addresses").update({"is_default": False}).eq("is_default", True).execute()
 
-    if not found:
+        # Set new default
+        client.table("addresses").update({"is_default": True}).eq("id", address_id).execute()
+
+        _clear_cache()
+        return True
+    except Exception:
         return False
-
-    return save_addresses(addresses)
 
 
 def get_address_display_name(address: Address) -> str:
@@ -328,3 +390,18 @@ def get_address_summary(address: Address) -> str:
     """
     province_str = f" ({address.province})" if address.province else ""
     return f"{address.street}, {address.zip} {address.city}{province_str}"
+
+
+def is_sheets_configured() -> bool:
+    """
+    Check if Supabase is properly configured.
+    (Kept name for backwards compatibility with app.py)
+
+    Returns:
+        True if configured, False otherwise
+    """
+    return (
+        "supabase" in st.secrets and
+        "url" in st.secrets.get("supabase", {}) and
+        "key" in st.secrets.get("supabase", {})
+    )
