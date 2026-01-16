@@ -650,6 +650,9 @@ def send_pickup_request(
     height: float,
     use_pallet: bool,
     num_pallets: int,
+    pallet_length: float,
+    pallet_width: float,
+    pallet_height: float,
     notes: str
 ) -> tuple[bool, str]:
     """
@@ -711,6 +714,10 @@ def send_pickup_request(
         # Pallet
         "use_pallet": "Sì" if use_pallet else "No",
         "num_pallets": num_pallets if use_pallet else 0,
+        "pallet_dimensions": f"{pallet_length} x {pallet_width} x {pallet_height} cm" if use_pallet else "-",
+        "pallet_length": pallet_length if use_pallet else 0,
+        "pallet_width": pallet_width if use_pallet else 0,
+        "pallet_height": pallet_height if use_pallet else 0,
 
         # Notes
         "notes": notes if notes else "Nessuna nota"
@@ -1062,6 +1069,10 @@ def pickup_request_page():
         )
 
         num_pallets = 0
+        pallet_length = 0.0
+        pallet_width = 0.0
+        pallet_height = 0.0
+
         if use_pallet:
             num_pallets = st.number_input(
                 "Numero pallet *",
@@ -1070,6 +1081,36 @@ def pickup_request_page():
                 step=1,
                 key="num_pallets"
             )
+
+            st.markdown("**Dimensioni pallet (cm):** *")
+            col_pl, col_pw, col_ph = st.columns(3)
+
+            with col_pl:
+                pallet_length = st.number_input(
+                    "Lunghezza pallet *",
+                    min_value=0.0,
+                    value=120.0,  # Standard EUR pallet
+                    step=1.0,
+                    key="pallet_length"
+                )
+
+            with col_pw:
+                pallet_width = st.number_input(
+                    "Larghezza pallet *",
+                    min_value=0.0,
+                    value=80.0,  # Standard EUR pallet
+                    step=1.0,
+                    key="pallet_width"
+                )
+
+            with col_ph:
+                pallet_height = st.number_input(
+                    "Altezza pallet *",
+                    min_value=0.0,
+                    value=0.0,
+                    step=1.0,
+                    key="pallet_height"
+                )
 
         # Notes section
         st.markdown("### 📝 Note")
@@ -1121,11 +1162,20 @@ def pickup_request_page():
 
             # Dimensions validation: all required
             if length <= 0:
-                errors.append("Lunghezza obbligatoria")
+                errors.append("Lunghezza collo obbligatoria")
             if width <= 0:
-                errors.append("Larghezza obbligatoria")
+                errors.append("Larghezza collo obbligatoria")
             if height <= 0:
-                errors.append("Altezza obbligatoria")
+                errors.append("Altezza collo obbligatoria")
+
+            # Pallet dimensions validation
+            if use_pallet:
+                if pallet_length <= 0:
+                    errors.append("Lunghezza pallet obbligatoria")
+                if pallet_width <= 0:
+                    errors.append("Larghezza pallet obbligatoria")
+                if pallet_height <= 0:
+                    errors.append("Altezza pallet obbligatoria")
 
             if errors:
                 for error in errors:
@@ -1151,6 +1201,9 @@ def pickup_request_page():
                         height=height,
                         use_pallet=use_pallet,
                         num_pallets=num_pallets,
+                        pallet_length=pallet_length,
+                        pallet_width=pallet_width,
+                        pallet_height=pallet_height,
                         notes=notes or ""
                     )
 
