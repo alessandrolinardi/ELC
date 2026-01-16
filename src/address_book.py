@@ -87,23 +87,22 @@ def load_addresses() -> list[Address]:
     Returns:
         List of Address objects
     """
-    # Check cache first
-    if 'addresses_cache' in st.session_state:
-        return st.session_state['addresses_cache']
-
     try:
         client = _get_supabase_client()
         if client is None:
+            st.error("DEBUG: Supabase client is None - check secrets configuration")
             return []
 
         response = client.table("addresses").select("*").order("name").execute()
 
-        addresses = [Address.from_dict(row) for row in response.data]
+        if not response.data:
+            st.warning(f"DEBUG: No data returned from Supabase. Response: {response}")
+            return []
 
-        # Cache the result
-        st.session_state['addresses_cache'] = addresses
+        addresses = [Address.from_dict(row) for row in response.data]
         return addresses
-    except Exception:
+    except Exception as e:
+        st.error(f"DEBUG: Error loading addresses: {e}")
         return []
 
 
