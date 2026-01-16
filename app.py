@@ -388,16 +388,17 @@ def label_sorter_page():
 
 
 def zip_validator_page():
-    """Page for ZIP Code Validator feature."""
-    st.markdown("# 📍 ZIP Code Validator")
-    st.markdown("*Valida e correggi i CAP negli indirizzi di spedizione*")
+    """Page for Address Validator feature."""
+    st.markdown("# 📍 Address Validator")
+    st.markdown("*Valida e correggi indirizzi, CAP e vie*")
 
     # User guide
     st.info(
         "**Come usare questo strumento:**\n"
         "- Carica un file Excel con il formato corretto. "
         "[Scarica il template](https://docs.google.com/spreadsheets/d/1eKfU6G-wzpNa8HZDcuddpJAZHEzWUKJUFw-y5LFDKOU/edit?usp=sharing)\n"
-        "- Al termine della validazione, scarica il file corretto e caricalo su ShippyPro"
+        "- Il sistema valida CAP e verifica che le vie esistano\n"
+        "- Al termine, scarica il file corretto e caricalo su ShippyPro"
     )
 
     st.markdown("---")
@@ -417,19 +418,30 @@ def zip_validator_page():
     )
 
     # Settings
-    col1, col2 = st.columns(2)
+    st.markdown("### ⚙️ Impostazioni")
+    col1, col2, col3 = st.columns(3)
 
     with col1:
         confidence_threshold = st.slider(
-            "Soglia confidenza per auto-correzione",
+            "Soglia CAP",
             min_value=50,
             max_value=100,
             value=90,
             step=5,
-            help="ZIP corretti automaticamente solo se confidenza ≥ soglia"
+            help="CAP corretti automaticamente solo se confidenza ≥ soglia"
         )
 
     with col2:
+        street_confidence_threshold = st.slider(
+            "Soglia Via",
+            min_value=50,
+            max_value=100,
+            value=85,
+            step=5,
+            help="Vie corrette automaticamente solo se confidenza ≥ soglia"
+        )
+
+    with col3:
         country_filter = st.selectbox(
             "Filtra per paese",
             options=["Solo IT", "Tutti"],
@@ -505,7 +517,10 @@ def zip_validator_page():
                 st.stop()
 
             # Validate
-            validator = ZipValidator(confidence_threshold=confidence_threshold)
+            validator = ZipValidator(
+                confidence_threshold=confidence_threshold,
+                street_confidence_threshold=street_confidence_threshold
+            )
 
             # Progress container
             progress_bar = st.progress(0)
@@ -515,7 +530,7 @@ def zip_validator_page():
                 progress_bar.progress(current / total)
                 status_text.text(f"⏳ {message} ({current}/{total})")
 
-            with st.spinner(f"Validazione {len(df)} indirizzi... (circa {len(df) * 1.1:.0f} secondi)"):
+            with st.spinner(f"Validazione {len(df)} indirizzi... (circa {len(df) * 1.5:.0f} secondi)"):
                 report = validator.process_dataframe(df, progress_callback=update_progress)
 
             progress_bar.progress(100)
@@ -545,6 +560,8 @@ def zip_validator_page():
         st.markdown("---")
         st.markdown("## ✅ Risultato")
 
+        # ZIP stats
+        st.markdown("#### 📮 CAP")
         col1, col2, col3, col4 = st.columns(4)
 
         with col1:
@@ -559,26 +576,52 @@ def zip_validator_page():
         with col4:
             st.metric("⏭️ Saltati", report.skipped_count)
 
+        # Street stats
+        st.markdown("#### 🛣️ Vie")
+        col_s1, col_s2, col_s3 = st.columns(3)
+
+        with col_s1:
+            st.metric("✓ Verificate", report.street_verified_count)
+
+        with col_s2:
+            st.metric("🔄 Corrette", report.street_corrected_count)
+
+        with col_s3:
+            not_verified = report.total_rows - report.street_verified_count - report.street_corrected_count - report.skipped_count
+            st.metric("⚠️ Da verificare", max(0, not_verified))
+
         # Preview ALL results (valid, corrected, and needs review)
         st.markdown("### 📋 Dettaglio validazione")
 
         preview_data = []
         for r in report.results:
+            # ZIP status
             if r.is_valid:
-                stato = "✓ Valido"
+                zip_stato = "✓"
             elif r.auto_corrected:
-                stato = "🔄 Corretto"
+                zip_stato = "🔄"
             else:
-                stato = "⚠️ Rivedere"
+                zip_stato = "⚠️"
+
+            # Street status
+            if r.street_verified:
+                street_stato = "✓"
+            elif r.street_auto_corrected:
+                street_stato = "🔄"
+            elif r.suggested_street:
+                street_stato = "⚠️"
+            else:
+                street_stato = "-"
 
             preview_data.append({
-                "Città": r.city[:20] if r.city else "-",
-                "Via": (r.street[:25] + "..." if len(r.street) > 25 else r.street) if r.street else "-",
+                "Città": r.city[:15] if r.city else "-",
+                "Via Orig.": (r.street[:18] + "..." if len(r.street) > 18 else r.street) if r.street else "-",
+                "Via Sugg.": (r.suggested_street[:18] + "..." if r.suggested_street and len(r.suggested_street) > 18 else r.suggested_street) if r.suggested_street else "-",
+                "🛣️": street_stato,
                 "ZIP Orig.": r.original_zip,
                 "ZIP Sugg.": r.suggested_zip or "-",
-                "Conf.": f"{r.confidence}%" if r.confidence else "-",
-                "Stato": stato,
-                "Motivo": r.reason[:30] + "..." if len(r.reason) > 30 else r.reason
+                "📮": zip_stato,
+                "Note": r.reason[:22] + "..." if len(r.reason) > 22 else r.reason
             })
 
         if preview_data:
@@ -1248,7 +1291,7 @@ def main():
         "Seleziona funzionalità:",
         options=[
             "📦 Label Sorter",
-            "📍 ZIP Validator",
+            "📍 Address Validator",
             "🚚 Richiesta Ritiro"
         ],
         index=0,
@@ -1258,7 +1301,7 @@ def main():
     st.sidebar.markdown("---")
     st.sidebar.markdown(
         "<div style='font-size: 0.8rem; color: #888;'>"
-        "ELC Tools v1.2<br>"
+        "ELC Tools v2.0<br>"
         "Estée Lauder Logistics"
         "</div>",
         unsafe_allow_html=True
@@ -1267,7 +1310,7 @@ def main():
     # Route to selected feature
     if feature == "📦 Label Sorter":
         label_sorter_page()
-    elif feature == "📍 ZIP Validator":
+    elif feature == "📍 Address Validator":
         zip_validator_page()
     elif feature == "🚚 Richiesta Ritiro":
         pickup_request_page()
