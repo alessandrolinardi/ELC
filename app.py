@@ -664,6 +664,8 @@ def send_pickup_request(
     # Calculate totals
     total_weight = num_packages * weight_per_package
     shipment_type = "FREIGHT" if total_weight > 70 else "NORMAL"
+    package_volume = length * width * height / 1000000  # in cubic meters
+    total_volume = package_volume * num_packages
 
     # Format date/time
     date_str = pickup_date.strftime("%d/%m/%Y")
@@ -674,53 +676,69 @@ def send_pickup_request(
     # Build subject for email
     subject = f"{carrier} - {date_str} - {shipment_type}"
 
-    # Build dimensions string
-    dimensions_str = f"{length} x {width} x {height} cm"
+    # Build dimensions strings
+    package_dimensions_str = f"{length} x {width} x {height} cm"
+    pallet_dimensions_str = f"{pallet_length} x {pallet_width} x {pallet_height} cm" if use_pallet else "-"
 
-    # Prepare payload for Zapier
+    # Prepare payload for Zapier - all fields exposed individually
     payload = {
-        # Email fields
+        # === Email/Meta fields ===
         "subject": subject,
         "timestamp": timestamp,
+        "shipment_type": shipment_type,
 
-        # Carrier
+        # === Carrier ===
         "carrier": carrier,
 
-        # Date/Time
+        # === Date/Time ===
         "pickup_date": date_str,
         "time_start": time_start_str,
         "time_end": time_end_str,
         "time_window": f"{time_start_str} - {time_end_str}",
 
-        # Address
+        # === Address - Individual fields ===
         "company": company,
         "address": address,
         "zip_code": zip_code,
         "city": city,
         "province": province,
-        "full_address": f"{address}, {zip_code} {city} ({province})",
         "reference": reference,
+        # Address - Formatted
+        "full_address": f"{address}, {zip_code} {city} ({province})",
+        "address_line1": address,
+        "address_line2": f"{zip_code} {city} ({province})",
 
-        # Package details
+        # === Package Details - Individual fields ===
         "num_packages": num_packages,
         "weight_per_package": weight_per_package,
-        "dimensions": dimensions_str,
-        "length": length,
-        "width": width,
-        "height": height,
+        "weight_per_package_str": f"{weight_per_package} kg",
+        "package_length": length,
+        "package_width": width,
+        "package_height": height,
+        # Package - Calculated
         "total_weight": total_weight,
-        "shipment_type": shipment_type,
+        "total_weight_str": f"{total_weight:.1f} kg",
+        "package_dimensions": package_dimensions_str,
+        "package_volume_m3": round(package_volume, 3),
+        "total_volume_m3": round(total_volume, 3),
 
-        # Pallet
-        "use_pallet": "Sì" if use_pallet else "No",
+        # === Pallet Details ===
+        "use_pallet": use_pallet,
+        "use_pallet_str": "Sì" if use_pallet else "No",
         "num_pallets": num_pallets if use_pallet else 0,
-        "pallet_dimensions": f"{pallet_length} x {pallet_width} x {pallet_height} cm" if use_pallet else "-",
         "pallet_length": pallet_length if use_pallet else 0,
         "pallet_width": pallet_width if use_pallet else 0,
         "pallet_height": pallet_height if use_pallet else 0,
+        "pallet_dimensions": pallet_dimensions_str,
 
-        # Notes
-        "notes": notes if notes else "Nessuna nota"
+        # === Notes ===
+        "notes": notes if notes else "",
+        "has_notes": bool(notes),
+
+        # === Summary for email body ===
+        "summary_packages": f"{num_packages} colli x {weight_per_package} kg = {total_weight:.1f} kg totali",
+        "summary_dimensions": f"Dimensioni collo: {package_dimensions_str}",
+        "summary_pallet": f"{num_pallets} pallet ({pallet_dimensions_str})" if use_pallet else "Nessun pallet"
     }
 
     try:
