@@ -850,10 +850,10 @@ def pickup_request_page():
         "- Compila i dettagli del ritiro e invia la richiesta"
     )
 
-    # Check if Google Sheets is configured
+    # Check if Supabase is configured
     if not is_sheets_configured():
         st.warning(
-            "⚠️ **Rubrica non configurata**: La rubrica indirizzi richiede Google Sheets. "
+            "⚠️ **Rubrica non configurata**: La rubrica indirizzi richiede Supabase. "
             "Configura le credenziali in Streamlit Secrets per salvare gli indirizzi."
         )
 
