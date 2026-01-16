@@ -650,6 +650,9 @@ def send_pickup_request(
     height: float,
     use_pallet: bool,
     num_pallets: int,
+    pallet_length: float,
+    pallet_width: float,
+    pallet_height: float,
     notes: str
 ) -> tuple[bool, str]:
     """
@@ -711,6 +714,10 @@ def send_pickup_request(
         # Pallet
         "use_pallet": "Sì" if use_pallet else "No",
         "num_pallets": num_pallets if use_pallet else 0,
+        "pallet_dimensions": f"{pallet_length} x {pallet_width} x {pallet_height} cm" if use_pallet else "-",
+        "pallet_length": pallet_length if use_pallet else 0,
+        "pallet_width": pallet_width if use_pallet else 0,
+        "pallet_height": pallet_height if use_pallet else 0,
 
         # Notes
         "notes": notes if notes else "Nessuna nota"
@@ -899,202 +906,235 @@ def pickup_request_page():
     if is_from_book:
         st.info(f"📍 **{selected_address.company}** - {get_address_summary(selected_address)}")
 
-    # Form
+    # Carrier selection (outside form for reactivity)
+    st.markdown("### 🚛 Corriere")
+    carrier = st.radio(
+        "Seleziona il corriere:",
+        options=["FedEx", "DHL", "UPS"],
+        horizontal=True,
+        key="carrier"
+    )
+
+    # Date and time section
+    st.markdown("### 📅 Data e Orario")
+    col_date, col_time_start, col_time_end = st.columns(3)
+
+    with col_date:
+        pickup_date = st.date_input(
+            "Data ritiro *",
+            value=date.today() + timedelta(days=1),
+            min_value=date.today(),
+            key="pickup_date"
+        )
+
+    with col_time_start:
+        time_start = st.time_input(
+            "Orario inizio *",
+            value=time(9, 0),
+            key="time_start"
+        )
+
+    with col_time_end:
+        time_end = st.time_input(
+            "Orario fine *",
+            value=time(18, 0),
+            key="time_end"
+        )
+
+    # Address fields - pre-filled if from book, editable if new
+    st.markdown("### 📍 Dettagli Indirizzo")
+
+    if is_from_book:
+        st.caption("🔒 Indirizzo selezionato dalla rubrica")
+        company = selected_address.company
+        address = selected_address.street
+        zip_code = selected_address.zip
+        city = selected_address.city
+        province = selected_address.province
+        reference = selected_address.reference
+
+        # Show read-only display
+        col1, col2 = st.columns(2)
+        with col1:
+            st.text_input("Azienda", value=company, disabled=True, key="company_display")
+            st.text_input("Indirizzo", value=address, disabled=True, key="address_display")
+        with col2:
+            st.text_input("CAP / Città", value=f"{zip_code} {city} ({province})", disabled=True, key="location_display")
+            st.text_input("Riferimento", value=reference, disabled=True, key="reference_display")
+    else:
+        company = st.text_input(
+            "Azienda *",
+            value="Estée Lauder",
+            key="company"
+        )
+
+        address = st.text_input(
+            "Indirizzo *",
+            placeholder="Via Turati 3",
+            key="address"
+        )
+
+        col_zip, col_city, col_province = st.columns([1, 2, 1])
+
+        with col_zip:
+            zip_code = st.text_input(
+                "CAP *",
+                placeholder="20121",
+                max_chars=5,
+                key="zip_code"
+            )
+
+        with col_city:
+            city = st.text_input(
+                "Città *",
+                placeholder="Milano",
+                key="city"
+            )
+
+        with col_province:
+            province = st.text_input(
+                "Provincia",
+                placeholder="MI",
+                max_chars=2,
+                key="province"
+            )
+
+        reference = st.text_input(
+            "Riferimento/Telefono",
+            placeholder="02 1234567",
+            key="reference"
+        )
+
+    # Package details section
+    st.markdown("### 📦 Dettagli Colli")
+
+    col_packages, col_weight = st.columns(2)
+
+    with col_packages:
+        num_packages = st.number_input(
+            "Numero colli *",
+            min_value=1,
+            value=1,
+            step=1,
+            key="num_packages"
+        )
+
+    with col_weight:
+        weight_per_package = st.number_input(
+            "Peso singolo collo (kg) *",
+            min_value=0.1,
+            value=1.0,
+            step=0.5,
+            key="weight_per_package"
+        )
+
+    st.markdown("**Dimensioni singolo collo (cm):** *")
+    col_l, col_w, col_h = st.columns(3)
+
+    with col_l:
+        length = st.number_input(
+            "Lunghezza *",
+            min_value=0.0,
+            value=0.0,
+            step=1.0,
+            key="length"
+        )
+
+    with col_w:
+        width = st.number_input(
+            "Larghezza *",
+            min_value=0.0,
+            value=0.0,
+            step=1.0,
+            key="width"
+        )
+
+    with col_h:
+        height = st.number_input(
+            "Altezza *",
+            min_value=0.0,
+            value=0.0,
+            step=1.0,
+            key="height"
+        )
+
+    # Pallet section
+    st.markdown("### 🎨 Pallet")
+
+    use_pallet = st.checkbox(
+        "Raggruppamento su pallet",
+        key="use_pallet"
+    )
+
+    num_pallets = 0
+    pallet_length = 0.0
+    pallet_width = 0.0
+    pallet_height = 0.0
+
+    if use_pallet:
+        num_pallets = st.number_input(
+            "Numero pallet *",
+            min_value=1,
+            value=1,
+            step=1,
+            key="num_pallets"
+        )
+
+        st.markdown("**Dimensioni pallet (cm):** *")
+        col_pl, col_pw, col_ph = st.columns(3)
+
+        with col_pl:
+            pallet_length = st.number_input(
+                "Lunghezza pallet *",
+                min_value=0.0,
+                value=120.0,  # Standard EUR pallet
+                step=1.0,
+                key="pallet_length"
+            )
+
+        with col_pw:
+            pallet_width = st.number_input(
+                "Larghezza pallet *",
+                min_value=0.0,
+                value=80.0,  # Standard EUR pallet
+                step=1.0,
+                key="pallet_width"
+            )
+
+        with col_ph:
+            pallet_height = st.number_input(
+                "Altezza pallet *",
+                min_value=0.0,
+                value=0.0,
+                step=1.0,
+                key="pallet_height"
+            )
+
+    # Notes section
+    st.markdown("### 📝 Note")
+    notes = st.text_area(
+        "Note aggiuntive",
+        placeholder="Eventuali note per il corriere...",
+        key="notes"
+    )
+
+    # Dynamic Summary section (outside form - updates in real-time)
+    st.markdown("### 📊 Riepilogo")
+    total_weight = num_packages * weight_per_package
+    shipment_type = "FREIGHT" if total_weight > 70 else "NORMAL"
+
+    col_summary1, col_summary2 = st.columns(2)
+    with col_summary1:
+        st.metric("Peso totale", f"{total_weight:.1f} kg")
+    with col_summary2:
+        st.metric("Tipo spedizione", f"{shipment_type}")
+
+    if total_weight > 70:
+        st.warning("⚠️ Peso superiore a 70 kg - Spedizione FREIGHT")
+
+    # Submit button in a form for proper submission handling
+    st.markdown("---")
     with st.form("pickup_request_form"):
-        # Carrier selection
-        st.markdown("### 🚛 Corriere")
-        carrier = st.radio(
-            "Seleziona il corriere:",
-            options=["FedEx", "DHL", "UPS"],
-            horizontal=True,
-            key="carrier"
-        )
-
-        # Date and time section
-        st.markdown("### 📅 Data e Orario")
-        col_date, col_time_start, col_time_end = st.columns(3)
-
-        with col_date:
-            pickup_date = st.date_input(
-                "Data ritiro *",
-                value=date.today() + timedelta(days=1),
-                min_value=date.today(),
-                key="pickup_date"
-            )
-
-        with col_time_start:
-            time_start = st.time_input(
-                "Orario inizio *",
-                value=time(9, 0),
-                key="time_start"
-            )
-
-        with col_time_end:
-            time_end = st.time_input(
-                "Orario fine *",
-                value=time(18, 0),
-                key="time_end"
-            )
-
-        # Address fields - pre-filled if from book, editable if new
-        st.markdown("### 📍 Dettagli Indirizzo")
-
-        if is_from_book:
-            st.caption("🔒 Indirizzo selezionato dalla rubrica")
-            company = selected_address.company
-            address = selected_address.street
-            zip_code = selected_address.zip
-            city = selected_address.city
-            province = selected_address.province
-            reference = selected_address.reference
-
-            # Show read-only display
-            col1, col2 = st.columns(2)
-            with col1:
-                st.text_input("Azienda", value=company, disabled=True, key="company_display")
-                st.text_input("Indirizzo", value=address, disabled=True, key="address_display")
-            with col2:
-                st.text_input("CAP / Città", value=f"{zip_code} {city} ({province})", disabled=True, key="location_display")
-                st.text_input("Riferimento", value=reference, disabled=True, key="reference_display")
-        else:
-            company = st.text_input(
-                "Azienda *",
-                value="Estée Lauder",
-                key="company"
-            )
-
-            address = st.text_input(
-                "Indirizzo *",
-                placeholder="Via Turati 3",
-                key="address"
-            )
-
-            col_zip, col_city, col_province = st.columns([1, 2, 1])
-
-            with col_zip:
-                zip_code = st.text_input(
-                    "CAP *",
-                    placeholder="20121",
-                    max_chars=5,
-                    key="zip_code"
-                )
-
-            with col_city:
-                city = st.text_input(
-                    "Città *",
-                    placeholder="Milano",
-                    key="city"
-                )
-
-            with col_province:
-                province = st.text_input(
-                    "Provincia",
-                    placeholder="MI",
-                    max_chars=2,
-                    key="province"
-                )
-
-            reference = st.text_input(
-                "Riferimento/Telefono",
-                placeholder="02 1234567",
-                key="reference"
-            )
-
-        # Package details section
-        st.markdown("### 📦 Dettagli Colli")
-
-        col_packages, col_weight = st.columns(2)
-
-        with col_packages:
-            num_packages = st.number_input(
-                "Numero colli *",
-                min_value=1,
-                value=1,
-                step=1,
-                key="num_packages"
-            )
-
-        with col_weight:
-            weight_per_package = st.number_input(
-                "Peso singolo collo (kg) *",
-                min_value=0.1,
-                value=1.0,
-                step=0.5,
-                key="weight_per_package"
-            )
-
-        st.markdown("**Dimensioni singolo collo (cm):** *")
-        col_l, col_w, col_h = st.columns(3)
-
-        with col_l:
-            length = st.number_input(
-                "Lunghezza *",
-                min_value=0.0,
-                value=0.0,
-                step=1.0,
-                key="length"
-            )
-
-        with col_w:
-            width = st.number_input(
-                "Larghezza *",
-                min_value=0.0,
-                value=0.0,
-                step=1.0,
-                key="width"
-            )
-
-        with col_h:
-            height = st.number_input(
-                "Altezza *",
-                min_value=0.0,
-                value=0.0,
-                step=1.0,
-                key="height"
-            )
-
-        # Pallet section
-        st.markdown("### 🎨 Pallet")
-
-        use_pallet = st.checkbox(
-            "Raggruppamento su pallet",
-            key="use_pallet"
-        )
-
-        num_pallets = 0
-        if use_pallet:
-            num_pallets = st.number_input(
-                "Numero pallet *",
-                min_value=1,
-                value=1,
-                step=1,
-                key="num_pallets"
-            )
-
-        # Notes section
-        st.markdown("### 📝 Note")
-        notes = st.text_area(
-            "Note aggiuntive",
-            placeholder="Eventuali note per il corriere...",
-            key="notes"
-        )
-
-        # Summary section
-        st.markdown("### 📊 Riepilogo")
-        total_weight = num_packages * weight_per_package
-        shipment_type = "FREIGHT" if total_weight > 70 else "NORMAL"
-
-        col_summary1, col_summary2 = st.columns(2)
-        with col_summary1:
-            st.metric("Peso totale", f"{total_weight:.1f} kg")
-        with col_summary2:
-            st.metric("Tipo spedizione", f"{shipment_type}")
-
-        if total_weight > 70:
-            st.warning("⚠️ Peso superiore a 70 kg - Spedizione FREIGHT")
-
-        # Submit button
-        st.markdown("---")
         submitted = st.form_submit_button(
             "📧 Invia Richiesta",
             type="primary",
@@ -1121,11 +1161,20 @@ def pickup_request_page():
 
             # Dimensions validation: all required
             if length <= 0:
-                errors.append("Lunghezza obbligatoria")
+                errors.append("Lunghezza collo obbligatoria")
             if width <= 0:
-                errors.append("Larghezza obbligatoria")
+                errors.append("Larghezza collo obbligatoria")
             if height <= 0:
-                errors.append("Altezza obbligatoria")
+                errors.append("Altezza collo obbligatoria")
+
+            # Pallet dimensions validation
+            if use_pallet:
+                if pallet_length <= 0:
+                    errors.append("Lunghezza pallet obbligatoria")
+                if pallet_width <= 0:
+                    errors.append("Larghezza pallet obbligatoria")
+                if pallet_height <= 0:
+                    errors.append("Altezza pallet obbligatoria")
 
             if errors:
                 for error in errors:
@@ -1151,6 +1200,9 @@ def pickup_request_page():
                         height=height,
                         use_pallet=use_pallet,
                         num_pallets=num_pallets,
+                        pallet_length=pallet_length,
+                        pallet_width=pallet_width,
+                        pallet_height=pallet_height,
                         notes=notes or ""
                     )
 
