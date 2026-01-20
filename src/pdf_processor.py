@@ -54,11 +54,12 @@ class PDFProcessor:
             re.compile(r'(\d{4}\s+\d{4}\s+\d{4}(?:\s+\d{4})?)', re.IGNORECASE),  # Spaced format
         ],
         'DHL': [
-            # Pattern specifici DHL
-            re.compile(r'WAYBILL\s*:?\s*([\d\s]+?)(?:\s{2,}|\n|$)', re.IGNORECASE),
-            re.compile(r'AWB\s*:?\s*([\d\s]+?)(?:\s{2,}|\n|$)', re.IGNORECASE),
-            re.compile(r'SHIPMENT\s*(?:NUMBER|ID|#)?\s*:?\s*([\d\s]+?)(?:\s{2,}|\n|$)', re.IGNORECASE),
+            # Pattern specifici DHL - più flessibili per catturare numeri con spazi
+            re.compile(r'WAYBILL[:\s]+(\d+(?:\s+\d+)*)', re.IGNORECASE),  # WAYBILL 43 0282 5052
+            re.compile(r'AWB[:\s]+(\d+(?:\s+\d+)*)', re.IGNORECASE),  # AWB format
+            re.compile(r'SHIPMENT\s*(?:NUMBER|ID|#)?[:\s]+(\d+(?:\s+\d+)*)', re.IGNORECASE),
             re.compile(r'JD\d{18}', re.IGNORECASE),  # DHL JD format
+            re.compile(r'(\d{2}\s+\d{4}\s+\d{4})', re.IGNORECASE),  # DHL spaced: 43 0282 5052
             re.compile(r'(\d{10,11})', re.IGNORECASE),  # DHL 10-11 digits
         ],
     }
