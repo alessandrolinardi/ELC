@@ -13,7 +13,7 @@ import pandas as pd
 
 from src.pdf_processor import PDFProcessor
 from src.excel_parser import ExcelParser, ExcelParserError
-from src.matcher import Matcher, UnmatchedReason
+from src.matcher import Matcher, UnmatchedReason, MatchType
 from src.sorter import Sorter, SortMethod
 from src.zip_validator import ZipValidator, ValidationReport
 from src.address_book import (
@@ -419,6 +419,30 @@ def label_sorter_page():
                         st.info(f"Mostrate solo le prime 5 pagine di {len(unrecognized_pages)} con tracking non riconosciuto.")
                 else:
                     st.info("Nessuna pagina con tracking non riconosciuto (problema di match con Excel).")
+
+            # Debug: Show fuzzy/partial matches that may need review
+            with st.expander("🔍 Debug: Match con confidenza ridotta"):
+                st.markdown("*Match trovati con metodi fuzzy o parziali (potrebbero richiedere verifica)*")
+                fuzzy_matches = [r for r in match_report.matched
+                                 if r.match_type in (MatchType.FUZZY, MatchType.PARTIAL)]
+                if fuzzy_matches:
+                    fuzzy_data = []
+                    for result in fuzzy_matches:
+                        match_type_label = {
+                            MatchType.FUZZY: "🔸 Fuzzy (simile)",
+                            MatchType.PARTIAL: "🔹 Parziale"
+                        }.get(result.match_type, "Altro")
+
+                        fuzzy_data.append({
+                            "Pag.": result.page_number,
+                            "Tracking PDF": result.tracking,
+                            "Tracking Excel": result.order.tracking if result.order else "-",
+                            "Tipo": match_type_label,
+                            "Confidenza": f"{result.match_confidence}%"
+                        })
+                    st.dataframe(fuzzy_data, use_container_width=True, hide_index=True)
+                else:
+                    st.info("Tutti i match sono esatti (100% confidenza).")
         else:
             st.success("🎉 Tutte le etichette sono state matchate!")
 
