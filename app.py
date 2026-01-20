@@ -378,6 +378,22 @@ def label_sorter_page():
                 })
 
             st.dataframe(unmatched_data, use_container_width=True, hide_index=True)
+
+            # Debug mode - show raw text from pages with unrecognized tracking
+            with st.expander("🔍 Debug: Testo estratto dalle pagine problematiche"):
+                st.markdown("*Questo testo è estratto direttamente dal PDF. Utile per capire perché il tracking non viene riconosciuto.*")
+                unrecognized_pages = [r for r in match_report.unmatched
+                                      if r.unmatched_reason and r.unmatched_reason.value == "Pattern tracking non identificato"]
+                if unrecognized_pages:
+                    for result in unrecognized_pages[:5]:  # Show first 5
+                        page_info = pdf_data.pages[result.page_index]
+                        st.markdown(f"**Pagina {result.page_number}:**")
+                        st.code(page_info.raw_text[:1000] if page_info.raw_text else "(nessun testo estratto)", language=None)
+                        st.markdown("---")
+                    if len(unrecognized_pages) > 5:
+                        st.info(f"Mostrate solo le prime 5 pagine di {len(unrecognized_pages)} con tracking non riconosciuto.")
+                else:
+                    st.info("Nessuna pagina con tracking non riconosciuto (problema di match con Excel).")
         else:
             st.success("🎉 Tutte le etichette sono state matchate!")
 
