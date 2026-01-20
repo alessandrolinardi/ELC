@@ -97,6 +97,28 @@ class PDFProcessor:
         """
         return re.sub(r'\s+', '', tracking).upper()
 
+    def _detect_carrier_from_text(self, text: str) -> Optional[str]:
+        """
+        Rileva il corriere dal testo della pagina (cerca keywords).
+
+        Args:
+            text: Testo estratto dalla pagina PDF
+
+        Returns:
+            Nome del corriere o None se non rilevato
+        """
+        text_upper = text.upper()
+
+        # Cerca keywords specifiche per ogni corriere
+        if 'DHL' in text_upper or 'DEUTSCHE POST' in text_upper or 'MYDHL' in text_upper:
+            return 'DHL'
+        elif 'FEDEX' in text_upper or 'FEDERAL EXPRESS' in text_upper:
+            return 'FedEx'
+        elif 'UPS' in text_upper and 'PICKUP' not in text_upper:  # Evita false match con "PICKUP"
+            return 'UPS'
+
+        return None
+
     def extract_tracking_from_text(self, text: str) -> tuple[Optional[str], Optional[str]]:
         """
         Estrae il tracking number e identifica il corriere dal testo.
@@ -107,7 +129,23 @@ class PDFProcessor:
         Returns:
             Tuple (tracking_normalizzato, carrier) o (None, None) se non trovato
         """
-        # Fase 1: Prova i pattern specifici per corriere
+        # Fase 0: Rileva il corriere dal testo della pagina (keywords)
+        detected_carrier = self._detect_carrier_from_text(text)
+
+        # Fase 1: Se corriere rilevato, prova PRIMA i suoi pattern
+        if detected_carrier and detected_carrier in self.PATTERNS:
+            for pattern in self.PATTERNS[detected_carrier]:
+                match = pattern.search(text)
+                if match:
+                    try:
+                        tracking_raw = match.group(1)
+                    except IndexError:
+                        tracking_raw = match.group(0)
+                    tracking = self.normalize_tracking(tracking_raw)
+                    if self._validate_tracking(tracking, detected_carrier):
+                        return tracking, detected_carrier
+
+        # Fase 2: Prova tutti i pattern per corriere (ordine standard)
         for carrier, patterns in self.PATTERNS.items():
             for pattern in patterns:
                 match = pattern.search(text)
@@ -119,18 +157,21 @@ class PDFProcessor:
                         tracking_raw = match.group(0)
                     tracking = self.normalize_tracking(tracking_raw)
                     if self._validate_tracking(tracking, carrier):
-                        return tracking, carrier
+                        # Se avevamo rilevato un corriere dal testo, usa quello
+                        final_carrier = detected_carrier if detected_carrier else carrier
+                        return tracking, final_carrier
 
-        # Fase 2: Prova i pattern italiani (corriere sconosciuto)
+        # Fase 3: Prova i pattern italiani
         for pattern in self.ITALIAN_PATTERNS:
             match = pattern.search(text)
             if match:
                 tracking = self.normalize_tracking(match.group(1))
-                carrier = self._detect_carrier_from_tracking(tracking)
+                # Usa il corriere rilevato dal testo se disponibile
+                carrier = detected_carrier or self._detect_carrier_from_tracking(tracking)
                 if len(tracking) >= 8:  # Minimo ragionevole
                     return tracking, carrier
 
-        # Fase 3: Pattern generici come fallback
+        # Fase 4: Pattern generici come fallback
         for pattern in self.GENERIC_PATTERNS:
             match = pattern.search(text)
             if match:
@@ -139,7 +180,8 @@ class PDFProcessor:
                 except IndexError:
                     tracking_raw = match.group(0)
                 tracking = self.normalize_tracking(tracking_raw)
-                carrier = self._detect_carrier_from_tracking(tracking)
+                # Usa il corriere rilevato dal testo se disponibile
+                carrier = detected_carrier or self._detect_carrier_from_tracking(tracking)
                 if len(tracking) >= 10:  # Minimo per tracking generico
                     return tracking, carrier
 
