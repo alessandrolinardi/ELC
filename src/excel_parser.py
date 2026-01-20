@@ -46,11 +46,30 @@ class ExcelParser:
     """
 
     # Nomi colonne attesi (case-insensitive)
+    # IMPORTANTE: l'ordine conta - le prime corrispondenze hanno priorità
     COLUMN_MAPPINGS = {
         'order_id': ['id ordine marketplace', 'order id', 'id_ordine', 'orderid', 'id ordine'],
-        'tracking': ['tracking', 'tracking number', 'trackingnumber', 'tracking_number'],
+        'tracking': [
+            # Nomi specifici tracking (priorità alta)
+            'tracking', 'tracking number', 'trackingnumber', 'tracking_number',
+            'n. spedizione', 'numero spedizione', 'n spedizione',
+            'awb', 'waybill', 'lettera di vettura', 'ldv',
+            'codice tracking', 'codice spedizione',
+            'shipment number', 'shipment id',
+            'n. tracking', 'numero tracking',
+        ],
         'carrier': ['corriere', 'carrier', 'courier', 'vettore'],
     }
+
+    # Colonne da escludere (NON sono tracking anche se contengono numeri)
+    EXCLUDED_COLUMNS = [
+        'telefono', 'phone', 'tel', 'mobile', 'cellulare',
+        'fax', 'email', 'mail', 'e-mail',
+        'cap', 'zip', 'postal', 'postcode',
+        'peso', 'weight', 'kg',
+        'prezzo', 'price', 'costo', 'cost', 'importo', 'amount',
+        'quantità', 'quantity', 'qty',
+    ]
 
     @staticmethod
     def normalize_tracking(tracking: str) -> str:
@@ -99,6 +118,22 @@ class ExcelParser:
 
         return None
 
+    def _is_excluded_column(self, column_name: str) -> bool:
+        """
+        Verifica se una colonna è nella lista di esclusione.
+
+        Args:
+            column_name: Nome della colonna
+
+        Returns:
+            True se la colonna deve essere esclusa
+        """
+        col_lower = column_name.lower().strip()
+        for excluded in self.EXCLUDED_COLUMNS:
+            if excluded in col_lower:
+                return True
+        return False
+
     def _find_column(self, df: pd.DataFrame, column_type: str) -> Optional[str]:
         """
         Trova la colonna corrispondente nel DataFrame.
@@ -115,7 +150,11 @@ class ExcelParser:
 
         for name in possible_names:
             if name in df_columns_lower:
-                return df_columns_lower[name]
+                found_col = df_columns_lower[name]
+                # Per tracking, verifica che non sia una colonna esclusa
+                if column_type == 'tracking' and self._is_excluded_column(found_col):
+                    continue
+                return found_col
 
         return None
 
