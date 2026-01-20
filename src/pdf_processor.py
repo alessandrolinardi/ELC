@@ -166,6 +166,33 @@ class PDFProcessor:
                 return 'FedEx'
         return None
 
+    def _is_phone_number(self, number: str) -> bool:
+        """
+        Verifica se un numero sembra essere un numero di telefono.
+
+        Args:
+            number: Numero da verificare
+
+        Returns:
+            True se sembra un numero di telefono
+        """
+        if not number or not number.isdigit():
+            return False
+
+        # Numeri di telefono italiani (con prefisso 39)
+        # Formato: 39XXXXXXXXXX (12 cifre) o 39XXXXXXXXXXX (13 cifre)
+        if number.startswith('39') and len(number) in [12, 13]:
+            # Dopo il 39, i cellulari iniziano con 3
+            if len(number) >= 3 and number[2] == '3':
+                return True
+
+        # Numeri di telefono senza prefisso internazionale
+        # Cellulari italiani: 3XXXXXXXXX (10 cifre)
+        if number.startswith('3') and len(number) == 10:
+            return True
+
+        return False
+
     def _validate_tracking(self, tracking: str, carrier: str) -> bool:
         """
         Validazione base del tracking number.
@@ -183,6 +210,10 @@ class PDFProcessor:
 
         # Rimuovi caratteri non validi che potrebbero essere stati catturati
         tracking = re.sub(r'[^A-Z0-9]', '', tracking.upper())
+
+        # Escludi numeri di telefono
+        if self._is_phone_number(tracking):
+            return False
 
         if not tracking:
             return False

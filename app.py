@@ -152,11 +152,12 @@ def label_sorter_page():
 
     with col1:
         st.markdown("### 📄 PDF Etichette")
-        pdf_file = st.file_uploader(
-            "Carica il PDF con le etichette",
+        pdf_files = st.file_uploader(
+            "Carica i PDF con le etichette",
             type=["pdf"],
             key="pdf_uploader",
-            help="Un PDF con una etichetta per pagina (DHL, FedEx, UPS)",
+            help="Uno o più PDF con etichette (DHL, FedEx, UPS). Verranno uniti automaticamente.",
+            accept_multiple_files=True,
             on_change=lambda: st.session_state.update({'label_sorter_results': None})
         )
 
@@ -189,16 +190,22 @@ def label_sorter_page():
     process_button = st.button(
         "🚀 Elabora",
         type="primary",
-        disabled=not (pdf_file and excel_file),
+        disabled=not (pdf_files and excel_file),
         use_container_width=True,
         key="label_sorter_process"
     )
 
     # Elaborazione
-    if process_button and pdf_file and excel_file:
+    if process_button and pdf_files and excel_file:
         # Security checks
-        if not check_file_size(pdf_file, MAX_FILE_SIZE_MB):
-            st.error(f"❌ File PDF troppo grande. Massimo: {MAX_FILE_SIZE_MB}MB")
+        total_pdf_size = 0
+        for pdf_file in pdf_files:
+            if not check_file_size(pdf_file, MAX_FILE_SIZE_MB):
+                st.error(f"❌ File PDF '{pdf_file.name}' troppo grande. Massimo: {MAX_FILE_SIZE_MB}MB")
+                st.stop()
+            total_pdf_size += get_file_size_mb(pdf_file)
+        if total_pdf_size > MAX_FILE_SIZE_MB * 2:  # Allow more for multiple files
+            st.error(f"❌ Dimensione totale PDF troppo grande ({total_pdf_size:.1f}MB). Massimo: {MAX_FILE_SIZE_MB * 2}MB")
             st.stop()
         if not check_file_size(excel_file, MAX_FILE_SIZE_MB):
             st.error(f"❌ File Excel troppo grande. Massimo: {MAX_FILE_SIZE_MB}MB")
@@ -213,11 +220,28 @@ def label_sorter_page():
                 pdf_processor = PDFProcessor()
                 excel_parser = ExcelParser()
 
-                # Step 1: Leggi PDF
-                with st.status("📄 Step 1/5: Lettura PDF...", expanded=True) as status:
-                    st.write("Caricamento file PDF...")
-                    pdf_bytes = pdf_file.read()
-                    st.write(f"✓ File caricato: {len(pdf_bytes):,} bytes")
+                # Step 1: Leggi e unisci PDF
+                with st.status(f"📄 Step 1/5: Lettura {len(pdf_files)} PDF...", expanded=True) as status:
+                    import fitz  # PyMuPDF for merging
+
+                    if len(pdf_files) == 1:
+                        st.write("Caricamento file PDF...")
+                        pdf_bytes = pdf_files[0].read()
+                        st.write(f"✓ File caricato: {len(pdf_bytes):,} bytes")
+                    else:
+                        st.write(f"Unione di {len(pdf_files)} file PDF...")
+                        merged_doc = fitz.open()
+                        for i, pdf_file in enumerate(pdf_files):
+                            pdf_file.seek(0)
+                            file_bytes = pdf_file.read()
+                            st.write(f"  → {pdf_file.name}: {len(file_bytes):,} bytes")
+                            temp_doc = fitz.open(stream=file_bytes, filetype="pdf")
+                            merged_doc.insert_pdf(temp_doc)
+                            temp_doc.close()
+                        # Save merged PDF to bytes
+                        pdf_bytes = merged_doc.tobytes()
+                        merged_doc.close()
+                        st.write(f"✓ PDF unito: {len(pdf_bytes):,} bytes totali")
 
                     st.write("Estrazione pagine e tracking...")
                     pdf_data = pdf_processor.process_pdf(pdf_bytes)
