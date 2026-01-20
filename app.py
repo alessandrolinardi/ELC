@@ -688,13 +688,13 @@ def zip_validator_page():
 
             preview_data.append({
                 "Città": r.city[:15] if r.city else "-",
-                "Via Orig.": (r.street[:18] + "..." if len(r.street) > 18 else r.street) if r.street else "-",
-                "Via Sugg.": (r.suggested_street[:18] + "..." if r.suggested_street and len(r.suggested_street) > 18 else r.suggested_street) if r.suggested_street else "-",
+                "Via Orig.": (r.street[:20] + "..." if len(r.street) > 20 else r.street) if r.street else "-",
+                "Via Sugg.": (r.suggested_street[:20] + "..." if r.suggested_street and len(r.suggested_street) > 20 else r.suggested_street) if r.suggested_street else "-",
                 "🛣️": street_stato,
                 "ZIP Orig.": r.original_zip,
                 "ZIP Sugg.": r.suggested_zip or "-",
                 "📮": zip_stato,
-                "Note": r.reason[:22] + "..." if len(r.reason) > 22 else r.reason
+                "Note": r.reason  # Full reason, no truncation
             })
 
         if preview_data:

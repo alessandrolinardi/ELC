@@ -699,6 +699,8 @@ class ZipValidator:
         Returns:
             Excel file as bytes
         """
+        from openpyxl.utils import get_column_letter
+
         df = original_df.copy()
         col_map = self._map_columns(df)
         zip_col = col_map.get('zip')
@@ -714,7 +716,21 @@ class ZipValidator:
                 df.at[result.row_index, street_col] = result.suggested_street
 
         output = BytesIO()
-        df.to_excel(output, index=False, engine='openpyxl')
+
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name='Corrected')
+            worksheet = writer.sheets['Corrected']
+
+            # Auto-fit column widths
+            for idx, col in enumerate(df.columns):
+                max_length = max(
+                    df[col].astype(str).map(len).max() if len(df) > 0 else 0,
+                    len(str(col))
+                ) + 2  # Add padding
+                # Cap at 50 chars width
+                column_width = min(max_length, 50)
+                worksheet.column_dimensions[get_column_letter(idx + 1)].width = column_width
+
         return output.getvalue()
 
     def generate_review_report(self, report: ValidationReport) -> bytes:
@@ -727,6 +743,8 @@ class ZipValidator:
         Returns:
             Excel file as bytes
         """
+        from openpyxl.utils import get_column_letter
+
         review_items = []
         for r in report.results:
             if not r.is_valid or not r.street_verified:
@@ -755,5 +773,19 @@ class ZipValidator:
 
         df = pd.DataFrame(review_items)
         output = BytesIO()
-        df.to_excel(output, index=False, engine='openpyxl')
+
+        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name='Review')
+            worksheet = writer.sheets['Review']
+
+            # Auto-fit column widths
+            for idx, col in enumerate(df.columns):
+                max_length = max(
+                    df[col].astype(str).map(len).max() if len(df) > 0 else 0,
+                    len(col)
+                ) + 2  # Add padding
+                # Cap at 60 chars width
+                column_width = min(max_length, 60)
+                worksheet.column_dimensions[get_column_letter(idx + 1)].width = column_width
+
         return output.getvalue()
