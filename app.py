@@ -5,6 +5,7 @@ App Streamlit multi-funzione per la gestione delle spedizioni.
 
 import io
 import csv
+import logging
 import requests
 from datetime import datetime, date, time, timedelta
 
@@ -21,6 +22,13 @@ from src.address_book import (
     add_address, update_address, delete_address, set_default_address,
     get_address_display_name, get_address_summary, Address, is_sheets_configured
 )
+from src.logging_config import setup_logging, get_streamlit_handler, DEBUG, INFO
+
+
+# Initialize logging (only once per session)
+if 'logging_initialized' not in st.session_state:
+    setup_logging(level=INFO, enable_console=False, enable_streamlit=True)
+    st.session_state.logging_initialized = True
 
 
 # ============================================================================
@@ -1364,6 +1372,46 @@ def main():
     )
 
     st.sidebar.markdown("---")
+
+    # Log viewer in sidebar (collapsible)
+    with st.sidebar.expander("📋 Log Viewer", expanded=False):
+        log_handler = get_streamlit_handler()
+        logs = log_handler.get_logs()
+
+        # Filter options
+        log_level = st.selectbox(
+            "Filtra per livello:",
+            options=["Tutti", "DEBUG", "INFO", "WARNING", "ERROR"],
+            index=0,
+            key="log_level_filter"
+        )
+
+        if log_level != "Tutti":
+            logs = [l for l in logs if l['level'] == log_level]
+
+        # Display logs
+        if logs:
+            st.caption(f"Ultimi {len(logs)} log")
+            for log in reversed(logs[-20:]):  # Show last 20
+                level_color = {
+                    'DEBUG': '🔵',
+                    'INFO': '🟢',
+                    'WARNING': '🟡',
+                    'ERROR': '🔴'
+                }.get(log['level'], '⚪')
+
+                st.markdown(
+                    f"<small>{level_color} <code>{log['timestamp'][-8:]}</code> "
+                    f"<b>{log['module']}</b>: {log['message'][:80]}</small>",
+                    unsafe_allow_html=True
+                )
+
+            if st.button("🗑️ Pulisci log", key="clear_logs"):
+                log_handler.clear()
+                st.rerun()
+        else:
+            st.info("Nessun log disponibile")
+
     st.sidebar.markdown(
         "<div style='font-size: 0.8rem; color: #888;'>"
         "ELC Tools v2.0<br>"

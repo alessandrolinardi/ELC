@@ -9,6 +9,10 @@ from typing import Optional
 
 from .pdf_processor import PageInfo, PDFData
 from .excel_parser import OrderInfo, ExcelData
+from .logging_config import get_logger
+
+# Logger per questo modulo
+logger = get_logger(__name__)
 
 
 class UnmatchedReason(Enum):
@@ -92,6 +96,10 @@ class Matcher:
 
                 # Salva per fuzzy matching
                 self._all_trackings.append((normalized, order))
+
+        logger.info(f"Matcher initialized: {len(self._all_trackings)} Excel trackings indexed, "
+                    f"{pdf_data.total_pages} PDF pages to match")
+        logger.debug(f"Tracking index has {len(self._tracking_index)} entries (including variants)")
 
     def _count_differences(self, s1: str, s2: str) -> int:
         """
@@ -194,19 +202,34 @@ class Matcher:
         Returns:
             MatchReport con i risultati
         """
+        logger.info("Starting matching process")
         matched = []
         unmatched = []
+
+        # Contatori per statistiche di match type
+        match_type_counts = {mt: 0 for mt in MatchType}
 
         for page in self.pdf_data.pages:
             result = self._match_page(page)
 
             if result.matched:
                 matched.append(result)
+                match_type_counts[result.match_type] += 1
+                logger.debug(f"Page {page.page_number}: MATCHED ({result.match_type.value}, {result.match_confidence}%)")
             else:
                 unmatched.append(result)
+                reason = result.unmatched_reason.value if result.unmatched_reason else "unknown"
+                logger.debug(f"Page {page.page_number}: UNMATCHED - {reason}")
 
         total = len(self.pdf_data.pages)
         match_rate = (len(matched) / total * 100) if total > 0 else 0
+
+        # Log match type statistics
+        type_stats = ", ".join(f"{mt.value}={count}" for mt, count in match_type_counts.items() if count > 0)
+        logger.info(f"Matching complete: {len(matched)}/{total} matched ({match_rate:.1f}%) - Types: {type_stats}")
+
+        if unmatched:
+            logger.warning(f"Unmatched pages: {[r.page_number for r in unmatched]}")
 
         return MatchReport(
             matched=matched,

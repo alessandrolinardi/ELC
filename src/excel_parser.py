@@ -14,6 +14,11 @@ from io import BytesIO, StringIO
 
 import pandas as pd
 
+from .logging_config import get_logger
+
+# Logger per questo modulo
+logger = get_logger(__name__)
+
 
 @dataclass
 class OrderInfo:
@@ -384,10 +389,12 @@ class ExcelParser:
         Raises:
             ExcelParserError: Se il file non può essere letto o mancano colonne
         """
+        logger.info(f"Parsing Excel file: {filename}")
         warnings = []
 
         # Leggi il file
         df = self._try_read_excel(file_input, filename)
+        logger.debug(f"DataFrame loaded: {len(df)} rows, columns: {df.columns.tolist()}")
 
         # Pulisci nomi colonne (rimuovi spazi extra, newlines)
         df.columns = [str(col).strip().replace('\n', ' ') for col in df.columns]
@@ -396,6 +403,8 @@ class ExcelParser:
         order_id_col = self._find_column(df, 'order_id')
         tracking_col = self._find_column(df, 'tracking')
         carrier_col = self._find_column(df, 'carrier')
+
+        logger.debug(f"Column mapping: order_id='{order_id_col}', tracking='{tracking_col}', carrier='{carrier_col}'")
 
         missing_cols = []
         if not order_id_col:
@@ -406,6 +415,7 @@ class ExcelParser:
             missing_cols.append("Corriere")
 
         if missing_cols:
+            logger.error(f"Missing required columns: {missing_cols}")
             raise ExcelParserError(
                 f"Colonne mancanti nel file Excel: {', '.join(missing_cols)}.\n"
                 f"Colonne trovate: {', '.join(df.columns.tolist())}"
@@ -413,10 +423,12 @@ class ExcelParser:
 
         # Estrai gli ordini
         orders = []
+        empty_tracking_count = 0
         for idx, row in df.iterrows():
             tracking = self.normalize_tracking(row[tracking_col])
 
             if not tracking:
+                empty_tracking_count += 1
                 warnings.append(f"Riga {idx + 2}: tracking vuoto, ignorata")
                 continue
 
@@ -431,6 +443,11 @@ class ExcelParser:
                 numeric_suffix=self.extract_numeric_suffix(order_id)
             )
             orders.append(order)
+
+        if empty_tracking_count > 0:
+            logger.warning(f"Skipped {empty_tracking_count} rows with empty tracking")
+
+        logger.info(f"Excel parsing complete: {len(orders)} orders extracted from {len(df)} rows")
 
         return ExcelData(
             orders=orders,

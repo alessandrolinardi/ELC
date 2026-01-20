@@ -11,6 +11,11 @@ from io import BytesIO
 
 import fitz  # PyMuPDF
 
+from .logging_config import get_logger
+
+# Logger per questo modulo
+logger = get_logger(__name__)
+
 
 @dataclass
 class PageInfo:
@@ -301,21 +306,30 @@ class PDFProcessor:
         Raises:
             ValueError: Se il PDF non può essere aperto
         """
+        logger.info("Starting PDF processing")
+
         try:
             if isinstance(pdf_input, str):
                 doc = fitz.open(pdf_input)
                 with open(pdf_input, 'rb') as f:
                     pdf_bytes = f.read()
+                logger.debug(f"Opened PDF from file path: {pdf_input}")
             elif isinstance(pdf_input, BytesIO):
                 pdf_bytes = pdf_input.getvalue()
                 doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+                logger.debug(f"Opened PDF from BytesIO: {len(pdf_bytes)} bytes")
             else:
                 pdf_bytes = pdf_input
                 doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+                logger.debug(f"Opened PDF from bytes: {len(pdf_bytes)} bytes")
         except Exception as e:
+            logger.error(f"Failed to open PDF: {e}")
             raise ValueError(f"Impossibile aprire il PDF: {str(e)}")
 
+        logger.info(f"PDF has {len(doc)} pages")
         pages = []
+        extracted_count = 0
+        failed_count = 0
 
         try:
             for page_num in range(len(doc)):
@@ -335,7 +349,15 @@ class PDFProcessor:
                         raw_text=text[:500]  # Limita per memoria
                     )
 
+                    if tracking:
+                        extracted_count += 1
+                        logger.debug(f"Page {page_num + 1}: extracted tracking={tracking}, carrier={carrier}")
+                    else:
+                        logger.debug(f"Page {page_num + 1}: no tracking found")
+
                 except Exception as e:
+                    failed_count += 1
+                    logger.warning(f"Page {page_num + 1}: extraction error - {e}")
                     page_info = PageInfo(
                         page_number=page_num + 1,
                         tracking=None,
@@ -347,6 +369,8 @@ class PDFProcessor:
                 pages.append(page_info)
         finally:
             doc.close()
+
+        logger.info(f"PDF processing complete: {extracted_count} tracking extracted, {failed_count} errors")
 
         return PDFData(
             pages=pages,

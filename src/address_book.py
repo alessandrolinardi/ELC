@@ -10,6 +10,11 @@ from dataclasses import dataclass, asdict
 import streamlit as st
 from supabase import create_client, Client
 
+from .logging_config import get_logger
+
+# Logger per questo modulo
+logger = get_logger(__name__)
+
 
 @dataclass
 class Address:
@@ -90,19 +95,20 @@ def load_addresses() -> list[Address]:
     try:
         client = _get_supabase_client()
         if client is None:
-            st.error("DEBUG: Supabase client is None - check secrets configuration")
+            logger.error("Supabase client is None - check secrets configuration")
             return []
 
         response = client.table("addresses").select("*").order("name").execute()
 
         if not response.data:
-            st.warning(f"DEBUG: No data returned from Supabase. Response: {response}")
+            logger.info("No addresses found in Supabase (empty table)")
             return []
 
         addresses = [Address.from_dict(row) for row in response.data]
+        logger.debug(f"Loaded {len(addresses)} addresses from Supabase")
         return addresses
     except Exception as e:
-        st.error(f"DEBUG: Error loading addresses: {e}")
+        logger.exception(f"Error loading addresses: {e}")
         return []
 
 
