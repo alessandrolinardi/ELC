@@ -32,6 +32,10 @@ class ExcelData:
     total_rows: int
     columns_found: list[str]
     warnings: list[str]
+    # Debug info: quali colonne sono state effettivamente usate
+    tracking_column_used: str = ""
+    order_id_column_used: str = ""
+    carrier_column_used: str = ""
 
 
 class ExcelParserError(Exception):
@@ -432,7 +436,10 @@ class ExcelParser:
             orders=orders,
             total_rows=len(df),
             columns_found=df.columns.tolist(),
-            warnings=warnings
+            warnings=warnings,
+            tracking_column_used=tracking_col or "",
+            order_id_column_used=order_id_col or "",
+            carrier_column_used=carrier_col or ""
         )
 
 
