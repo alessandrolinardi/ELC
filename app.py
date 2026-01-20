@@ -246,11 +246,12 @@ def label_sorter_page():
                     try:
                         excel_data = excel_parser.parse_excel(excel_bytes, excel_file.name)
                         st.write(f"✓ Ordini trovati: {len(excel_data.orders)}")
-                        st.write(f"✓ Colonne: {', '.join(excel_data.columns_found[:5])}...")
+                        st.write(f"✓ Colonne trovate: {excel_data.columns_found}")
+                        st.write(f"✓ Colonna Tracking usata: **{excel_data.tracking_column_used}**")
 
                         if excel_data.orders:
                             first_orders = [(o.order_id, o.tracking) for o in excel_data.orders[:3]]
-                            st.write(f"✓ Primi ordini: {first_orders}")
+                            st.write(f"✓ Primi ordini (ID, Tracking): {first_orders}")
 
                         status.update(label=f"✅ Step 2/5: Excel letto ({len(excel_data.orders)} ordini)", state="complete")
                     except ExcelParserError as e:
