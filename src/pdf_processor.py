@@ -37,34 +37,52 @@ class PDFProcessor:
     """
 
     # Pattern per estrazione tracking - compilati per performance
+    # Organizzati per priorità: prima i pattern più specifici, poi quelli generici
     PATTERNS = {
-        'UPS': re.compile(
-            r'TRACKING\s*#\s*:\s*([A-Z0-9\s]+?)(?:\s{2,}|\n|$)',
-            re.IGNORECASE
-        ),
-        'FedEx': re.compile(
-            r'TRK#\s*\[?\d+\]?\s*([\d\s]+?)(?:\s{2,}|\n|$)',
-            re.IGNORECASE
-        ),
-        'DHL': re.compile(
-            r'WAYBILL\s+([\d\s]+?)(?:\s{2,}|\n|$)',
-            re.IGNORECASE
-        ),
+        'UPS': [
+            # Pattern specifici UPS
+            re.compile(r'TRACKING\s*#\s*:?\s*([A-Z0-9\s]+?)(?:\s{2,}|\n|$)', re.IGNORECASE),
+            re.compile(r'TRACKING\s*NUMBER\s*:?\s*([A-Z0-9\s]+?)(?:\s{2,}|\n|$)', re.IGNORECASE),
+            re.compile(r'1Z\s*[A-Z0-9]{6}\s*[A-Z0-9]{10}', re.IGNORECASE),
+            re.compile(r'1Z[A-Z0-9]{16}', re.IGNORECASE),
+        ],
+        'FedEx': [
+            # Pattern specifici FedEx
+            re.compile(r'TRK#\s*\[?\d*\]?\s*([\d\s]+?)(?:\s{2,}|\n|$)', re.IGNORECASE),
+            re.compile(r'TRACKING\s*(?:ID|#|NUMBER)?\s*:?\s*(\d[\d\s]{10,}?)(?:\s{2,}|\n|$)', re.IGNORECASE),
+            re.compile(r'(\d{12,22})', re.IGNORECASE),  # FedEx 12-22 digits
+            re.compile(r'(\d{4}\s+\d{4}\s+\d{4}(?:\s+\d{4})?)', re.IGNORECASE),  # Spaced format
+        ],
+        'DHL': [
+            # Pattern specifici DHL
+            re.compile(r'WAYBILL\s*:?\s*([\d\s]+?)(?:\s{2,}|\n|$)', re.IGNORECASE),
+            re.compile(r'AWB\s*:?\s*([\d\s]+?)(?:\s{2,}|\n|$)', re.IGNORECASE),
+            re.compile(r'SHIPMENT\s*(?:NUMBER|ID|#)?\s*:?\s*([\d\s]+?)(?:\s{2,}|\n|$)', re.IGNORECASE),
+            re.compile(r'JD\d{18}', re.IGNORECASE),  # DHL JD format
+            re.compile(r'(\d{10,11})', re.IGNORECASE),  # DHL 10-11 digits
+        ],
     }
 
-    # Pattern alternativi per maggiore copertura
-    ALT_PATTERNS = {
-        'UPS': re.compile(
-            r'1Z\s*[A-Z0-9\s]{15,}',
-            re.IGNORECASE
-        ),
-        'FedEx': re.compile(
-            r'\b(\d{4}\s*\d{4}\s*\d{4}\s*\d{4})\b'
-        ),
-        'DHL': re.compile(
-            r'\b(\d{2}\s*\d{4}\s*\d{4})\b'
-        ),
-    }
+    # Pattern italiani per le etichette
+    ITALIAN_PATTERNS = [
+        re.compile(r'N\.?\s*SPEDIZIONE\s*:?\s*([A-Z0-9\s]+?)(?:\s{2,}|\n|$)', re.IGNORECASE),
+        re.compile(r'LETTERA\s*(?:DI)?\s*VETTURA\s*:?\s*([A-Z0-9\s]+?)(?:\s{2,}|\n|$)', re.IGNORECASE),
+        re.compile(r'CODICE\s*TRACCIAMENTO\s*:?\s*([A-Z0-9\s]+?)(?:\s{2,}|\n|$)', re.IGNORECASE),
+        re.compile(r'SPEDIZIONE\s*N[°.]?\s*:?\s*([A-Z0-9\s]+?)(?:\s{2,}|\n|$)', re.IGNORECASE),
+        re.compile(r'NUMERO\s*SPEDIZIONE\s*:?\s*([A-Z0-9\s]+?)(?:\s{2,}|\n|$)', re.IGNORECASE),
+    ]
+
+    # Pattern generico come fallback - cerca sequenze alfanumeriche tipiche di tracking
+    GENERIC_PATTERNS = [
+        # UPS format: 1Z + 16 chars
+        re.compile(r'\b(1Z[A-Z0-9]{16})\b', re.IGNORECASE),
+        # Long numeric sequences (12-22 digits) - common for FedEx, DHL
+        re.compile(r'\b(\d{12,22})\b'),
+        # JD + 18 digits (DHL eCommerce)
+        re.compile(r'\b(JD\d{18})\b', re.IGNORECASE),
+        # Alphanumeric with at least 10 chars near tracking keywords
+        re.compile(r'(?:tracking|spedizione|waybill|awb)[^\n]{0,30}?([A-Z0-9]{10,20})', re.IGNORECASE),
+    ]
 
     @staticmethod
     def normalize_tracking(tracking: str) -> str:
@@ -89,28 +107,69 @@ class PDFProcessor:
         Returns:
             Tuple (tracking_normalizzato, carrier) o (None, None) se non trovato
         """
-        # Prova prima i pattern principali
-        for carrier, pattern in self.PATTERNS.items():
+        # Fase 1: Prova i pattern specifici per corriere
+        for carrier, patterns in self.PATTERNS.items():
+            for pattern in patterns:
+                match = pattern.search(text)
+                if match:
+                    # Prendi il gruppo 1 se esiste, altrimenti gruppo 0
+                    try:
+                        tracking_raw = match.group(1)
+                    except IndexError:
+                        tracking_raw = match.group(0)
+                    tracking = self.normalize_tracking(tracking_raw)
+                    if self._validate_tracking(tracking, carrier):
+                        return tracking, carrier
+
+        # Fase 2: Prova i pattern italiani (corriere sconosciuto)
+        for pattern in self.ITALIAN_PATTERNS:
             match = pattern.search(text)
             if match:
                 tracking = self.normalize_tracking(match.group(1))
-                # Validazione base del tracking
-                if self._validate_tracking(tracking, carrier):
+                carrier = self._detect_carrier_from_tracking(tracking)
+                if len(tracking) >= 8:  # Minimo ragionevole
                     return tracking, carrier
 
-        # Fallback ai pattern alternativi
-        for carrier, pattern in self.ALT_PATTERNS.items():
+        # Fase 3: Pattern generici come fallback
+        for pattern in self.GENERIC_PATTERNS:
             match = pattern.search(text)
             if match:
-                tracking = self.normalize_tracking(match.group(0) if carrier == 'UPS' else match.group(1))
-                if self._validate_tracking(tracking, carrier):
+                try:
+                    tracking_raw = match.group(1)
+                except IndexError:
+                    tracking_raw = match.group(0)
+                tracking = self.normalize_tracking(tracking_raw)
+                carrier = self._detect_carrier_from_tracking(tracking)
+                if len(tracking) >= 10:  # Minimo per tracking generico
                     return tracking, carrier
 
         return None, None
 
+    def _detect_carrier_from_tracking(self, tracking: str) -> Optional[str]:
+        """
+        Tenta di identificare il corriere dal formato del tracking.
+
+        Args:
+            tracking: Tracking normalizzato
+
+        Returns:
+            Nome del corriere o None
+        """
+        if tracking.startswith('1Z'):
+            return 'UPS'
+        elif tracking.startswith('JD'):
+            return 'DHL'
+        elif tracking.isdigit():
+            if len(tracking) == 10 or len(tracking) == 11:
+                return 'DHL'
+            elif len(tracking) >= 12:
+                return 'FedEx'
+        return None
+
     def _validate_tracking(self, tracking: str, carrier: str) -> bool:
         """
         Validazione base del tracking number.
+        Più permissiva per non escludere formati validi.
 
         Args:
             tracking: Tracking normalizzato
@@ -122,25 +181,37 @@ class PDFProcessor:
         if not tracking:
             return False
 
-        # Lunghezze tipiche per corriere
+        # Rimuovi caratteri non validi che potrebbero essere stati catturati
+        tracking = re.sub(r'[^A-Z0-9]', '', tracking.upper())
+
+        if not tracking:
+            return False
+
+        # Lunghezze minime per corriere (più permissive)
         min_lengths = {
-            'UPS': 18,      # 1Z + 16 caratteri
-            'FedEx': 12,    # 12-15 cifre
-            'DHL': 10,      # 10 cifre
+            'UPS': 10,      # Può essere più corto in alcuni formati
+            'FedEx': 10,    # Minimo ragionevole
+            'DHL': 10,      # 10 cifre standard
         }
 
         min_len = min_lengths.get(carrier, 8)
 
         if carrier == 'UPS':
-            # UPS tracking inizia con 1Z
-            return tracking.startswith('1Z') and len(tracking) >= min_len
+            # UPS tracking tipicamente inizia con 1Z, ma accetta altri formati
+            if tracking.startswith('1Z'):
+                return len(tracking) >= 18
+            # Accetta anche altri formati UPS
+            return len(tracking) >= min_len and tracking.isalnum()
         elif carrier == 'FedEx':
-            # FedEx è numerico
-            return tracking.isdigit() and len(tracking) >= min_len
+            # FedEx è tipicamente numerico ma può avere lettere in alcuni formati
+            return len(tracking) >= min_len
         elif carrier == 'DHL':
-            # DHL è numerico
-            return tracking.isdigit() and len(tracking) >= min_len
+            # DHL può essere numerico o iniziare con JD
+            if tracking.startswith('JD'):
+                return len(tracking) >= 10
+            return len(tracking) >= min_len
 
+        # Per corrieri non specificati, accetta qualsiasi tracking abbastanza lungo
         return len(tracking) >= min_len
 
     def process_pdf(self, pdf_input: bytes | BytesIO | str) -> PDFData:
