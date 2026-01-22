@@ -908,6 +908,9 @@ class ZipValidator:
 
         return True, ""  # Unknown province, assume OK
 
+    # Default phone number to use when phone is missing
+    DEFAULT_PHONE = "393445556667"
+
     def _map_columns(self, df: pd.DataFrame) -> dict:
         """Map DataFrame columns to expected fields."""
         col_map = {}
@@ -921,6 +924,8 @@ class ZipValidator:
             'state': ['state', 'province', 'provincia', 'regione'],
             'zip': ['zip', 'cap', 'postal code', 'postcode', 'zip code'],
             'country': ['country', 'paese', 'nazione'],
+            'phone': ['phone', 'telefono', 'tel', 'phone number', 'telephone'],
+            'cash_on_delivery': ['cash on delivery', 'cod', 'contrassegno', 'cash_on_delivery'],
         }
 
         for field, possible_names in mappings.items():
@@ -937,8 +942,15 @@ class ZipValidator:
         report: ValidationReport
     ) -> bytes:
         """
-        Generate corrected Excel with auto-corrections applied (ZIP, street, country).
+        Generate corrected Excel with auto-corrections applied.
         Maintains the exact same column structure as the input file.
+
+        Corrections applied:
+        - ZIP: Corrected if auto_corrected flag is set
+        - Street: Corrected if street_auto_corrected flag is set
+        - Country: Filled from address detection if empty
+        - Phone: Filled with default (393445556667) if empty
+        - Cash on Delivery: Always set to 0
 
         Args:
             original_df: Original DataFrame
@@ -953,7 +965,10 @@ class ZipValidator:
         col_map = self._map_columns(df)
         zip_col = col_map.get('zip')
         street_col = col_map.get('street')
-        country_col = col_map.get('country')  # May be None if not in input
+        city_col = col_map.get('city')
+        country_col = col_map.get('country')
+        phone_col = col_map.get('phone')
+        cod_col = col_map.get('cash_on_delivery')
 
         for result in report.results:
             # Correct ZIP
@@ -964,12 +979,26 @@ class ZipValidator:
             if result.street_auto_corrected and result.suggested_street and street_col:
                 df.at[result.row_index, street_col] = result.suggested_street
 
-            # Fill country code only if column exists in input
+            # Fill country code if column exists and value is empty
             if country_col:
                 current_country = df.at[result.row_index, country_col]
-                # Fill if empty or if we detected a more specific country
-                if not str(current_country).strip() or (result.country_detected and str(current_country).strip().upper() in ('', 'IT', 'ITALY')):
-                    df.at[result.row_index, country_col] = result.country_code
+                if not str(current_country).strip() or str(current_country).lower() == 'nan':
+                    # Detect country from address
+                    street_val = str(df.at[result.row_index, street_col]) if street_col else ''
+                    city_val = str(df.at[result.row_index, city_col]) if city_col else ''
+                    zip_val = str(df.at[result.row_index, zip_col]) if zip_col else ''
+                    detected_country = self.detect_country_code(zip_val, city_val, street_val)
+                    df.at[result.row_index, country_col] = detected_country
+
+            # Fill phone with default if empty
+            if phone_col:
+                current_phone = df.at[result.row_index, phone_col]
+                if pd.isna(current_phone) or not str(current_phone).strip() or str(current_phone).lower() == 'nan':
+                    df.at[result.row_index, phone_col] = self.DEFAULT_PHONE
+
+            # Set Cash on Delivery to 0 always
+            if cod_col:
+                df.at[result.row_index, cod_col] = 0
 
         output = BytesIO()
 
