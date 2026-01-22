@@ -302,6 +302,29 @@ class ZipValidator:
 
         return "", street
 
+    def _looks_like_valid_italian_street(self, street: str) -> bool:
+        """
+        Check if street follows a valid Italian street format.
+        This is a heuristic fallback when API can't verify the street.
+
+        Returns:
+            True if street format appears valid
+        """
+        if not street:
+            return False
+
+        street_lower = street.lower().strip()
+
+        # Check if starts with a known Italian street prefix
+        for prefix in self.STREET_PREFIXES:
+            if street_lower.startswith(prefix + ' ') or street_lower.startswith(prefix + '.'):
+                # Must have something after the prefix (the actual street name)
+                remaining = street_lower[len(prefix):].strip(' .')
+                if len(remaining) >= 2:  # At least 2 chars for a name
+                    return True
+
+        return False
+
     def _string_similarity(self, s1: str, s2: str) -> float:
         """
         Calculate similarity ratio between two strings.
@@ -474,6 +497,7 @@ class ZipValidator:
     def _search_similar_streets(self, street: str, city: str) -> list[tuple[str, float, dict]]:
         """
         Search for streets similar to the input in the given city.
+        Uses multiple search strategies for better results.
 
         Args:
             street: Street to search for
@@ -485,11 +509,14 @@ class ZipValidator:
         if not street or not city:
             return []
 
+        matches = []
+        seen_streets = set()
+
         try:
-            # Search with partial street name
+            # Extract street components
             street_prefix, street_name = self._extract_street_name(street)
 
-            # Try searching with free-form query
+            # Strategy 1: Free-form query with full street
             params = {
                 'q': f"{street}, {city}, Italy",
                 'format': 'json',
@@ -501,21 +528,91 @@ class ZipValidator:
             response.raise_for_status()
             results = response.json()
 
-            matches = []
             for result in results:
                 address = result.get('address', {})
-                found_street = address.get('road') or address.get('pedestrian') or address.get('footway')
+                found_street = (
+                    address.get('road') or
+                    address.get('pedestrian') or
+                    address.get('footway') or
+                    address.get('residential')
+                )
 
-                if found_street:
+                if found_street and found_street.lower() not in seen_streets:
+                    seen_streets.add(found_street.lower())
                     similarity = self._string_similarity(street, found_street)
                     matches.append((found_street, similarity, result))
+
+            # Strategy 2: If no good matches, try structured search
+            if not matches or max(m[1] for m in matches) < 0.70:
+                time.sleep(self.REQUEST_DELAY)
+
+                params = {
+                    'street': street,
+                    'city': city,
+                    'country': 'Italy',
+                    'format': 'json',
+                    'addressdetails': 1,
+                    'limit': 5
+                }
+
+                response = self.session.get(self.NOMINATIM_URL, params=params, timeout=10)
+                response.raise_for_status()
+                results = response.json()
+
+                for result in results:
+                    address = result.get('address', {})
+                    found_street = (
+                        address.get('road') or
+                        address.get('pedestrian') or
+                        address.get('footway') or
+                        address.get('residential')
+                    )
+
+                    if found_street and found_street.lower() not in seen_streets:
+                        seen_streets.add(found_street.lower())
+                        similarity = self._string_similarity(street, found_street)
+                        matches.append((found_street, similarity, result))
+
+            # Strategy 3: If still no good matches and we have a street name, try just the name
+            if street_name and (not matches or max(m[1] for m in matches) < 0.70):
+                time.sleep(self.REQUEST_DELAY)
+
+                # Try with just the street name (without number)
+                street_name_no_num = re.sub(r',?\s*\d+.*$', '', street_name).strip()
+                if street_name_no_num:
+                    search_term = f"{street_prefix} {street_name_no_num}".strip() if street_prefix else street_name_no_num
+
+                    params = {
+                        'q': f"{search_term}, {city}, Italy",
+                        'format': 'json',
+                        'addressdetails': 1,
+                        'limit': 10
+                    }
+
+                    response = self.session.get(self.NOMINATIM_URL, params=params, timeout=10)
+                    response.raise_for_status()
+                    results = response.json()
+
+                    for result in results:
+                        address = result.get('address', {})
+                        found_street = (
+                            address.get('road') or
+                            address.get('pedestrian') or
+                            address.get('footway') or
+                            address.get('residential')
+                        )
+
+                        if found_street and found_street.lower() not in seen_streets:
+                            seen_streets.add(found_street.lower())
+                            similarity = self._string_similarity(street, found_street)
+                            matches.append((found_street, similarity, result))
 
             # Sort by similarity
             matches.sort(key=lambda x: x[1], reverse=True)
             return matches
 
         except Exception:
-            return []
+            return matches if matches else []
 
     def validate_address(
         self,
@@ -575,8 +672,8 @@ class ZipValidator:
 
         is_city_only = result.get('_city_only', False)
 
-        # Check street match
-        if original_street and not is_city_only:
+        # Check street match - always try even if city-only match
+        if original_street:
             address_data = result.get('address', {})
             found_street = (
                 address_data.get('road') or
@@ -585,7 +682,8 @@ class ZipValidator:
                 address_data.get('residential')
             )
 
-            if found_street:
+            # If we have a street from the response (not city-only), compare it
+            if found_street and not is_city_only:
                 similarity = self._string_similarity(original_street, found_street)
 
                 if similarity >= 0.95:
@@ -611,20 +709,46 @@ class ZipValidator:
                         if best_score >= 0.70:
                             suggested_street = best_match
                             street_confidence = int(best_score * 100)
+                        elif best_score >= 0.60:
+                            # Lower threshold for suggestion (not auto-correct)
+                            suggested_street = best_match
+                            street_confidence = int(best_score * 100)
             else:
-                # No street in response - search for similar
+                # No street in response OR city-only match - search for similar streets
                 time.sleep(self.REQUEST_DELAY)
                 similar = self._search_similar_streets(original_street, city)
                 if similar:
                     best_match, best_score, best_result = similar[0]
-                    if best_score >= 0.70:
+                    if best_score >= 0.85:
+                        # High confidence - verify the street
+                        street_verified = True
+                        suggested_street = best_match if best_score < 0.95 else None
+                        street_confidence = int(best_score * 100)
+                    elif best_score >= 0.70:
                         suggested_street = best_match
                         street_confidence = int(best_score * 100)
-                        # Also get ZIP from best match if available
-                        if best_result:
-                            better_zip = best_result.get('address', {}).get('postcode')
-                            if better_zip and ';' not in better_zip:
-                                result = best_result
+                    elif best_score >= 0.60:
+                        # Lower threshold for suggestion only
+                        suggested_street = best_match
+                        street_confidence = int(best_score * 100)
+
+                    # Also get ZIP from best match if available and we're in city-only mode
+                    if best_result and is_city_only and best_score >= 0.70:
+                        better_zip = best_result.get('address', {}).get('postcode')
+                        if better_zip and ';' not in better_zip:
+                            result = best_result
+                else:
+                    # API didn't find a matching street - check if format looks valid
+                    # This prevents showing "-" for correctly formatted streets that OSM doesn't have
+                    if self._looks_like_valid_italian_street(original_street):
+                        if not is_city_only:
+                            # API found the address location, just not the street name
+                            street_verified = True
+                            street_confidence = 75
+                        else:
+                            # City-only match with valid street format - low confidence verify
+                            street_verified = True
+                            street_confidence = 60
 
         # Now validate ZIP
         suggested_zip = result.get('address', {}).get('postcode')
