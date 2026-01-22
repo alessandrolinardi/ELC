@@ -686,6 +686,24 @@ def zip_validator_page():
             else:
                 street_stato = "-"
 
+            # Country status
+            if r.country_detected:
+                country_stato = f"{r.country_code}*"  # Asterisk indicates auto-detected
+            else:
+                country_stato = r.country_code
+
+            # Phone status
+            if r.phone_missing:
+                phone_stato = "📱+"  # Will be filled with default
+            else:
+                phone_stato = "✓"
+
+            # COD status
+            if r.cod_changed:
+                cod_stato = f"{r.original_cod}→0"  # Show what will change
+            else:
+                cod_stato = "0"
+
             preview_data.append({
                 "Città": r.city[:15] if r.city else "-",
                 "Via Orig.": (r.street[:20] + "..." if len(r.street) > 20 else r.street) if r.street else "-",
@@ -694,6 +712,9 @@ def zip_validator_page():
                 "ZIP Orig.": r.original_zip,
                 "ZIP Sugg.": r.suggested_zip or "-",
                 "📮": zip_stato,
+                "🌍": country_stato,
+                "📱": phone_stato,
+                "💰": cod_stato,
                 "Note": r.reason  # Full reason, no truncation
             })
 
@@ -717,6 +738,13 @@ def zip_validator_page():
                         hide_index=True,
                         height=400  # Scrollable height
                     )
+
+            # Legend for symbols
+            st.caption(
+                "**Legenda:** ✓ = OK | 🔄 = Auto-corretto | ⚠️ = Da verificare | "
+                "🌍 IT* = Paese auto-rilevato | 📱+ = Tel. default (393445556667) | "
+                "💰 50→0 = COD impostato a 0"
+            )
 
         # Downloads - now using pre-generated files from session state
         st.markdown("### 📥 Download")
