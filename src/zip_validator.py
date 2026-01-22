@@ -74,6 +74,59 @@ class ZipValidator:
         'venice': ('30100', '30176'),
     }
 
+    # Italian province codes to ZIP prefix mapping
+    # Province code -> list of valid ZIP prefixes (first 2-3 digits)
+    ITALIAN_PROVINCE_ZIP = {
+        # Piemonte
+        'TO': ['10'], 'VC': ['13'], 'NO': ['28'], 'CN': ['12'], 'AT': ['14'],
+        'AL': ['15'], 'BI': ['13'], 'VB': ['28'],
+        # Valle d'Aosta
+        'AO': ['11'],
+        # Lombardia
+        'VA': ['21'], 'CO': ['22'], 'SO': ['23'], 'MI': ['20'], 'BG': ['24'],
+        'BS': ['25'], 'PV': ['27'], 'CR': ['26'], 'MN': ['46'], 'LC': ['23'],
+        'LO': ['26'], 'MB': ['20'],
+        # Trentino-Alto Adige
+        'BZ': ['39'], 'TN': ['38'],
+        # Veneto
+        'VR': ['37'], 'VI': ['36'], 'BL': ['32'], 'TV': ['31'], 'VE': ['30'],
+        'PD': ['35'], 'RO': ['45'],
+        # Friuli-Venezia Giulia
+        'UD': ['33'], 'GO': ['34'], 'TS': ['34'], 'PN': ['33'],
+        # Liguria
+        'IM': ['18'], 'SV': ['17'], 'GE': ['16'], 'SP': ['19'],
+        # Emilia-Romagna
+        'PC': ['29'], 'PR': ['43'], 'RE': ['42'], 'MO': ['41'], 'BO': ['40'],
+        'FE': ['44'], 'RA': ['48'], 'FC': ['47'], 'RN': ['47'],
+        # Toscana
+        'MS': ['54'], 'LU': ['55'], 'PT': ['51'], 'FI': ['50'], 'LI': ['57'],
+        'PI': ['56'], 'AR': ['52'], 'SI': ['53'], 'GR': ['58'], 'PO': ['59'],
+        # Umbria
+        'PG': ['06'], 'TR': ['05'],
+        # Marche
+        'PU': ['61'], 'AN': ['60'], 'MC': ['62'], 'AP': ['63'], 'FM': ['63'],
+        # Lazio
+        'VT': ['01'], 'RI': ['02'], 'RM': ['00'], 'LT': ['04'], 'FR': ['03'],
+        # Abruzzo
+        'AQ': ['67'], 'TE': ['64'], 'PE': ['65'], 'CH': ['66'],
+        # Molise
+        'CB': ['86'], 'IS': ['86'],
+        # Campania
+        'CE': ['81'], 'BN': ['82'], 'NA': ['80'], 'AV': ['83'], 'SA': ['84'],
+        # Puglia
+        'FG': ['71'], 'BA': ['70'], 'TA': ['74'], 'BR': ['72'], 'LE': ['73'],
+        'BT': ['76'],
+        # Basilicata
+        'PZ': ['85'], 'MT': ['75'],
+        # Calabria
+        'CS': ['87'], 'CZ': ['88'], 'RC': ['89'], 'KR': ['88'], 'VV': ['89'],
+        # Sicilia
+        'TP': ['91'], 'PA': ['90'], 'ME': ['98'], 'AG': ['92'], 'CL': ['93'],
+        'EN': ['94'], 'CT': ['95'], 'RG': ['97'], 'SR': ['96'],
+        # Sardegna
+        'SS': ['07'], 'NU': ['08'], 'CA': ['09'], 'OR': ['09'], 'SU': ['09'],
+    }
+
     # Common Italian street prefixes for normalization
     STREET_PREFIXES = [
         'via', 'viale', 'piazza', 'piazzale', 'corso', 'largo', 'vicolo',
@@ -682,6 +735,7 @@ class ZipValidator:
             )
 
         has_country_col = col_map.get('country') is not None
+        has_state_col = col_map.get('state') is not None
         total = len(df)
 
         for idx, row in df.iterrows():
@@ -690,8 +744,19 @@ class ZipValidator:
 
             name = str(row.get(col_map.get('name', ''), ''))
             street = str(row.get(col_map.get('street', ''), ''))
+            # Combine Street 1 and Street 2 if both present
+            street2 = str(row.get(col_map.get('street2', ''), '')) if col_map.get('street2') else ''
+            if street2 and street2.lower() != 'nan':
+                full_street = f"{street}, {street2}".strip(', ')
+            else:
+                full_street = street
             city = str(row.get(col_map['city'], ''))
             original_zip = str(row.get(col_map['zip'], ''))
+            # Get state/province if available (for ZIP validation)
+            state = ''
+            if has_state_col:
+                state_raw = row.get(col_map['state'], '')
+                state = str(state_raw).strip() if pd.notna(state_raw) else ''
 
             # Get country from column or auto-detect
             country_detected = False
@@ -745,11 +810,20 @@ class ZipValidator:
                 skipped_count += 1
                 continue
 
-            # Validate full address
+            # Validate full address (use combined street for better results)
             (
                 is_valid, suggested_zip, confidence, reason,
                 street_verified, suggested_street, street_confidence
-            ) = self.validate_address(street, city, original_zip, country)
+            ) = self.validate_address(full_street, city, original_zip, country)
+
+            # Cross-validate ZIP with province if state column is available
+            if state and suggested_zip:
+                province_valid, province_msg = self._validate_zip_province(suggested_zip, state)
+                if not province_valid:
+                    # ZIP doesn't match province - flag for review
+                    is_valid = False
+                    confidence = min(confidence, 70)
+                    reason = f"{reason}. Warning: {province_msg}"
 
             # Determine ZIP action
             zip_auto_correct = not is_valid and confidence >= self.confidence_threshold and suggested_zip
@@ -765,7 +839,7 @@ class ZipValidator:
                 row_index=idx,
                 name=name,
                 city=city,
-                street=street,
+                street=street,  # Keep original street (not combined) for output
                 original_zip=original_zip,
                 suggested_zip=suggested_zip,
                 confidence=confidence,
@@ -808,6 +882,32 @@ class ZipValidator:
             street_corrected_count=street_corrected_count
         )
 
+    def _validate_zip_province(self, zip_code: str, province: str) -> tuple[bool, str]:
+        """
+        Validate if ZIP code matches the Italian province.
+
+        Args:
+            zip_code: 5-digit Italian CAP
+            province: 2-letter Italian province code (e.g., 'MI', 'RM')
+
+        Returns:
+            Tuple (is_valid, message)
+        """
+        if not province or not zip_code or len(zip_code) != 5:
+            return True, ""  # Can't validate, assume OK
+
+        province_upper = province.upper().strip()
+        zip_prefix = zip_code[:2]
+
+        if province_upper in self.ITALIAN_PROVINCE_ZIP:
+            valid_prefixes = self.ITALIAN_PROVINCE_ZIP[province_upper]
+            if zip_prefix in valid_prefixes:
+                return True, f"ZIP matches province {province_upper}"
+            else:
+                return False, f"ZIP {zip_code} doesn't match province {province_upper} (expected {valid_prefixes[0]}xxx)"
+
+        return True, ""  # Unknown province, assume OK
+
     def _map_columns(self, df: pd.DataFrame) -> dict:
         """Map DataFrame columns to expected fields."""
         col_map = {}
@@ -816,7 +916,9 @@ class ZipValidator:
         mappings = {
             'name': ['name', 'nome', 'customer name'],
             'street': ['street 1', 'street', 'address', 'indirizzo', 'via'],
+            'street2': ['street 2', 'street2', 'address 2', 'indirizzo 2'],
             'city': ['city', 'città', 'citta'],
+            'state': ['state', 'province', 'provincia', 'regione'],
             'zip': ['zip', 'cap', 'postal code', 'postcode', 'zip code'],
             'country': ['country', 'paese', 'nazione'],
         }
@@ -835,7 +937,8 @@ class ZipValidator:
         report: ValidationReport
     ) -> bytes:
         """
-        Generate corrected Excel with auto-corrections applied (ZIP, street, and country).
+        Generate corrected Excel with auto-corrections applied (ZIP, street, country).
+        Maintains the exact same column structure as the input file.
 
         Args:
             original_df: Original DataFrame
@@ -850,12 +953,7 @@ class ZipValidator:
         col_map = self._map_columns(df)
         zip_col = col_map.get('zip')
         street_col = col_map.get('street')
-        country_col = col_map.get('country')
-
-        # Add Country column if it doesn't exist
-        if not country_col:
-            country_col = 'Country'
-            df[country_col] = ''
+        country_col = col_map.get('country')  # May be None if not in input
 
         for result in report.results:
             # Correct ZIP
@@ -866,10 +964,12 @@ class ZipValidator:
             if result.street_auto_corrected and result.suggested_street and street_col:
                 df.at[result.row_index, street_col] = result.suggested_street
 
-            # Add/update country code (always fill if detected or if empty)
-            current_country = df.at[result.row_index, country_col] if country_col in df.columns else ''
-            if result.country_detected or not str(current_country).strip():
-                df.at[result.row_index, country_col] = result.country_code
+            # Fill country code only if column exists in input
+            if country_col:
+                current_country = df.at[result.row_index, country_col]
+                # Fill if empty or if we detected a more specific country
+                if not str(current_country).strip() or (result.country_detected and str(current_country).strip().upper() in ('', 'IT', 'ITALY')):
+                    df.at[result.row_index, country_col] = result.country_code
 
         output = BytesIO()
 
