@@ -35,6 +35,11 @@ class ValidationResult:
     # Country code (ISO 3166-1 alpha-2)
     country_code: str = "IT"
     country_detected: bool = False  # True if country was auto-detected
+    # Additional corrections tracking
+    phone_missing: bool = False      # True if phone was empty and will be filled
+    original_phone: str = ""         # Original phone value
+    cod_changed: bool = False        # True if Cash on Delivery will be set to 0
+    original_cod: str = ""           # Original COD value
 
 
 @dataclass
@@ -758,6 +763,25 @@ class ZipValidator:
                 state_raw = row.get(col_map['state'], '')
                 state = str(state_raw).strip() if pd.notna(state_raw) else ''
 
+            # Get phone if available - track if missing
+            phone_col = col_map.get('phone')
+            original_phone = ''
+            phone_missing = False
+            if phone_col:
+                phone_raw = row.get(phone_col, '')
+                original_phone = str(phone_raw).strip() if pd.notna(phone_raw) else ''
+                phone_missing = not original_phone or original_phone.lower() == 'nan'
+
+            # Get Cash on Delivery if available - track if needs to be set to 0
+            cod_col = col_map.get('cash_on_delivery')
+            original_cod = ''
+            cod_changed = False
+            if cod_col:
+                cod_raw = row.get(cod_col, '')
+                original_cod = str(cod_raw).strip() if pd.notna(cod_raw) else ''
+                # COD needs to be changed if it's not 0
+                cod_changed = original_cod != '0' and original_cod.lower() != 'nan' and original_cod != ''
+
             # Get country from column or auto-detect
             country_detected = False
             if has_country_col:
@@ -805,7 +829,11 @@ class ZipValidator:
                     street_verified=True,
                     street_confidence=100,
                     country_code=country,
-                    country_detected=country_detected
+                    country_detected=country_detected,
+                    phone_missing=phone_missing,
+                    original_phone=original_phone,
+                    cod_changed=cod_changed,
+                    original_cod=original_cod
                 ))
                 skipped_count += 1
                 continue
@@ -851,7 +879,11 @@ class ZipValidator:
                 street_confidence=street_confidence,
                 street_auto_corrected=street_auto_correct,
                 country_code=country,
-                country_detected=country_detected
+                country_detected=country_detected,
+                phone_missing=phone_missing,
+                original_phone=original_phone,
+                cod_changed=cod_changed,
+                original_cod=original_cod
             )
             results.append(result)
 
