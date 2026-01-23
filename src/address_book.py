@@ -22,6 +22,7 @@ class Address:
     id: str
     name: str
     company: str
+    contact_name: str  # Full name of contact person
     street: str
     zip: str
     city: str
@@ -37,6 +38,7 @@ class Address:
             "id": self.id,
             "name": self.name,
             "company": self.company,
+            "contact_name": self.contact_name,
             "street": self.street,
             "zip": self.zip,
             "city": self.city,
@@ -54,6 +56,7 @@ class Address:
             id=data.get("id", ""),
             name=data.get("name", ""),
             company=data.get("company", ""),
+            contact_name=data.get("contact_name", ""),
             street=data.get("street", ""),
             zip=data.get("zip", ""),
             city=data.get("city", ""),
@@ -180,6 +183,7 @@ def add_address(
     city: str,
     province: str = "",
     reference: str = "",
+    contact_name: str = "",
     is_default: bool = False
 ) -> Optional[str]:
     """
@@ -193,6 +197,7 @@ def add_address(
         city: City name
         province: Province code (optional)
         reference: Reference/phone (optional)
+        contact_name: Full name of contact person (optional)
         is_default: Whether this should be the default address
 
     Returns:
@@ -226,6 +231,7 @@ def add_address(
             id=new_id,
             name=name,
             company=company,
+            contact_name=contact_name,
             street=street,
             zip=zip_code,
             city=city,
