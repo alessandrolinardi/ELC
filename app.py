@@ -782,6 +782,7 @@ def send_pickup_request(
     time_start: time,
     time_end: time,
     company: str,
+    contact_name: str,
     address: str,
     zip_code: str,
     city: str,
@@ -842,6 +843,7 @@ def send_pickup_request(
 
         # === Address - Individual fields ===
         "company": company,
+        "contact_name": contact_name,
         "address": address,
         "zip_code": zip_code,
         "city": city,
@@ -849,8 +851,8 @@ def send_pickup_request(
         "reference": reference,
         # Address - Formatted
         "full_address": f"{address}, {zip_code} {city} ({province})",
-        "address_line1": address,
-        "address_line2": f"{zip_code} {city} ({province})",
+        "address_line1": f"{company} - {contact_name}" if contact_name else company,
+        "address_line2": f"{address}, {zip_code} {city} ({province})",
 
         # === Package Details - Individual fields ===
         "num_packages": num_packages,
@@ -925,6 +927,7 @@ def address_book_management():
             with st.form("add_address_form"):
                 new_name = st.text_input("Nome indirizzo *", placeholder="Es: Magazzino Bologna")
                 new_company = st.text_input("Azienda *", value="Estée Lauder")
+                new_contact_name = st.text_input("Nome e Cognome referente", placeholder="Mario Rossi")
                 new_street = st.text_input("Indirizzo *", placeholder="Via Emilia 50")
 
                 col1, col2, col3 = st.columns([1, 2, 1])
@@ -935,7 +938,7 @@ def address_book_management():
                 with col3:
                     new_province = st.text_input("Provincia", placeholder="BO", max_chars=2)
 
-                new_reference = st.text_input("Riferimento/Telefono", placeholder="051 123456")
+                new_reference = st.text_input("Telefono", placeholder="051 123456")
                 new_is_default = st.checkbox("Imposta come predefinito")
 
                 col_save, col_cancel = st.columns(2)
@@ -949,6 +952,7 @@ def address_book_management():
                             result = add_address(
                                 name=new_name,
                                 company=new_company,
+                                contact_name=new_contact_name or "",
                                 street=new_street,
                                 zip_code=new_zip,
                                 city=new_city,
@@ -983,9 +987,11 @@ def address_book_management():
                         default_label = " **(PREDEFINITO)**" if addr.is_default else ""
                         st.markdown(f"**{prefix} {addr.name}**{default_label}")
                         st.caption(f"{addr.company}")
+                        if addr.contact_name:
+                            st.caption(f"Referente: {addr.contact_name}")
                         st.caption(f"{addr.street}, {addr.zip} {addr.city} ({addr.province})")
                         if addr.reference:
-                            st.caption(f"Rif: {addr.reference}")
+                            st.caption(f"Tel: {addr.reference}")
 
                     with col_actions:
                         if not addr.is_default:
@@ -1116,6 +1122,7 @@ def pickup_request_page():
     if is_from_book:
         st.caption("🔒 Indirizzo selezionato dalla rubrica")
         company = selected_address.company
+        contact_name = selected_address.contact_name
         address = selected_address.street
         zip_code = selected_address.zip
         city = selected_address.city
@@ -1126,15 +1133,22 @@ def pickup_request_page():
         col1, col2 = st.columns(2)
         with col1:
             st.markdown(f"**Azienda:** {company}")
+            st.markdown(f"**Referente:** {contact_name if contact_name else '-'}")
             st.markdown(f"**Indirizzo:** {address}")
         with col2:
             st.markdown(f"**CAP / Città:** {zip_code} {city} ({province})")
-            st.markdown(f"**Riferimento:** {reference if reference else '-'}")
+            st.markdown(f"**Telefono:** {reference if reference else '-'}")
     else:
         company = st.text_input(
             "Azienda *",
             value="Estée Lauder",
             key="company"
+        )
+
+        contact_name = st.text_input(
+            "Nome e Cognome referente",
+            placeholder="Mario Rossi",
+            key="contact_name"
         )
 
         address = st.text_input(
@@ -1169,7 +1183,7 @@ def pickup_request_page():
             )
 
         reference = st.text_input(
-            "Riferimento/Telefono",
+            "Telefono",
             placeholder="02 1234567",
             key="reference"
         )
@@ -1357,6 +1371,7 @@ def pickup_request_page():
                         time_start=time_start,
                         time_end=time_end,
                         company=company,
+                        contact_name=contact_name or "",
                         address=address,
                         zip_code=zip_code,
                         city=city,
