@@ -1122,14 +1122,14 @@ def pickup_request_page():
         province = selected_address.province
         reference = selected_address.reference
 
-        # Show read-only display
+        # Show read-only display using markdown (avoids caching issues with disabled inputs)
         col1, col2 = st.columns(2)
         with col1:
-            st.text_input("Azienda", value=company, disabled=True, key="company_display")
-            st.text_input("Indirizzo", value=address, disabled=True, key="address_display")
+            st.markdown(f"**Azienda:** {company}")
+            st.markdown(f"**Indirizzo:** {address}")
         with col2:
-            st.text_input("CAP / Città", value=f"{zip_code} {city} ({province})", disabled=True, key="location_display")
-            st.text_input("Riferimento", value=reference, disabled=True, key="reference_display")
+            st.markdown(f"**CAP / Città:** {zip_code} {city} ({province})")
+            st.markdown(f"**Riferimento:** {reference if reference else '-'}")
     else:
         company = st.text_input(
             "Azienda *",
