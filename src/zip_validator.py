@@ -1156,11 +1156,25 @@ class ZipValidator:
             if cod_col:
                 df.at[result.row_index, cod_col] = 0
 
+        # Ensure ZIP column is stored as string with leading zeros preserved
+        if zip_col:
+            df[zip_col] = df[zip_col].apply(
+                lambda x: str(x).zfill(5) if pd.notna(x) and str(x).strip() else x
+            )
+
         output = BytesIO()
 
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             df.to_excel(writer, index=False, sheet_name='Corrected')
             worksheet = writer.sheets['Corrected']
+
+            # Format ZIP column as text to preserve leading zeros
+            if zip_col:
+                from openpyxl.styles import numbers
+                zip_col_idx = list(df.columns).index(zip_col) + 1  # 1-indexed
+                for row in range(2, len(df) + 2):  # Start from row 2 (after header)
+                    cell = worksheet.cell(row=row, column=zip_col_idx)
+                    cell.number_format = numbers.FORMAT_TEXT
 
             # Auto-fit column widths
             for idx, col in enumerate(df.columns):
