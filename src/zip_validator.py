@@ -1,6 +1,8 @@
 """
 Address Validator Module
-Validates and corrects addresses (ZIP codes and streets) using OpenStreetMap Nominatim API.
+Validates and corrects addresses (ZIP codes and streets) using Photon API (primary)
+with Nominatim API fallback. Photon has no rate limits (~10x faster), while Nominatim
+is used as a reliable fallback.
 """
 
 import time
@@ -63,13 +65,17 @@ class ValidationReport:
 
 class ZipValidator:
     """
-    Validates addresses using OpenStreetMap Nominatim API.
+    Validates addresses using Photon API (primary) with Nominatim fallback.
     Validates both ZIP codes and street names.
     """
 
+    # Photon API - primary (no rate limits, ~10x faster)
+    PHOTON_URL = "https://photon.komoot.io/api/"
+    # Nominatim API - fallback (1 req/sec limit)
     NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
     USER_AGENT = "ELC-AddressValidator/2.0 (shipping label tool)"
-    REQUEST_DELAY = 1.1  # seconds between requests (Nominatim limit)
+    REQUEST_DELAY = 1.1  # seconds between requests (Nominatim only)
+    PHOTON_DELAY = 0.1  # minimal delay for Photon (courtesy)
 
     # Italian CAP ranges for major cities (for additional validation)
     ITALIAN_CAP_RANGES = {
@@ -156,6 +162,138 @@ class ZipValidator:
         self.street_confidence_threshold = street_confidence_threshold
         self.session = requests.Session()
         self.session.headers.update({'User-Agent': self.USER_AGENT})
+        self._photon_available = True  # Track if Photon is responding
+
+    def _query_photon(self, query: str, limit: int = 5) -> list[dict]:
+        """
+        Query Photon API for address.
+
+        Photon returns GeoJSON format. This method converts it to a format
+        compatible with our Nominatim-based processing.
+
+        Args:
+            query: Free-text address query (e.g., "Via Roma 10, Milano, Italy")
+            limit: Maximum results to return
+
+        Returns:
+            List of results in Nominatim-compatible format, or empty list on failure
+        """
+        if not self._photon_available:
+            return []
+
+        try:
+            params = {
+                'q': query,
+                'limit': limit,
+                'lang': 'it'  # Italian language for better results
+            }
+
+            logger.debug(f"Photon query: '{query}'")
+            response = self.session.get(self.PHOTON_URL, params=params, timeout=5)
+            response.raise_for_status()
+            data = response.json()
+
+            # Convert GeoJSON features to Nominatim-like format
+            results = []
+            for feature in data.get('features', []):
+                props = feature.get('properties', {})
+
+                # Build address dict matching Nominatim structure
+                address = {
+                    'road': props.get('street'),
+                    'house_number': props.get('housenumber'),
+                    'postcode': props.get('postcode'),
+                    'city': props.get('city'),
+                    'town': props.get('city'),  # Photon uses 'city' for both
+                    'village': props.get('city'),
+                    'state': props.get('state'),
+                    'country': props.get('country'),
+                    'country_code': props.get('countrycode', '').upper() if props.get('countrycode') else None
+                }
+
+                # Create Nominatim-compatible result
+                result = {
+                    'display_name': props.get('name', ''),
+                    'address': address,
+                    'lat': feature.get('geometry', {}).get('coordinates', [0, 0])[1],
+                    'lon': feature.get('geometry', {}).get('coordinates', [0, 0])[0],
+                    '_source': 'photon'  # Track source
+                }
+                results.append(result)
+
+            if results:
+                logger.debug(f"Photon found {len(results)} results")
+            return results
+
+        except requests.exceptions.Timeout:
+            logger.warning("Photon API timeout - will use Nominatim fallback")
+            self._photon_available = False
+            return []
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"Photon API error: {e} - will use Nominatim fallback")
+            self._photon_available = False
+            return []
+        except Exception as e:
+            logger.debug(f"Photon query failed: {e}")
+            return []
+
+    def _query_address(self, street: str, city: str, country: str = "Italy") -> Optional[dict]:
+        """
+        Query address using hybrid approach: Photon first, Nominatim fallback.
+
+        Args:
+            street: Street address
+            city: City name
+            country: Country name
+
+        Returns:
+            First matching result or None
+        """
+        # Try Photon first (fast, no rate limits)
+        if self._photon_available:
+            # Build query string for Photon
+            parts = [p for p in [street, city, country] if p and p.strip()]
+            query = ", ".join(parts)
+
+            results = self._query_photon(query, limit=5)
+            if results:
+                # Find best result - prefer ones with street info
+                best_result = None
+                best_with_street = None
+
+                for result in results:
+                    address = result.get('address', {})
+                    result_city = (address.get('city') or address.get('town') or '').lower()
+
+                    # Check if result matches our city
+                    if city.lower() in result_city or result_city in city.lower():
+                        if address.get('road'):
+                            # Has street info - this is ideal
+                            best_with_street = result
+                            break
+                        elif best_result is None:
+                            best_result = result
+
+                # Use result with street if found, otherwise city-level result
+                if best_with_street:
+                    time.sleep(self.PHOTON_DELAY)
+                    return best_with_street
+                elif best_result:
+                    best_result['_city_only'] = True  # Mark as city-only match
+                    time.sleep(self.PHOTON_DELAY)
+                    return best_result
+
+                # If first result doesn't match city, still return it but mark as uncertain
+                if results:
+                    result = results[0]
+                    if not result.get('address', {}).get('road'):
+                        result['_city_only'] = True
+                    time.sleep(self.PHOTON_DELAY)
+                    return result
+
+        # Fallback to Nominatim
+        logger.debug("Using Nominatim fallback")
+        return self._query_nominatim(street, city, country)
 
     def detect_country_code(self, zip_code: str, city: str = "", street: str = "") -> str:
         """
@@ -447,7 +585,7 @@ class ZipValidator:
 
     def _query_nominatim(self, street: str, city: str, country: str = "Italy") -> Optional[dict]:
         """
-        Query Nominatim API for address.
+        Query Nominatim API for address (used as fallback when Photon fails).
 
         Args:
             street: Street address
@@ -475,7 +613,9 @@ class ZipValidator:
 
             if results:
                 logger.debug(f"Nominatim found address match")
-                return results[0]
+                result = results[0]
+                result['_source'] = 'nominatim'
+                return result
 
             # Fallback: city-only search
             logger.debug(f"No street match, trying city-only for '{city}'")
@@ -495,6 +635,7 @@ class ZipValidator:
             if results:
                 result = results[0]
                 result['_city_only'] = True  # Mark as city-only match
+                result['_source'] = 'nominatim'
                 logger.debug(f"Nominatim city-only match found")
                 return result
 
@@ -507,7 +648,7 @@ class ZipValidator:
     def _search_similar_streets(self, street: str, city: str) -> list[tuple[str, float, dict]]:
         """
         Search for streets similar to the input in the given city.
-        Uses multiple search strategies for better results.
+        Uses Photon API (fast) with Nominatim fallback.
 
         Args:
             street: Street to search for
@@ -526,7 +667,52 @@ class ZipValidator:
             # Extract street components
             street_prefix, street_name = self._extract_street_name(street)
 
-            # Strategy 1: Free-form query with full street
+            # Strategy 1: Try Photon API first (fast, no rate limits)
+            if self._photon_available:
+                query = f"{street}, {city}, Italy"
+                results = self._query_photon(query, limit=10)
+
+                for result in results:
+                    address = result.get('address', {})
+                    found_street = address.get('road')
+
+                    if found_street and found_street.lower() not in seen_streets:
+                        seen_streets.add(found_street.lower())
+                        similarity = self._string_similarity(street, found_street)
+                        matches.append((found_street, similarity, result))
+
+                # If Photon found good matches, we're done
+                if matches and max(m[1] for m in matches) >= 0.70:
+                    time.sleep(self.PHOTON_DELAY)
+                    matches.sort(key=lambda x: x[1], reverse=True)
+                    return matches
+
+                # Try alternate query without street number
+                if street_name:
+                    street_name_no_num = re.sub(r',?\s*\d+.*$', '', street_name).strip()
+                    if street_name_no_num:
+                        search_term = f"{street_prefix} {street_name_no_num}".strip() if street_prefix else street_name_no_num
+                        query = f"{search_term}, {city}, Italy"
+                        time.sleep(self.PHOTON_DELAY)
+                        results = self._query_photon(query, limit=10)
+
+                        for result in results:
+                            address = result.get('address', {})
+                            found_street = address.get('road')
+
+                            if found_street and found_street.lower() not in seen_streets:
+                                seen_streets.add(found_street.lower())
+                                similarity = self._string_similarity(street, found_street)
+                                matches.append((found_street, similarity, result))
+
+                # If we have good matches from Photon, return them
+                if matches and max(m[1] for m in matches) >= 0.60:
+                    time.sleep(self.PHOTON_DELAY)
+                    matches.sort(key=lambda x: x[1], reverse=True)
+                    return matches
+
+            # Strategy 2: Nominatim fallback (if Photon failed or gave poor results)
+            logger.debug("Using Nominatim for street search")
             params = {
                 'q': f"{street}, {city}, Italy",
                 'format': 'json',
@@ -552,7 +738,7 @@ class ZipValidator:
                     similarity = self._string_similarity(street, found_street)
                     matches.append((found_street, similarity, result))
 
-            # Strategy 2: If no good matches, try structured search
+            # Strategy 3: If still no good matches, try structured Nominatim search
             if not matches or max(m[1] for m in matches) < 0.70:
                 time.sleep(self.REQUEST_DELAY)
 
@@ -582,40 +768,6 @@ class ZipValidator:
                         seen_streets.add(found_street.lower())
                         similarity = self._string_similarity(street, found_street)
                         matches.append((found_street, similarity, result))
-
-            # Strategy 3: If still no good matches and we have a street name, try just the name
-            if street_name and (not matches or max(m[1] for m in matches) < 0.70):
-                time.sleep(self.REQUEST_DELAY)
-
-                # Try with just the street name (without number)
-                street_name_no_num = re.sub(r',?\s*\d+.*$', '', street_name).strip()
-                if street_name_no_num:
-                    search_term = f"{street_prefix} {street_name_no_num}".strip() if street_prefix else street_name_no_num
-
-                    params = {
-                        'q': f"{search_term}, {city}, Italy",
-                        'format': 'json',
-                        'addressdetails': 1,
-                        'limit': 10
-                    }
-
-                    response = self.session.get(self.NOMINATIM_URL, params=params, timeout=10)
-                    response.raise_for_status()
-                    results = response.json()
-
-                    for result in results:
-                        address = result.get('address', {})
-                        found_street = (
-                            address.get('road') or
-                            address.get('pedestrian') or
-                            address.get('footway') or
-                            address.get('residential')
-                        )
-
-                        if found_street and found_street.lower() not in seen_streets:
-                            seen_streets.add(found_street.lower())
-                            similarity = self._string_similarity(street, found_street)
-                            matches.append((found_street, similarity, result))
 
             # Sort by similarity
             matches.sort(key=lambda x: x[1], reverse=True)
@@ -674,8 +826,8 @@ class ZipValidator:
 
         working_zip = cleaned_zip
 
-        # Query Nominatim with full address
-        result = self._query_nominatim(original_street or "", city, "Italy")
+        # Query address using hybrid approach (Photon first, then Nominatim)
+        result = self._query_address(original_street or "", city, "Italy")
 
         if not result:
             return False, None, 0, "Address not found in API", False, None, 0
@@ -712,7 +864,7 @@ class ZipValidator:
                     street_confidence = int(similarity * 100)
                 else:
                     # Low match - search for similar streets
-                    time.sleep(self.REQUEST_DELAY)
+                    # Note: _search_similar_streets handles its own rate limiting
                     similar = self._search_similar_streets(original_street, city)
                     if similar:
                         best_match, best_score, _ = similar[0]
@@ -725,7 +877,7 @@ class ZipValidator:
                             street_confidence = int(best_score * 100)
             else:
                 # No street in response OR city-only match - search for similar streets
-                time.sleep(self.REQUEST_DELAY)
+                # Note: _search_similar_streets handles its own rate limiting
                 similar = self._search_similar_streets(original_street, city)
                 if similar:
                     best_match, best_score, best_result = similar[0]
@@ -1037,8 +1189,11 @@ class ZipValidator:
             elif street_auto_correct:
                 street_corrected_count += 1
 
-            # Rate limiting
-            time.sleep(self.REQUEST_DELAY)
+            # Rate limiting - use minimal delay when Photon is available
+            if self._photon_available:
+                time.sleep(self.PHOTON_DELAY)
+            else:
+                time.sleep(self.REQUEST_DELAY)
 
         logger.info(
             f"Validation complete: {valid_count} valid, {corrected_count} corrected, "
