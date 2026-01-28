@@ -13,6 +13,11 @@ from difflib import SequenceMatcher
 
 import pandas as pd
 
+from .logging_config import get_logger
+
+# Logger for this module
+logger = get_logger(__name__)
+
 
 @dataclass
 class ValidationResult:
@@ -463,14 +468,17 @@ class ZipValidator:
                 'limit': 1
             }
 
+            logger.debug(f"Nominatim query: street='{street}', city='{city}'")
             response = self.session.get(self.NOMINATIM_URL, params=params, timeout=10)
             response.raise_for_status()
             results = response.json()
 
             if results:
+                logger.debug(f"Nominatim found address match")
                 return results[0]
 
             # Fallback: city-only search
+            logger.debug(f"No street match, trying city-only for '{city}'")
             time.sleep(self.REQUEST_DELAY)
             params = {
                 'city': city,
@@ -487,8 +495,10 @@ class ZipValidator:
             if results:
                 result = results[0]
                 result['_city_only'] = True  # Mark as city-only match
+                logger.debug(f"Nominatim city-only match found")
                 return result
 
+            logger.warning(f"Nominatim: no results for '{city}'")
             return None
 
         except Exception:
@@ -846,6 +856,8 @@ class ZipValidator:
         Returns:
             ValidationReport with all results
         """
+        logger.info(f"Starting address validation for {len(df)} rows")
+
         results = []
         valid_count = 0
         corrected_count = 0
@@ -855,6 +867,7 @@ class ZipValidator:
         street_corrected_count = 0
 
         col_map = self._map_columns(df)
+        logger.debug(f"Column mapping: {col_map}")
 
         # Only city and zip are required; country can be auto-detected
         if not all(col_map.get(k) for k in ['city', 'zip']):
@@ -1027,6 +1040,14 @@ class ZipValidator:
             # Rate limiting
             time.sleep(self.REQUEST_DELAY)
 
+        logger.info(
+            f"Validation complete: {valid_count} valid, {corrected_count} corrected, "
+            f"{review_count} need review, {skipped_count} skipped"
+        )
+        logger.info(
+            f"Streets: {street_verified_count} verified, {street_corrected_count} corrected"
+        )
+
         return ValidationReport(
             total_rows=total,
             valid_count=valid_count,
@@ -1116,6 +1137,8 @@ class ZipValidator:
             Excel file as bytes
         """
         from openpyxl.utils import get_column_letter
+
+        logger.info(f"Generating corrected Excel with {len(report.results)} rows")
 
         df = original_df.copy()
         col_map = self._map_columns(df)
