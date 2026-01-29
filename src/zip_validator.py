@@ -898,11 +898,12 @@ class ZipValidator:
         is_transposition = self._is_transposition(working_zip, suggested_zip)
         is_adjacent_swap = self._is_adjacent_swap(working_zip, suggested_zip)
 
-        # If original ZIP was incomplete (1-3 digits), don't suggest corrections
-        # because the padded ZIP is likely wrong - flag for manual review
+        # If original ZIP was incomplete (1-3 digits), suggest the padded version
+        # not the API's suggestion - flag for manual review
         if was_incomplete and diff_count >= 2:
             confidence = 50
-            reason = f"Original ZIP '{original_zip_raw}' incomplete - needs manual review"
+            reason = f"Original ZIP '{original_zip_raw}' padded to '{working_zip}' - needs manual review"
+            return False, working_zip, confidence, reason, street_verified, suggested_street, street_confidence
         elif is_city_only:
             confidence = 70
             reason = "City-level match only (street not found)"
