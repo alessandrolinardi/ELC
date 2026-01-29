@@ -150,6 +150,17 @@ class ZipValidator:
         'lungomare', 'lungotevere', 'lungarno', 'circonvallazione'
     ]
 
+    # Location prefixes that should be moved to Street 2 (Centro Commerciale, etc.)
+    LOCATION_PREFIXES = [
+        'centro commerciale', 'c.c.', 'cc ', 'c/c',
+        'centro direzionale', 'c.d.', 'cd ',
+        'centro servizi', 'c.s.',
+        'parco commerciale', 'p.c.',
+        'galleria commerciale',
+        'outlet',
+        'retail park',
+    ]
+
     def __init__(self, confidence_threshold: int = 90, street_confidence_threshold: int = 85):
         """
         Initialize validator.
@@ -535,6 +546,98 @@ class ZipValidator:
         if house_num:
             return f"{suggested_name} {house_num}"
         return suggested_name
+
+    def _extract_location_prefix(self, street: str) -> tuple[str, str]:
+        """
+        Extract location prefix (Centro Commerciale, C.C., etc.) from street address.
+
+        Moves location prefixes to a separate field so the actual street address
+        can be validated independently.
+
+        Example:
+            Input: "C.C. Le Grange Via Casilina inc. Via Marello 1"
+            Output: ("Via Casilina inc. Via Marello 1", "C.C. Le Grange")
+
+        Args:
+            street: Original street address
+
+        Returns:
+            Tuple of (clean_street, extracted_location)
+            If no location prefix found, returns (original_street, "")
+        """
+        if not street:
+            return street, ""
+
+        street_lower = street.lower().strip()
+
+        # Check if the street starts with a location prefix
+        for prefix in self.LOCATION_PREFIXES:
+            if street_lower.startswith(prefix):
+                # Find where the actual street address begins (first STREET_PREFIXES match)
+                for street_prefix in self.STREET_PREFIXES:
+                    match = re.search(rf'\b{street_prefix}\.?\s+', street_lower)
+                    if match:
+                        # Extract: everything before street prefix is location, rest is street
+                        location = street[:match.start()].strip()
+                        clean_street = street[match.start():].strip()
+                        return clean_street, location
+
+                # No standard street prefix found - return original
+                return street, ""
+
+        return street, ""
+
+    def preprocess_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Preprocess DataFrame by moving location prefixes from Street 1 to Street 2.
+
+        This separates Centro Commerciale, C.C., etc. from the actual street address
+        to improve validation accuracy.
+
+        Args:
+            df: Original DataFrame
+
+        Returns:
+            Preprocessed DataFrame with locations moved to Street 2
+        """
+        df = df.copy()
+        col_map = self._map_columns(df)
+        street_col = col_map.get('street')
+        street2_col = col_map.get('street2')
+
+        if not street_col:
+            return df
+
+        # If Street 2 column doesn't exist, create it
+        if not street2_col:
+            # Find position after Street 1 to insert Street 2
+            if street_col in df.columns:
+                col_idx = df.columns.get_loc(street_col) + 1
+                df.insert(col_idx, 'Street 2', '')
+                street2_col = 'Street 2'
+            else:
+                df['Street 2'] = ''
+                street2_col = 'Street 2'
+
+        # Process each row
+        for idx, row in df.iterrows():
+            street_val = str(row.get(street_col, '')).strip()
+            street2_val = str(row.get(street2_col, '')).strip()
+
+            # Skip if Street 1 is empty or nan
+            if not street_val or street_val.lower() == 'nan':
+                continue
+
+            # Extract location prefix
+            clean_street, location = self._extract_location_prefix(street_val)
+
+            # If we extracted a location and Street 2 is empty, move it
+            if location and (not street2_val or street2_val.lower() == 'nan'):
+                df.at[idx, street_col] = clean_street
+                df.at[idx, street2_col] = location
+                logger.debug(f"Row {idx}: Moved '{location}' to Street 2, keeping '{clean_street}' in Street 1")
+
+        return df
 
     def _looks_like_valid_italian_street(self, street: str) -> bool:
         """
@@ -1060,19 +1163,26 @@ class ZipValidator:
     def process_dataframe(
         self,
         df: pd.DataFrame,
-        progress_callback: Optional[Callable[[int, int, str], None]] = None
-    ) -> ValidationReport:
+        progress_callback: Optional[Callable[[int, int, str], None]] = None,
+        preprocess: bool = True
+    ) -> tuple[ValidationReport, pd.DataFrame]:
         """
         Process entire DataFrame and validate all addresses.
 
         Args:
             df: DataFrame with address data
             progress_callback: Optional callback(current, total, message)
+            preprocess: If True, preprocess to move Centro Commerciale to Street 2
 
         Returns:
-            ValidationReport with all results
+            Tuple of (ValidationReport with all results, preprocessed DataFrame)
         """
         logger.info(f"Starting address validation for {len(df)} rows")
+
+        # Preprocess to move Centro Commerciale info to Street 2
+        if preprocess:
+            logger.info("Preprocessing: moving location prefixes to Street 2")
+            df = self.preprocess_dataframe(df)
 
         results = []
         valid_count = 0
@@ -1265,7 +1375,7 @@ class ZipValidator:
             f"Streets: {street_verified_count} verified, {street_corrected_count} corrected"
         )
 
-        return ValidationReport(
+        report = ValidationReport(
             total_rows=total,
             valid_count=valid_count,
             corrected_count=corrected_count,
@@ -1275,6 +1385,7 @@ class ZipValidator:
             street_verified_count=street_verified_count,
             street_corrected_count=street_corrected_count
         )
+        return report, df
 
     def _validate_zip_province(self, zip_code: str, province: str) -> tuple[bool, str]:
         """

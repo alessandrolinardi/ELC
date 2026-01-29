@@ -604,13 +604,13 @@ def zip_validator_page():
                 status_text.text(f"⏳ {message} ({current}/{total})")
 
             with st.spinner(f"Validazione {len(df)} indirizzi... (circa {len(df) * 1.5:.0f} secondi)"):
-                report = validator.process_dataframe(df, progress_callback=update_progress)
+                report, preprocessed_df = validator.process_dataframe(df, progress_callback=update_progress)
 
             progress_bar.progress(100)
             status_text.text("✅ Validazione completata!")
 
-            # Generate files and store in session state (using original_df stored before filtering)
-            corrected_excel = validator.generate_corrected_excel(original_df, report)
+            # Generate files using preprocessed DataFrame (with C.C. moved to Street 2)
+            corrected_excel = validator.generate_corrected_excel(preprocessed_df, report)
             review_excel = validator.generate_review_report(report)
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
