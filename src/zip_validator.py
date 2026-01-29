@@ -174,6 +174,7 @@ class ZipValidator:
         self.session = requests.Session()
         self.session.headers.update({'User-Agent': self.USER_AGENT})
         self._photon_available = True  # Track if Photon is responding
+        self._city_cache = {}  # Cache for city lookups: city_name -> result
 
     def _query_photon(self, query: str, limit: int = 5) -> list[dict]:
         """
@@ -355,8 +356,30 @@ class ZipValidator:
                     result['_city_only'] = True
                 return result
 
-        # Fallback to Nominatim
-        logger.debug("Using Nominatim fallback")
+            # No results from Photon - try city-only query
+            # Note: We don't cache successful city lookups because large cities have
+            # multiple ZIP codes (e.g., Milano 20100-20199, Roma 00100-00199)
+            city_lower = city.lower().strip()
+
+            # Only check cache for known "not found" cities to avoid repeated failed queries
+            if city_lower in self._city_cache and self._city_cache[city_lower] is None:
+                return None
+
+            # Try city-only query with Photon (fast)
+            city_query = f"{city}, {country}"
+            city_results = self._query_photon(city_query, limit=3)
+            if city_results:
+                for cr in city_results:
+                    if cr.get('address', {}).get('postcode'):
+                        cr['_city_only'] = True
+                        return cr
+
+            # Cache only the miss to avoid repeated failed queries for non-existent cities
+            self._city_cache[city_lower] = None
+            return None
+
+        # Only use Nominatim when Photon service is completely down
+        logger.debug("Using Nominatim fallback (Photon unavailable)")
         return self._query_nominatim(street, city, country)
 
     def detect_country_code(self, zip_code: str, city: str = "", street: str = "") -> str:
