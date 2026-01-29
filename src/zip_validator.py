@@ -150,6 +150,17 @@ class ZipValidator:
         'lungomare', 'lungotevere', 'lungarno', 'circonvallazione'
     ]
 
+    # Location prefixes that should be moved to Street 2 (Centro Commerciale, etc.)
+    LOCATION_PREFIXES = [
+        'centro commerciale', 'c.c.', 'cc ', 'c/c',
+        'centro direzionale', 'c.d.', 'cd ',
+        'centro servizi', 'c.s.',
+        'parco commerciale', 'p.c.',
+        'galleria commerciale',
+        'outlet',
+        'retail park',
+    ]
+
     def __init__(self, confidence_threshold: int = 90, street_confidence_threshold: int = 85):
         """
         Initialize validator.
@@ -258,6 +269,30 @@ class ZipValidator:
         Returns:
             First matching result or None
         """
+        def find_best_result(results: list, city_name: str) -> Optional[dict]:
+            """Find the best matching result from a list."""
+            best_result = None
+            best_with_street = None
+
+            for result in results:
+                address = result.get('address', {})
+                result_city = (address.get('city') or address.get('town') or '').lower()
+
+                # Check if result matches our city
+                if city_name.lower() in result_city or result_city in city_name.lower():
+                    if address.get('road'):
+                        best_with_street = result
+                        break
+                    elif best_result is None:
+                        best_result = result
+
+            if best_with_street:
+                return best_with_street
+            elif best_result:
+                best_result['_city_only'] = True
+                return best_result
+            return None
+
         # Try Photon first (fast, no rate limits)
         if self._photon_available:
             # Build query string for Photon
@@ -266,36 +301,59 @@ class ZipValidator:
 
             results = self._query_photon(query, limit=5)
             if results:
-                # Find best result - prefer ones with street info
-                best_result = None
-                best_with_street = None
+                best = find_best_result(results, city)
+                if best and best.get('address', {}).get('postcode'):
+                    return best
 
-                for result in results:
-                    address = result.get('address', {})
-                    result_city = (address.get('city') or address.get('town') or '').lower()
+            # If no good result, try without house number (e.g., "11/A" or "123")
+            # This helps with addresses like "Piazza Marescotti 11/A"
+            if street:
+                street_no_num = re.sub(r'\s*\d+[/\-]?\w*\s*$', '', street).strip()
+                if street_no_num and street_no_num != street:
+                    parts = [p for p in [street_no_num, city, country] if p and p.strip()]
+                    query = ", ".join(parts)
+                    results = self._query_photon(query, limit=5)
+                    if results:
+                        best = find_best_result(results, city)
+                        if best and best.get('address', {}).get('postcode'):
+                            return best
 
-                    # Check if result matches our city
-                    if city.lower() in result_city or result_city in city.lower():
-                        if address.get('road'):
-                            # Has street info - this is ideal
-                            best_with_street = result
-                            break
-                        elif best_result is None:
-                            best_result = result
+            # If still no result, try extracting main street from complex addresses
+            # e.g., "C.C. Le Grange Via Casilina inc. Via Marello 1" -> "Via Casilina"
+            if street:
+                # Look for first occurrence of a street prefix
+                street_lower = street.lower()
+                for prefix in self.STREET_PREFIXES:
+                    match = re.search(rf'\b({prefix}\.?\s+\w+)', street_lower)
+                    if match:
+                        # Extract the main street (prefix + first word)
+                        start = match.start()
+                        # Get from original string to preserve case
+                        simple_street = street[start:]
+                        # Cut at "inc.", intersection markers, or next street prefix
+                        simple_street = re.split(r'\s+(?:inc\.?|incr\.?|ang\.?|angolo)\s+', simple_street, maxsplit=1)[0]
+                        simple_street = re.sub(r'\s*\d+[/\-]?\w*\s*$', '', simple_street).strip()
 
-                # Use result with street if found, otherwise city-level result
-                if best_with_street:
-                    return best_with_street
-                elif best_result:
-                    best_result['_city_only'] = True  # Mark as city-only match
-                    return best_result
+                        if simple_street and simple_street.lower() != street.lower():
+                            parts = [p for p in [simple_street, city, country] if p and p.strip()]
+                            query = ", ".join(parts)
+                            results = self._query_photon(query, limit=5)
+                            if results:
+                                best = find_best_result(results, city)
+                                if best and best.get('address', {}).get('postcode'):
+                                    return best
+                        break
 
-                # If first result doesn't match city, still return it but mark as uncertain
-                if results:
-                    result = results[0]
-                    if not result.get('address', {}).get('road'):
-                        result['_city_only'] = True
-                    return result
+            # Return whatever we have from initial query
+            if results:
+                best = find_best_result(results, city)
+                if best:
+                    return best
+                # Fall back to first result
+                result = results[0]
+                if not result.get('address', {}).get('road'):
+                    result['_city_only'] = True
+                return result
 
         # Fallback to Nominatim
         logger.debug("Using Nominatim fallback")
@@ -429,6 +487,9 @@ class ZipValidator:
         normalized = re.sub(r'[.,;:]', ' ', normalized)
         normalized = re.sub(r'\s+', ' ', normalized).strip()
 
+        # Remove house numbers at the end for comparison (e.g., "21 21", "11/A", "123")
+        normalized = re.sub(r'\s+\d+[/\-]?\w*(\s+\d+[/\-]?\w*)*\s*$', '', normalized).strip()
+
         return normalized
 
     def _extract_street_name(self, street: str) -> tuple[str, str]:
@@ -450,6 +511,133 @@ class ZipValidator:
                 return prefix, street[len(prefix) + 1:].strip()
 
         return "", street
+
+    def _extract_house_number(self, street: str) -> tuple[str, str]:
+        """
+        Extract house number from the end of a street address.
+
+        Returns:
+            Tuple of (street_without_number, house_number)
+        """
+        if not street:
+            return "", ""
+
+        # Match house numbers at the end: "21", "21 21", "11/A", "123bis", etc.
+        match = re.search(r'\s+(\d+[/\-]?\w*(?:\s+\d+[/\-]?\w*)*)\s*$', street)
+        if match:
+            house_num = match.group(1)
+            street_only = street[:match.start()].strip()
+            return street_only, house_num
+
+        return street, ""
+
+    def _build_street_suggestion(self, suggested_name: str, original_street: str) -> str:
+        """
+        Build a street suggestion preserving the original house number.
+
+        Args:
+            suggested_name: The corrected street name from API
+            original_street: The original street with house number
+
+        Returns:
+            Suggested street with original house number appended
+        """
+        _, house_num = self._extract_house_number(original_street)
+        if house_num:
+            return f"{suggested_name} {house_num}"
+        return suggested_name
+
+    def _extract_location_prefix(self, street: str) -> tuple[str, str]:
+        """
+        Extract location prefix (Centro Commerciale, C.C., etc.) from street address.
+
+        Moves location prefixes to a separate field so the actual street address
+        can be validated independently.
+
+        Example:
+            Input: "C.C. Le Grange Via Casilina inc. Via Marello 1"
+            Output: ("Via Casilina inc. Via Marello 1", "C.C. Le Grange")
+
+        Args:
+            street: Original street address
+
+        Returns:
+            Tuple of (clean_street, extracted_location)
+            If no location prefix found, returns (original_street, "")
+        """
+        if not street:
+            return street, ""
+
+        street_lower = street.lower().strip()
+
+        # Check if the street starts with a location prefix
+        for prefix in self.LOCATION_PREFIXES:
+            if street_lower.startswith(prefix):
+                # Find where the actual street address begins (first STREET_PREFIXES match)
+                for street_prefix in self.STREET_PREFIXES:
+                    match = re.search(rf'\b{street_prefix}\.?\s+', street_lower)
+                    if match:
+                        # Extract: everything before street prefix is location, rest is street
+                        location = street[:match.start()].strip()
+                        clean_street = street[match.start():].strip()
+                        return clean_street, location
+
+                # No standard street prefix found - return original
+                return street, ""
+
+        return street, ""
+
+    def preprocess_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Preprocess DataFrame by moving location prefixes from Street 1 to Street 2.
+
+        This separates Centro Commerciale, C.C., etc. from the actual street address
+        to improve validation accuracy.
+
+        Args:
+            df: Original DataFrame
+
+        Returns:
+            Preprocessed DataFrame with locations moved to Street 2
+        """
+        df = df.copy()
+        col_map = self._map_columns(df)
+        street_col = col_map.get('street')
+        street2_col = col_map.get('street2')
+
+        if not street_col:
+            return df
+
+        # If Street 2 column doesn't exist, create it
+        if not street2_col:
+            # Find position after Street 1 to insert Street 2
+            if street_col in df.columns:
+                col_idx = df.columns.get_loc(street_col) + 1
+                df.insert(col_idx, 'Street 2', '')
+                street2_col = 'Street 2'
+            else:
+                df['Street 2'] = ''
+                street2_col = 'Street 2'
+
+        # Process each row
+        for idx, row in df.iterrows():
+            street_val = str(row.get(street_col, '')).strip()
+            street2_val = str(row.get(street2_col, '')).strip()
+
+            # Skip if Street 1 is empty or nan
+            if not street_val or street_val.lower() == 'nan':
+                continue
+
+            # Extract location prefix
+            clean_street, location = self._extract_location_prefix(street_val)
+
+            # If we extracted a location and Street 2 is empty, move it
+            if location and (not street2_val or street2_val.lower() == 'nan'):
+                df.at[idx, street_col] = clean_street
+                df.at[idx, street2_col] = location
+                logger.debug(f"Row {idx}: Moved '{location}' to Street 2, keeping '{clean_street}' in Street 1")
+
+        return df
 
     def _looks_like_valid_italian_street(self, street: str) -> bool:
         """
@@ -800,14 +988,14 @@ class ZipValidator:
                     street_verified = True
                     street_confidence = 100
                 elif similarity >= 0.85:
-                    # Good match - likely minor typo
+                    # Good match - likely minor typo in street name
                     street_verified = True
-                    suggested_street = found_street
+                    suggested_street = self._build_street_suggestion(found_street, original_street)
                     street_confidence = int(similarity * 100)
                 elif similarity >= 0.70:
                     # Moderate match - suggest correction
                     street_verified = False
-                    suggested_street = found_street
+                    suggested_street = self._build_street_suggestion(found_street, original_street)
                     street_confidence = int(similarity * 100)
                 else:
                     # Low match - search for similar streets
@@ -816,11 +1004,11 @@ class ZipValidator:
                     if similar:
                         best_match, best_score, _ = similar[0]
                         if best_score >= 0.70:
-                            suggested_street = best_match
+                            suggested_street = self._build_street_suggestion(best_match, original_street)
                             street_confidence = int(best_score * 100)
                         elif best_score >= 0.60:
                             # Lower threshold for suggestion (not auto-correct)
-                            suggested_street = best_match
+                            suggested_street = self._build_street_suggestion(best_match, original_street)
                             street_confidence = int(best_score * 100)
             else:
                 # No street in response OR city-only match - search for similar streets
@@ -831,14 +1019,14 @@ class ZipValidator:
                     if best_score >= 0.85:
                         # High confidence - verify the street
                         street_verified = True
-                        suggested_street = best_match if best_score < 0.95 else None
+                        suggested_street = self._build_street_suggestion(best_match, original_street) if best_score < 0.95 else None
                         street_confidence = int(best_score * 100)
                     elif best_score >= 0.70:
-                        suggested_street = best_match
+                        suggested_street = self._build_street_suggestion(best_match, original_street)
                         street_confidence = int(best_score * 100)
                     elif best_score >= 0.60:
                         # Lower threshold for suggestion only
-                        suggested_street = best_match
+                        suggested_street = self._build_street_suggestion(best_match, original_street)
                         street_confidence = int(best_score * 100)
 
                     # Also get ZIP from best match if available and we're in city-only mode
@@ -861,6 +1049,17 @@ class ZipValidator:
 
         # Now validate ZIP
         suggested_zip = result.get('address', {}).get('postcode')
+
+        if not suggested_zip:
+            # Try city-only query to get postal code for the city
+            city_query = f"{city}, Italy"
+            city_results = self._query_photon(city_query, limit=3)
+            for city_result in city_results:
+                city_zip = city_result.get('address', {}).get('postcode')
+                if city_zip and ';' not in city_zip:
+                    suggested_zip = city_zip
+                    is_city_only = True
+                    break
 
         if not suggested_zip:
             city_lower = city.lower().strip()
@@ -920,9 +1119,20 @@ class ZipValidator:
             confidence = 92
             reason = f"2 digits different ({working_zip} → {suggested_zip})"
         elif diff_count >= 3 and not is_city_only:
-            # 3+ digits different is suspicious - lower confidence
-            confidence = 70
-            reason = f"{diff_count} digits different - verify manually ({working_zip} → {suggested_zip})"
+            # 3+ digits different is suspicious
+            # Check if original ZIP looks correct for the city (same province, city center ZIP)
+            same_province = working_zip[:2] == suggested_zip[:2]
+            is_city_center_zip = working_zip.endswith('100') or working_zip.endswith('00')
+
+            if same_province and is_city_center_zip:
+                # Original ZIP looks like a valid city center ZIP in the same province
+                # API probably found the street in a different town - trust original
+                confidence = 85
+                reason = f"Original ZIP {working_zip} appears correct (city center) - API found {suggested_zip}"
+                return False, working_zip, confidence, reason, street_verified, suggested_street, street_confidence
+            else:
+                confidence = 70
+                reason = f"{diff_count} digits different - verify manually ({working_zip} → {suggested_zip})"
         else:
             confidence = 85
             reason = f"{diff_count} digits different - verify manually"
@@ -953,19 +1163,26 @@ class ZipValidator:
     def process_dataframe(
         self,
         df: pd.DataFrame,
-        progress_callback: Optional[Callable[[int, int, str], None]] = None
-    ) -> ValidationReport:
+        progress_callback: Optional[Callable[[int, int, str], None]] = None,
+        preprocess: bool = True
+    ) -> tuple[ValidationReport, pd.DataFrame]:
         """
         Process entire DataFrame and validate all addresses.
 
         Args:
             df: DataFrame with address data
             progress_callback: Optional callback(current, total, message)
+            preprocess: If True, preprocess to move Centro Commerciale to Street 2
 
         Returns:
-            ValidationReport with all results
+            Tuple of (ValidationReport with all results, preprocessed DataFrame)
         """
         logger.info(f"Starting address validation for {len(df)} rows")
+
+        # Preprocess to move Centro Commerciale info to Street 2
+        if preprocess:
+            logger.info("Preprocessing: moving location prefixes to Street 2")
+            df = self.preprocess_dataframe(df)
 
         results = []
         valid_count = 0
@@ -1158,7 +1375,7 @@ class ZipValidator:
             f"Streets: {street_verified_count} verified, {street_corrected_count} corrected"
         )
 
-        return ValidationReport(
+        report = ValidationReport(
             total_rows=total,
             valid_count=valid_count,
             corrected_count=corrected_count,
@@ -1168,6 +1385,7 @@ class ZipValidator:
             street_verified_count=street_verified_count,
             street_corrected_count=street_corrected_count
         )
+        return report, df
 
     def _validate_zip_province(self, zip_code: str, province: str) -> tuple[bool, str]:
         """
