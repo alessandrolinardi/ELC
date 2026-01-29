@@ -705,9 +705,9 @@ def zip_validator_page():
                 cod_stato = "0"
 
             preview_data.append({
-                "Città": r.city[:15] if r.city else "-",
-                "Via Orig.": (r.street[:20] + "..." if len(r.street) > 20 else r.street) if r.street else "-",
-                "Via Sugg.": (r.suggested_street[:20] + "..." if r.suggested_street and len(r.suggested_street) > 20 else r.suggested_street) if r.suggested_street else "-",
+                "Città": r.city if r.city else "-",
+                "Via Orig.": r.street if r.street else "-",
+                "Via Sugg.": r.suggested_street if r.suggested_street else "-",
                 "🛣️": street_stato,
                 "ZIP Orig.": r.original_zip,
                 "ZIP Sugg.": r.suggested_zip or "-",
