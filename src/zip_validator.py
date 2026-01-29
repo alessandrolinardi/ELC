@@ -756,6 +756,10 @@ class ZipValidator:
         # Try to clean up the zip code
         cleaned_zip, was_cleaned = self._clean_zip_code(original_zip_raw)
 
+        # Track if original ZIP was very incomplete (1-3 digits)
+        original_digits = re.sub(r'[^\d]', '', original_zip_raw)
+        was_incomplete = len(original_digits) < 4
+
         # Format check on cleaned version
         if not self._is_valid_italian_zip_format(cleaned_zip):
             result = self._query_nominatim(original_street or "", city, "Italy")
@@ -866,7 +870,10 @@ class ZipValidator:
                     return False, working_zip, 70, f"Street not found - ZIP in city range ({cap_start}-{cap_end})", street_verified, suggested_street, street_confidence
                 else:
                     return False, cap_start, 80, f"ZIP outside city range ({cap_start}-{cap_end})", street_verified, suggested_street, street_confidence
-            return False, None, 50, "No postal code in API response", street_verified, suggested_street, street_confidence
+            # No postal code from API - return the cleaned/padded ZIP if it was modified
+            if was_cleaned:
+                return False, working_zip, 60, f"No API postal code - using padded ZIP '{original_zip_raw}' → '{working_zip}'", street_verified, suggested_street, street_confidence
+            return False, working_zip, 50, "No postal code in API response", street_verified, suggested_street, street_confidence
 
         # Handle multiple postcodes
         if ';' in suggested_zip:
@@ -891,7 +898,13 @@ class ZipValidator:
         is_transposition = self._is_transposition(working_zip, suggested_zip)
         is_adjacent_swap = self._is_adjacent_swap(working_zip, suggested_zip)
 
-        if is_city_only:
+        # If original ZIP was incomplete (1-3 digits), suggest the padded version
+        # not the API's suggestion - flag for manual review
+        if was_incomplete and diff_count >= 2:
+            confidence = 50
+            reason = f"Original ZIP '{original_zip_raw}' padded to '{working_zip}' - needs manual review"
+            return False, working_zip, confidence, reason, street_verified, suggested_street, street_confidence
+        elif is_city_only:
             confidence = 70
             reason = "City-level match only (street not found)"
         elif is_adjacent_swap:
@@ -907,13 +920,14 @@ class ZipValidator:
             confidence = 92
             reason = f"2 digits different ({working_zip} → {suggested_zip})"
         elif diff_count >= 3 and not is_city_only:
-            confidence = 91
-            reason = f"{diff_count} digits different, city confirmed ({working_zip} → {suggested_zip})"
+            # 3+ digits different is suspicious - lower confidence
+            confidence = 70
+            reason = f"{diff_count} digits different - verify manually ({working_zip} → {suggested_zip})"
         else:
             confidence = 85
             reason = f"{diff_count} digits different - verify manually"
 
-        if was_cleaned:
+        if was_cleaned and not was_incomplete:
             reason = f"Cleaned '{original_zip_raw}' → '{working_zip}'. " + reason
 
         return False, suggested_zip, confidence, reason, street_verified, suggested_street, street_confidence
