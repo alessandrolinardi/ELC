@@ -863,6 +863,17 @@ class ZipValidator:
         suggested_zip = result.get('address', {}).get('postcode')
 
         if not suggested_zip:
+            # Try city-only query to get postal code for the city
+            city_query = f"{city}, Italy"
+            city_results = self._query_photon(city_query, limit=3)
+            for city_result in city_results:
+                city_zip = city_result.get('address', {}).get('postcode')
+                if city_zip and ';' not in city_zip:
+                    suggested_zip = city_zip
+                    is_city_only = True
+                    break
+
+        if not suggested_zip:
             city_lower = city.lower().strip()
             if city_lower in self.ITALIAN_CAP_RANGES:
                 cap_start, cap_end = self.ITALIAN_CAP_RANGES[city_lower]
