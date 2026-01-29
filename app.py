@@ -589,10 +589,17 @@ def zip_validator_page():
                 st.warning("⚠️ Nessun indirizzo italiano trovato nel file")
                 st.stop()
 
-            # Validate
+            # Validate - use Google Maps API if key is configured in secrets
+            google_api_key = None
+            try:
+                google_api_key = st.secrets.get("GOOGLE_MAPS_API_KEY", None)
+            except Exception:
+                pass  # No secrets configured
+
             validator = ZipValidator(
                 confidence_threshold=confidence_threshold,
-                street_confidence_threshold=street_confidence_threshold
+                street_confidence_threshold=street_confidence_threshold,
+                google_api_key=google_api_key
             )
 
             # Progress container

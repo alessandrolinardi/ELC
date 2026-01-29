@@ -65,11 +65,14 @@ class ValidationReport:
 
 class ZipValidator:
     """
-    Validates addresses using Photon API (primary) with Nominatim fallback.
+    Validates addresses using Google Maps API (primary, if key provided),
+    Photon API (secondary), and Nominatim API (fallback).
     Validates both ZIP codes and street names.
     """
 
-    # Photon API - primary (no rate limits, ~10x faster)
+    # Google Maps Geocoding API (best accuracy, requires API key)
+    GOOGLE_GEOCODE_URL = "https://maps.googleapis.com/maps/api/geocode/json"
+    # Photon API - secondary (no rate limits, ~10x faster than Nominatim)
     PHOTON_URL = "https://photon.komoot.io/api/"
     # Nominatim API - fallback (1 req/sec limit)
     NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
@@ -161,18 +164,22 @@ class ZipValidator:
         'retail park',
     ]
 
-    def __init__(self, confidence_threshold: int = 90, street_confidence_threshold: int = 85):
+    def __init__(self, confidence_threshold: int = 90, street_confidence_threshold: int = 85,
+                 google_api_key: Optional[str] = None):
         """
         Initialize validator.
 
         Args:
             confidence_threshold: Minimum confidence for auto-correction of ZIP (default 90%)
             street_confidence_threshold: Minimum confidence for auto-correction of street (default 85%)
+            google_api_key: Optional Google Maps API key for best accuracy
         """
         self.confidence_threshold = confidence_threshold
         self.street_confidence_threshold = street_confidence_threshold
+        self.google_api_key = google_api_key
         self.session = requests.Session()
         self.session.headers.update({'User-Agent': self.USER_AGENT})
+        self._google_available = bool(google_api_key)  # Track if Google API is available
         self._photon_available = True  # Track if Photon is responding
         self._photon_empty_count = 0  # Track consecutive empty results from Photon
         self._city_cache = {}  # Cache for city lookups: city_name -> result
@@ -266,9 +273,126 @@ class ZipValidator:
             logger.debug(f"Photon query failed: {e}")
             return []
 
+    def _query_google(self, street: str, city: str, country: str = "Italy") -> Optional[dict]:
+        """
+        Query Google Maps Geocoding API for address.
+
+        Google provides the most accurate results, especially for:
+        - Neighborhoods (e.g., "Cascina Merlata" as part of Milano)
+        - Complex addresses
+        - Recent street names
+
+        Args:
+            street: Street address
+            city: City name
+            country: Country name
+
+        Returns:
+            Result in Nominatim-compatible format, or None
+        """
+        if not self._google_available or not self.google_api_key:
+            return None
+
+        try:
+            # Build address string
+            parts = [p for p in [street, city, country] if p and p.strip()]
+            address = ", ".join(parts)
+
+            params = {
+                'address': address,
+                'key': self.google_api_key,
+                'language': 'it',
+                'region': 'it'
+            }
+
+            logger.debug(f"Google query: '{address}'")
+            response = self.session.get(self.GOOGLE_GEOCODE_URL, params=params, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+
+            if data.get('status') != 'OK':
+                if data.get('status') == 'ZERO_RESULTS':
+                    logger.debug(f"Google: no results for '{address}'")
+                    return None
+                elif data.get('status') in ('OVER_QUERY_LIMIT', 'REQUEST_DENIED'):
+                    logger.warning(f"Google API error: {data.get('status')} - disabling Google")
+                    self._google_available = False
+                    return None
+                else:
+                    logger.debug(f"Google status: {data.get('status')}")
+                    return None
+
+            # Parse first result
+            result = data['results'][0]
+            address_components = result.get('address_components', [])
+
+            # Extract address parts from components
+            street_number = ''
+            route = ''
+            postal_code = ''
+            locality = ''
+            admin_area = ''
+            country_code = ''
+
+            for component in address_components:
+                types = component.get('types', [])
+                if 'street_number' in types:
+                    street_number = component.get('long_name', '')
+                elif 'route' in types:
+                    route = component.get('long_name', '')
+                elif 'postal_code' in types:
+                    postal_code = component.get('long_name', '')
+                elif 'locality' in types:
+                    locality = component.get('long_name', '')
+                elif 'administrative_area_level_2' in types:
+                    admin_area = component.get('short_name', '')
+                elif 'country' in types:
+                    country_code = component.get('short_name', '')
+
+            # Build Nominatim-compatible result
+            address_dict = {
+                'road': route,
+                'house_number': street_number,
+                'postcode': postal_code,
+                'city': locality,
+                'town': locality,
+                'state': admin_area,
+                'country': country,
+                'country_code': country_code
+            }
+
+            nominatim_result = {
+                'display_name': result.get('formatted_address', ''),
+                'address': address_dict,
+                'lat': result.get('geometry', {}).get('location', {}).get('lat'),
+                'lon': result.get('geometry', {}).get('location', {}).get('lng'),
+                '_source': 'google'
+            }
+
+            # Mark as city-only if no street found
+            if not route:
+                nominatim_result['_city_only'] = True
+
+            logger.debug(f"Google found: {locality}, {route}, ZIP: {postal_code}")
+            return nominatim_result
+
+        except requests.exceptions.Timeout:
+            logger.warning("Google API timeout")
+            return None
+        except requests.exceptions.RequestException as e:
+            logger.warning(f"Google API error: {e}")
+            self._google_available = False
+            return None
+        except Exception as e:
+            logger.debug(f"Google query failed: {e}")
+            return None
+
     def _query_address(self, street: str, city: str, country: str = "Italy") -> Optional[dict]:
         """
-        Query address using hybrid approach: Photon first, Nominatim fallback.
+        Query address using hybrid approach:
+        1. Google Maps (if API key provided) - best accuracy
+        2. Photon (fast, no rate limits)
+        3. Nominatim (fallback, 1 req/sec)
 
         Args:
             street: Street address
@@ -302,7 +426,13 @@ class ZipValidator:
                 return best_result
             return None
 
-        # Try Photon first (fast, no rate limits)
+        # Try Google first (best accuracy, handles neighborhoods like "Cascina Merlata")
+        if self._google_available:
+            result = self._query_google(street, city, country)
+            if result and result.get('address', {}).get('postcode'):
+                return result
+
+        # Try Photon second (fast, no rate limits)
         if self._photon_available:
             # Build query string for Photon
             parts = [p for p in [street, city, country] if p and p.strip()]
