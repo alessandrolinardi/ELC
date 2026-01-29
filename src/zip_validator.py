@@ -258,6 +258,30 @@ class ZipValidator:
         Returns:
             First matching result or None
         """
+        def find_best_result(results: list, city_name: str) -> Optional[dict]:
+            """Find the best matching result from a list."""
+            best_result = None
+            best_with_street = None
+
+            for result in results:
+                address = result.get('address', {})
+                result_city = (address.get('city') or address.get('town') or '').lower()
+
+                # Check if result matches our city
+                if city_name.lower() in result_city or result_city in city_name.lower():
+                    if address.get('road'):
+                        best_with_street = result
+                        break
+                    elif best_result is None:
+                        best_result = result
+
+            if best_with_street:
+                return best_with_street
+            elif best_result:
+                best_result['_city_only'] = True
+                return best_result
+            return None
+
         # Try Photon first (fast, no rate limits)
         if self._photon_available:
             # Build query string for Photon
@@ -266,36 +290,33 @@ class ZipValidator:
 
             results = self._query_photon(query, limit=5)
             if results:
-                # Find best result - prefer ones with street info
-                best_result = None
-                best_with_street = None
+                best = find_best_result(results, city)
+                if best and best.get('address', {}).get('postcode'):
+                    return best
 
-                for result in results:
-                    address = result.get('address', {})
-                    result_city = (address.get('city') or address.get('town') or '').lower()
+            # If no good result, try without house number (e.g., "11/A" or "123")
+            # This helps with addresses like "Piazza Marescotti 11/A"
+            if street:
+                street_no_num = re.sub(r'\s*\d+[/\-]?\w*\s*$', '', street).strip()
+                if street_no_num and street_no_num != street:
+                    parts = [p for p in [street_no_num, city, country] if p and p.strip()]
+                    query = ", ".join(parts)
+                    results = self._query_photon(query, limit=5)
+                    if results:
+                        best = find_best_result(results, city)
+                        if best and best.get('address', {}).get('postcode'):
+                            return best
 
-                    # Check if result matches our city
-                    if city.lower() in result_city or result_city in city.lower():
-                        if address.get('road'):
-                            # Has street info - this is ideal
-                            best_with_street = result
-                            break
-                        elif best_result is None:
-                            best_result = result
-
-                # Use result with street if found, otherwise city-level result
-                if best_with_street:
-                    return best_with_street
-                elif best_result:
-                    best_result['_city_only'] = True  # Mark as city-only match
-                    return best_result
-
-                # If first result doesn't match city, still return it but mark as uncertain
-                if results:
-                    result = results[0]
-                    if not result.get('address', {}).get('road'):
-                        result['_city_only'] = True
-                    return result
+            # Return whatever we have from initial query
+            if results:
+                best = find_best_result(results, city)
+                if best:
+                    return best
+                # Fall back to first result
+                result = results[0]
+                if not result.get('address', {}).get('road'):
+                    result['_city_only'] = True
+                return result
 
         # Fallback to Nominatim
         logger.debug("Using Nominatim fallback")
