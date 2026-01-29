@@ -174,6 +174,7 @@ class ZipValidator:
         self.session = requests.Session()
         self.session.headers.update({'User-Agent': self.USER_AGENT})
         self._photon_available = True  # Track if Photon is responding
+        self._photon_empty_count = 0  # Track consecutive empty results from Photon
         self._city_cache = {}  # Cache for city lookups: city_name -> result
 
     def _query_photon(self, query: str, limit: int = 5) -> list[dict]:
@@ -235,6 +236,13 @@ class ZipValidator:
 
             if results:
                 logger.debug(f"Photon found {len(results)} results")
+                self._photon_empty_count = 0  # Reset counter on success
+            else:
+                self._photon_empty_count += 1
+                # If Photon returns empty 5 times in a row, assume it's blocked/broken
+                if self._photon_empty_count >= 5:
+                    logger.warning("Photon returning empty results repeatedly - switching to Nominatim")
+                    self._photon_available = False
             return results
 
         except requests.exceptions.Timeout:
@@ -363,7 +371,9 @@ class ZipValidator:
 
             # Only check cache for known "not found" cities to avoid repeated failed queries
             if city_lower in self._city_cache and self._city_cache[city_lower] is None:
-                return None
+                # City already known to be not found - fall back to Nominatim
+                logger.debug(f"City '{city}' cached as not found, trying Nominatim")
+                return self._query_nominatim(street, city, country)
 
             # Try city-only query with Photon (fast)
             city_query = f"{city}, {country}"
@@ -374,9 +384,10 @@ class ZipValidator:
                         cr['_city_only'] = True
                         return cr
 
-            # Cache only the miss to avoid repeated failed queries for non-existent cities
+            # Photon couldn't find the city - cache as not found and fall back to Nominatim
             self._city_cache[city_lower] = None
-            return None
+            logger.debug(f"Photon returned no results, falling back to Nominatim for '{city}'")
+            return self._query_nominatim(street, city, country)
 
         # Only use Nominatim when Photon service is completely down
         logger.debug("Using Nominatim fallback (Photon unavailable)")
