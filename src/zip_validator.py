@@ -450,6 +450,9 @@ class ZipValidator:
         normalized = re.sub(r'[.,;:]', ' ', normalized)
         normalized = re.sub(r'\s+', ' ', normalized).strip()
 
+        # Remove house numbers at the end for comparison (e.g., "21 21", "11/A", "123")
+        normalized = re.sub(r'\s+\d+[/\-]?\w*(\s+\d+[/\-]?\w*)*\s*$', '', normalized).strip()
+
         return normalized
 
     def _extract_street_name(self, street: str) -> tuple[str, str]:
@@ -471,6 +474,41 @@ class ZipValidator:
                 return prefix, street[len(prefix) + 1:].strip()
 
         return "", street
+
+    def _extract_house_number(self, street: str) -> tuple[str, str]:
+        """
+        Extract house number from the end of a street address.
+
+        Returns:
+            Tuple of (street_without_number, house_number)
+        """
+        if not street:
+            return "", ""
+
+        # Match house numbers at the end: "21", "21 21", "11/A", "123bis", etc.
+        match = re.search(r'\s+(\d+[/\-]?\w*(?:\s+\d+[/\-]?\w*)*)\s*$', street)
+        if match:
+            house_num = match.group(1)
+            street_only = street[:match.start()].strip()
+            return street_only, house_num
+
+        return street, ""
+
+    def _build_street_suggestion(self, suggested_name: str, original_street: str) -> str:
+        """
+        Build a street suggestion preserving the original house number.
+
+        Args:
+            suggested_name: The corrected street name from API
+            original_street: The original street with house number
+
+        Returns:
+            Suggested street with original house number appended
+        """
+        _, house_num = self._extract_house_number(original_street)
+        if house_num:
+            return f"{suggested_name} {house_num}"
+        return suggested_name
 
     def _looks_like_valid_italian_street(self, street: str) -> bool:
         """
@@ -821,14 +859,14 @@ class ZipValidator:
                     street_verified = True
                     street_confidence = 100
                 elif similarity >= 0.85:
-                    # Good match - likely minor typo
+                    # Good match - likely minor typo in street name
                     street_verified = True
-                    suggested_street = found_street
+                    suggested_street = self._build_street_suggestion(found_street, original_street)
                     street_confidence = int(similarity * 100)
                 elif similarity >= 0.70:
                     # Moderate match - suggest correction
                     street_verified = False
-                    suggested_street = found_street
+                    suggested_street = self._build_street_suggestion(found_street, original_street)
                     street_confidence = int(similarity * 100)
                 else:
                     # Low match - search for similar streets
@@ -837,11 +875,11 @@ class ZipValidator:
                     if similar:
                         best_match, best_score, _ = similar[0]
                         if best_score >= 0.70:
-                            suggested_street = best_match
+                            suggested_street = self._build_street_suggestion(best_match, original_street)
                             street_confidence = int(best_score * 100)
                         elif best_score >= 0.60:
                             # Lower threshold for suggestion (not auto-correct)
-                            suggested_street = best_match
+                            suggested_street = self._build_street_suggestion(best_match, original_street)
                             street_confidence = int(best_score * 100)
             else:
                 # No street in response OR city-only match - search for similar streets
@@ -852,14 +890,14 @@ class ZipValidator:
                     if best_score >= 0.85:
                         # High confidence - verify the street
                         street_verified = True
-                        suggested_street = best_match if best_score < 0.95 else None
+                        suggested_street = self._build_street_suggestion(best_match, original_street) if best_score < 0.95 else None
                         street_confidence = int(best_score * 100)
                     elif best_score >= 0.70:
-                        suggested_street = best_match
+                        suggested_street = self._build_street_suggestion(best_match, original_street)
                         street_confidence = int(best_score * 100)
                     elif best_score >= 0.60:
                         # Lower threshold for suggestion only
-                        suggested_street = best_match
+                        suggested_street = self._build_street_suggestion(best_match, original_street)
                         street_confidence = int(best_score * 100)
 
                     # Also get ZIP from best match if available and we're in city-only mode
