@@ -952,9 +952,20 @@ class ZipValidator:
             confidence = 92
             reason = f"2 digits different ({working_zip} → {suggested_zip})"
         elif diff_count >= 3 and not is_city_only:
-            # 3+ digits different is suspicious - lower confidence
-            confidence = 70
-            reason = f"{diff_count} digits different - verify manually ({working_zip} → {suggested_zip})"
+            # 3+ digits different is suspicious
+            # Check if original ZIP looks correct for the city (same province, city center ZIP)
+            same_province = working_zip[:2] == suggested_zip[:2]
+            is_city_center_zip = working_zip.endswith('100') or working_zip.endswith('00')
+
+            if same_province and is_city_center_zip:
+                # Original ZIP looks like a valid city center ZIP in the same province
+                # API probably found the street in a different town - trust original
+                confidence = 85
+                reason = f"Original ZIP {working_zip} appears correct (city center) - API found {suggested_zip}"
+                return False, working_zip, confidence, reason, street_verified, suggested_street, street_confidence
+            else:
+                confidence = 70
+                reason = f"{diff_count} digits different - verify manually ({working_zip} → {suggested_zip})"
         else:
             confidence = 85
             reason = f"{diff_count} digits different - verify manually"
