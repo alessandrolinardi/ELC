@@ -356,10 +356,14 @@ class ZipValidator:
                     result['_city_only'] = True
                 return result
 
-            # No results from Photon - try city-only lookup from cache or quick query
+            # No results from Photon - try city-only query
+            # Note: We don't cache successful city lookups because large cities have
+            # multiple ZIP codes (e.g., Milano 20100-20199, Roma 00100-00199)
             city_lower = city.lower().strip()
-            if city_lower in self._city_cache:
-                return self._city_cache[city_lower]
+
+            # Only check cache for known "not found" cities to avoid repeated failed queries
+            if city_lower in self._city_cache and self._city_cache[city_lower] is None:
+                return None
 
             # Try city-only query with Photon (fast)
             city_query = f"{city}, {country}"
@@ -368,10 +372,9 @@ class ZipValidator:
                 for cr in city_results:
                     if cr.get('address', {}).get('postcode'):
                         cr['_city_only'] = True
-                        self._city_cache[city_lower] = cr
                         return cr
 
-            # Cache the miss to avoid repeated queries
+            # Cache only the miss to avoid repeated failed queries for non-existent cities
             self._city_cache[city_lower] = None
             return None
 
