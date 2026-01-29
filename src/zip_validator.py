@@ -486,7 +486,10 @@ class ZipValidator:
 
     def _clean_zip_code(self, zip_code: str) -> tuple[str, bool]:
         """
-        Clean zip code by replacing common typos (letters for numbers).
+        Clean zip code by replacing common typos and padding with leading zeros.
+
+        For Italian CAPs (5 digits), if the ZIP is shorter than 5 digits,
+        assumes missing digits are leading zeros (e.g., "187" → "00187").
 
         Args:
             zip_code: Original zip code
@@ -512,6 +515,11 @@ class ZipValidator:
 
         # Remove any remaining non-digit characters
         cleaned = re.sub(r'[^\d]', '', cleaned)
+
+        # Pad with leading zeros if shorter than 5 digits (Italian CAP)
+        # e.g., "187" → "00187" (Rome), "6100" → "06100" (Perugia)
+        if len(cleaned) < 5 and len(cleaned) > 0:
+            cleaned = cleaned.zfill(5)
 
         was_cleaned = cleaned != original.replace(' ', '')
         return cleaned, was_cleaned
