@@ -307,6 +307,32 @@ class ZipValidator:
                         if best and best.get('address', {}).get('postcode'):
                             return best
 
+            # If still no result, try extracting main street from complex addresses
+            # e.g., "C.C. Le Grange Via Casilina inc. Via Marello 1" -> "Via Casilina"
+            if street:
+                # Look for first occurrence of a street prefix
+                street_lower = street.lower()
+                for prefix in self.STREET_PREFIXES:
+                    match = re.search(rf'\b({prefix}\.?\s+\w+)', street_lower)
+                    if match:
+                        # Extract the main street (prefix + first word)
+                        start = match.start()
+                        # Get from original string to preserve case
+                        simple_street = street[start:]
+                        # Cut at "inc.", intersection markers, or next street prefix
+                        simple_street = re.split(r'\s+(?:inc\.?|incr\.?|ang\.?|angolo)\s+', simple_street, maxsplit=1)[0]
+                        simple_street = re.sub(r'\s*\d+[/\-]?\w*\s*$', '', simple_street).strip()
+
+                        if simple_street and simple_street.lower() != street.lower():
+                            parts = [p for p in [simple_street, city, country] if p and p.strip()]
+                            query = ", ".join(parts)
+                            results = self._query_photon(query, limit=5)
+                            if results:
+                                best = find_best_result(results, city)
+                                if best and best.get('address', {}).get('postcode'):
+                                    return best
+                        break
+
             # Return whatever we have from initial query
             if results:
                 best = find_best_result(results, city)
