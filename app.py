@@ -36,7 +36,7 @@ if 'logging_initialized' not in st.session_state:
 # ============================================================================
 MAX_FILE_SIZE_MB = 50  # Maximum file size in MB
 MAX_PDF_PAGES = 500    # Maximum pages in PDF
-MAX_EXCEL_ROWS = 500   # Maximum rows in Excel for ZIP validation (reduced for API cost control)
+MAX_EXCEL_ROWS = 1000  # Maximum rows in Excel for ZIP validation
 MAX_VALIDATIONS_PER_DAY = 2000  # Daily limit for Google API calls
 MIN_SECONDS_BETWEEN_VALIDATIONS = 10  # Cooldown between validation runs
 
