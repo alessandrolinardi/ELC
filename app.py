@@ -37,7 +37,8 @@ if 'logging_initialized' not in st.session_state:
 MAX_FILE_SIZE_MB = 50  # Maximum file size in MB
 MAX_PDF_PAGES = 500    # Maximum pages in PDF
 MAX_EXCEL_ROWS = 1000  # Maximum rows in Excel for ZIP validation
-MAX_ZIP_VALIDATIONS_PER_SESSION = 500  # Limit API calls to Nominatim
+MAX_VALIDATIONS_PER_DAY = 2000  # Daily limit for Google API calls
+MIN_SECONDS_BETWEEN_VALIDATIONS = 10  # Cooldown between validation runs
 
 
 def check_file_size(file, max_mb: int = MAX_FILE_SIZE_MB) -> bool:
@@ -58,6 +59,55 @@ def get_file_size_mb(file) -> float:
     size_mb = file.tell() / (1024 * 1024)
     file.seek(0)
     return size_mb
+
+
+def check_daily_api_limit(rows_to_validate: int) -> tuple[bool, str]:
+    """
+    Check if we're within daily API call limits.
+    Returns (is_allowed, message).
+    """
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    # Initialize or reset daily counter
+    if 'api_usage_date' not in st.session_state or st.session_state.api_usage_date != today:
+        st.session_state.api_usage_date = today
+        st.session_state.api_calls_today = 0
+
+    current_usage = st.session_state.api_calls_today
+    projected_usage = current_usage + rows_to_validate
+
+    if projected_usage > MAX_VALIDATIONS_PER_DAY:
+        remaining = MAX_VALIDATIONS_PER_DAY - current_usage
+        return False, f"Limite giornaliero API raggiunto. Usati: {current_usage}/{MAX_VALIDATIONS_PER_DAY}. Rimanenti: {remaining}"
+
+    return True, f"Utilizzo API: {current_usage} + {rows_to_validate} = {projected_usage}/{MAX_VALIDATIONS_PER_DAY}"
+
+
+def record_api_usage(rows_validated: int):
+    """Record API usage for rate limiting."""
+    if 'api_calls_today' not in st.session_state:
+        st.session_state.api_calls_today = 0
+    st.session_state.api_calls_today += rows_validated
+
+
+def check_cooldown() -> tuple[bool, int]:
+    """
+    Check if enough time has passed since last validation.
+    Returns (is_allowed, seconds_remaining).
+    """
+    if 'last_validation_time' not in st.session_state:
+        return True, 0
+
+    elapsed = (datetime.now() - st.session_state.last_validation_time).total_seconds()
+    if elapsed < MIN_SECONDS_BETWEEN_VALIDATIONS:
+        return False, int(MIN_SECONDS_BETWEEN_VALIDATIONS - elapsed)
+
+    return True, 0
+
+
+def record_validation_time():
+    """Record the time of the last validation."""
+    st.session_state.last_validation_time = datetime.now()
 
 
 # Configurazione pagina
@@ -522,8 +572,17 @@ def zip_validator_page():
             help="Attualmente la validazione supporta solo indirizzi italiani"
         )
 
-    # Process button
+    # Show usage limits
     st.markdown("---")
+    today = datetime.now().strftime("%Y-%m-%d")
+    if 'api_usage_date' not in st.session_state or st.session_state.api_usage_date != today:
+        current_usage = 0
+    else:
+        current_usage = st.session_state.get('api_calls_today', 0)
+
+    usage_pct = (current_usage / MAX_VALIDATIONS_PER_DAY) * 100
+    st.caption(f"📊 Utilizzo API oggi: {current_usage}/{MAX_VALIDATIONS_PER_DAY} ({usage_pct:.0f}%) | Max righe per file: {MAX_EXCEL_ROWS}")
+
     process_button = st.button(
         "🔍 Avvia Validazione",
         type="primary",
@@ -536,6 +595,12 @@ def zip_validator_page():
         # Security check: file size
         if not check_file_size(excel_file, MAX_FILE_SIZE_MB):
             st.error(f"❌ File troppo grande. Massimo: {MAX_FILE_SIZE_MB}MB")
+            st.stop()
+
+        # Security check: cooldown between validations
+        cooldown_ok, seconds_remaining = check_cooldown()
+        if not cooldown_ok:
+            st.warning(f"⏳ Attendi {seconds_remaining} secondi prima della prossima validazione.")
             st.stop()
 
         try:
@@ -568,6 +633,14 @@ def zip_validator_page():
                     st.info("💡 Suggerimento: dividi il file in batch più piccoli.")
                     st.stop()
 
+                # Security check: daily API limit
+                daily_ok, daily_msg = check_daily_api_limit(len(df))
+                if not daily_ok:
+                    st.error(f"❌ {daily_msg}")
+                    st.info("💡 Il limite si resetta a mezzanotte.")
+                    st.stop()
+                st.write(f"✓ {daily_msg}")
+
                 status.update(label=f"✅ File letto ({len(df)} righe)", state="complete")
 
             # Filter by country if needed
@@ -589,10 +662,17 @@ def zip_validator_page():
                 st.warning("⚠️ Nessun indirizzo italiano trovato nel file")
                 st.stop()
 
-            # Validate
+            # Validate - use Google Maps API if key is configured in secrets
+            google_api_key = None
+            try:
+                google_api_key = st.secrets.get("GOOGLE_MAPS_API_KEY", None)
+            except Exception:
+                pass  # No secrets configured
+
             validator = ZipValidator(
                 confidence_threshold=confidence_threshold,
-                street_confidence_threshold=street_confidence_threshold
+                street_confidence_threshold=street_confidence_threshold,
+                google_api_key=google_api_key
             )
 
             # Progress container
@@ -620,6 +700,10 @@ def zip_validator_page():
                 'review_excel': review_excel,
                 'timestamp': timestamp
             }
+
+            # Record API usage for rate limiting
+            record_api_usage(len(df))
+            record_validation_time()
 
         except Exception as e:
             st.error(f"❌ Errore: {str(e)}")
