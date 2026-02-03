@@ -665,7 +665,9 @@ def zip_validator_page():
             # Validate - use Google Maps API if key is configured in secrets
             google_api_key = None
             try:
-                google_api_key = st.secrets.get("GOOGLE_MAPS_API_KEY", None)
+                if "GOOGLE_MAPS_API_KEY" in st.secrets:
+                    google_api_key = st.secrets["GOOGLE_MAPS_API_KEY"]
+                    st.info("🗺️ Usando Google Maps API per maggiore precisione")
             except Exception:
                 pass  # No secrets configured
 
