@@ -520,34 +520,47 @@ def zip_validator_page():
 **1. Prepara il file Excel**
 - Scarica il [template](https://docs.google.com/spreadsheets/d/1eKfU6G-wzpNa8HZDcuddpJAZHEzWUKJUFw-y5LFDKOU/edit?usp=sharing) con il formato corretto
 - Colonne richieste: **Street 1**, **City**, **Zip**, **Country**
-- Colonne opzionali: Street 2, State/Province, Contact Name, Phone
+- Colonne opzionali: Street 2, State/Province, Phone, Order Number, Cash on Delivery
 
 **2. Cosa viene validato**
 - **CAP**: Verifica correttezza e suggerisce correzioni per errori di battitura
 - **Vie**: Verifica esistenza via tramite Google Maps API
 - **Numeri civici**: Il numero civico originale viene SEMPRE preservato
+- **PO (Order Number)**: Verifica che contenga un numero PO valido (es: 3501494822)
+- **Contrassegno (COD)**: Viene automaticamente impostato a 0
 
 **3. Legenda risultati**
 | Simbolo | Significato |
 |---------|-------------|
-| ✓ | Indirizzo verificato correttamente |
-| 🔄 | Corretto automaticamente (confidenza alta) |
+| ✓ | Verificato correttamente |
+| 🔄 | Corretto automaticamente |
 | ⚠️ | Da verificare manualmente |
+| ❌ | Errore (blocca download) |
 | - | Non validato / non applicabile |
 
-**4. Funzionalità avanzate**
-- **Centro Commerciale**: Indirizzi come "C.C. Le Grange Via Roma 1" vengono separati automaticamente
+**4. Validazione PO (Order Number)**
+- Il campo "Order Number" deve contenere un **PO valido** (10 cifre, inizia con 350)
+- Il PO può essere embedded: `SBX-Mat-pt.2-3501494822-18` → estrae `3501494822`
+- **Se il PO non è valido, il download viene bloccato**
+- Lista PO validi: contatta l'amministratore per aggiungerne di nuovi
+
+**5. Contrassegno (Cash on Delivery)**
+- Il campo COD viene **automaticamente impostato a 0** nel file corretto
+- Nella preview vedrai `50→0` se il valore originale era diverso da 0
+
+**6. Funzionalità avanzate**
+- **Centro Commerciale**: "C.C. Le Grange Via Roma 1" viene separato automaticamente
 - **Abbreviazioni**: "V." → "Via", "C.so" → "Corso" vengono gestite
 - **CAP incompleti**: "187" viene corretto in "00187" (Roma)
 
-**5. Limiti di utilizzo**
+**7. Limiti di utilizzo**
 - Max **1.000 righe** per file
 - Max **2.000 validazioni/giorno** per utente
 - Max **500 validazioni/ora** per utente
 - I limiti sono persistenti (non si resettano con refresh)
 
-**6. Scarica i risultati**
-- **File Corretto**: Excel pronto per ShippyPro con correzioni applicate
+**8. Scarica i risultati**
+- **File Corretto**: Excel pronto per ShippyPro (COD=0, correzioni applicate)
 - **Report Revisione**: Dettaglio di tutti gli indirizzi da verificare
         """)
         st.info("💡 **Suggerimento**: Per file grandi, dividili in batch da 500-1000 righe")
@@ -828,6 +841,15 @@ def zip_validator_page():
             not_verified = report.total_rows - report.street_verified_count - report.street_corrected_count - report.skipped_count
             st.metric("⚠️ Da verificare", max(0, not_verified))
 
+        # PO validation warning
+        if report.po_invalid_count > 0:
+            st.markdown("#### 🚨 Numeri Ordine (PO)")
+            st.error(f"**ATTENZIONE:** {report.po_invalid_count} righe hanno un PO non valido o mancante!")
+            st.warning(
+                "I PO devono essere numeri a 10 cifre che iniziano con '350' (es: 3501494822).\n\n"
+                "Il download sarà disabilitato finché tutti i PO non saranno corretti."
+            )
+
         # Preview ALL results (valid, corrected, and needs review)
         st.markdown("### 📋 Dettaglio validazione")
 
@@ -869,6 +891,14 @@ def zip_validator_page():
             else:
                 cod_stato = "0"
 
+            # PO status
+            if r.po_invalid:
+                po_stato = f"❌ {r.po_value[:20]}..." if len(r.po_value) > 20 else f"❌ {r.po_value}"
+            elif r.po_extracted:
+                po_stato = f"✓ {r.po_extracted}"
+            else:
+                po_stato = "-"
+
             preview_data.append({
                 "Città": r.city if r.city else "-",
                 "Via Orig.": r.street if r.street else "-",
@@ -880,6 +910,7 @@ def zip_validator_page():
                 "🌍": country_stato,
                 "📱": phone_stato,
                 "💰": cod_stato,
+                "🛒": po_stato,
                 "Note": r.reason  # Full reason, no truncation
             })
 
@@ -908,11 +939,17 @@ def zip_validator_page():
             st.caption(
                 "**Legenda:** ✓ = OK | 🔄 = Auto-corretto | ⚠️ = Da verificare | "
                 "🌍 IT* = Paese auto-rilevato | 📱+ = Tel. default (393445556667) | "
-                "💰 50→0 = COD impostato a 0"
+                "💰 50→0 = COD impostato a 0 | 🛒 ❌ = PO non valido"
             )
 
         # Downloads - now using pre-generated files from session state
         st.markdown("### 📥 Download")
+
+        # Disable downloads if there are invalid POs
+        download_disabled = report.po_invalid_count > 0
+        if download_disabled:
+            st.error("⛔ Download disabilitato: correggi prima i PO non validi nel file originale")
+
         col_dl1, col_dl2 = st.columns(2)
 
         with col_dl1:
@@ -922,7 +959,8 @@ def zip_validator_page():
                 file_name=f"indirizzi_corretti_{results['timestamp']}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
-                key="download_corrected"
+                key="download_corrected",
+                disabled=download_disabled
             )
 
         with col_dl2:
@@ -932,7 +970,8 @@ def zip_validator_page():
                 file_name=f"report_revisione_{results['timestamp']}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
-                key="download_review"
+                key="download_review",
+                disabled=download_disabled
             )
 
         # Button to clear results and start over
