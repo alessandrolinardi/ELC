@@ -68,8 +68,8 @@ def get_file_size_mb(file) -> float:
 
 def check_daily_api_limit(rows_to_validate: int) -> tuple[bool, str]:
     """
-    Check if we're within daily API call limits.
-    Uses persistent file-based storage that survives deploys and refreshes.
+    Check if we're within API call limits (1000 per 12-hour window).
+    Uses Supabase for persistent storage.
     Returns (is_allowed, message).
     """
     client_ip = get_client_ip()
@@ -79,9 +79,9 @@ def check_daily_api_limit(rows_to_validate: int) -> tuple[bool, str]:
         return False, message
 
     # Build informative message
-    ip_today = usage_info.get('ip_today', 0)
-    ip_limit = usage_info.get('ip_daily_limit', MAX_VALIDATIONS_PER_DAY_PER_IP)
-    return True, f"Utilizzo API: {ip_today} + {rows_to_validate} = {ip_today + rows_to_validate}/{ip_limit}"
+    current = usage_info.get('current_usage', 0)
+    limit = usage_info.get('limit', 1000)
+    return True, f"Utilizzo API: {current} + {rows_to_validate} = {current + rows_to_validate}/{limit}"
 
 
 def record_api_usage(rows_validated: int):
@@ -618,30 +618,25 @@ def zip_validator_page():
     st.markdown("---")
     client_ip = get_client_ip()
     usage_stats = get_usage_stats(client_ip)
-    ip_today = usage_stats.get('ip_today', 0)
-    ip_limit = usage_stats.get('ip_daily_limit', MAX_VALIDATIONS_PER_DAY_PER_IP)
-    ip_this_hour = usage_stats.get('ip_this_hour', 0)
-    ip_hourly_limit = usage_stats.get('ip_hourly_limit', MAX_VALIDATIONS_PER_HOUR_PER_IP)
+    current_usage = usage_stats.get('current_usage', 0)
+    limit = usage_stats.get('limit', 1000)
+    remaining = usage_stats.get('remaining', 1000)
+    period_end = usage_stats.get('period_end', '00:00')
 
-    usage_pct = (ip_today / ip_limit) * 100
-    st.caption(f"📊 Utilizzo API: {ip_today}/{ip_limit} oggi ({usage_pct:.0f}%) | {ip_this_hour}/{ip_hourly_limit} questa ora | Max righe: {MAX_EXCEL_ROWS}")
+    usage_pct = (current_usage / limit) * 100 if limit > 0 else 0
+    st.caption(f"📊 Utilizzo API: {current_usage}/{limit} ({usage_pct:.0f}%) | Rimanenti: {remaining} | Reset: {period_end} | Max righe: {MAX_EXCEL_ROWS}")
 
     # Debug expander for rate limiting troubleshooting
     with st.expander("🔧 Debug Rate Limiting", expanded=False):
         debug_info = get_debug_info(client_ip)
-        st.write(f"**Client IP:** `{debug_info.get('client_ip', 'N/A')}`")
-        st.write(f"**IP Hash:** `{debug_info.get('ip_hash', 'N/A')}`")
-        st.write(f"**Today:** `{debug_info.get('today', 'N/A')}`")
-        st.write(f"**Current Hour:** `{debug_info.get('current_hour', 'N/A')}`")
+        st.write(f"**Period ID:** `{debug_info.get('period_id', 'N/A')}`")
+        st.write(f"**Period End:** `{debug_info.get('period_end', 'N/A')}`")
         st.write(f"**Supabase Connected:** `{debug_info.get('supabase_connected', False)}`")
-        st.write(f"**Records Today:** `{debug_info.get('all_records_count', 0)}`")
-        st.write(f"**Matching IP Records:** `{debug_info.get('matching_ip_records', 0)}`")
-        st.write(f"**Matching IP Total:** `{debug_info.get('matching_ip_total', 0)}`")
-        if debug_info.get('records_today'):
-            st.write("**Today's Records:**")
-            for r in debug_info['records_today']:
-                match_icon = "✅" if r.get('matches_current_ip') else "❌"
-                st.write(f"  {match_icon} `{r.get('ip_hash')}` | date: `{r.get('date')}` | hour: `{r.get('hour')}` | count: `{r.get('request_count')}`")
+        st.write(f"**Current Usage:** `{debug_info.get('current_usage', 0)}/{debug_info.get('limit', 1000)}`")
+        if debug_info.get('records'):
+            st.write("**Records:**")
+            for r in debug_info['records']:
+                st.write(f"  `{r.get('ip_hash')}` | hour: `{r.get('hour')}` | count: `{r.get('request_count')}` | last: `{r.get('last_request')}`")
         if debug_info.get('error'):
             st.error(f"Error: {debug_info.get('error')}")
 
