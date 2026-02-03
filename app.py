@@ -665,11 +665,21 @@ def zip_validator_page():
             # Validate - use Google Maps API if key is configured in secrets
             google_api_key = None
             try:
-                if "GOOGLE_MAPS_API_KEY" in st.secrets:
-                    google_api_key = st.secrets["GOOGLE_MAPS_API_KEY"]
-                    st.info("🗺️ Usando Google Maps API per maggiore precisione")
-            except Exception:
-                pass  # No secrets configured
+                # Try different ways to access the secret
+                if hasattr(st, 'secrets'):
+                    # Try direct access
+                    try:
+                        google_api_key = st.secrets["GOOGLE_MAPS_API_KEY"]
+                        st.success("🗺️ Google Maps API attivo")
+                    except KeyError:
+                        # Maybe it's nested under [google]
+                        try:
+                            google_api_key = st.secrets["google"]["GOOGLE_MAPS_API_KEY"]
+                            st.success("🗺️ Google Maps API attivo")
+                        except (KeyError, TypeError):
+                            st.warning("⚠️ GOOGLE_MAPS_API_KEY non trovata nei secrets - usando Nominatim (lento)")
+            except Exception as e:
+                st.warning(f"⚠️ Errore lettura secrets: {e} - usando Nominatim (lento)")
 
             validator = ZipValidator(
                 confidence_threshold=confidence_threshold,
