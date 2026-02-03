@@ -734,9 +734,15 @@ class ZipValidator:
         # Use original house number if available, otherwise keep API's (if any)
         final_house_num = original_house_num or api_house_num
 
+        # Log for debugging
+        logger.debug(f"_build_street_suggestion: suggested_name={suggested_name!r}, original_street={original_street!r}")
+        logger.debug(f"  -> original_house_num={original_house_num!r}, api_house_num={api_house_num!r}, final={final_house_num!r}")
+
         # Combine the cleaned suggestion with the house number
         if final_house_num:
-            return f"{suggested_street_only} {final_house_num}"
+            result = f"{suggested_street_only} {final_house_num}"
+            logger.debug(f"  -> result={result!r}")
+            return result
         return suggested_street_only
 
     def _extract_location_prefix(self, street: str) -> tuple[str, str]:
@@ -1095,7 +1101,12 @@ class ZipValidator:
             if self._google_available:
                 result = self._query_google(street, city, "Italy")
                 if result:
-                    found_street = result.get('address', {}).get('road')
+                    found_street_raw = result.get('address', {}).get('road')
+                    # Strip any embedded house number from the road name
+                    if found_street_raw:
+                        found_street, _ = self._extract_house_number(found_street_raw)
+                    else:
+                        found_street = None
                     if found_street and found_street.lower() not in seen_streets:
                         seen_streets.add(found_street.lower())
                         similarity = self._string_similarity(street, found_street)
@@ -1108,7 +1119,12 @@ class ZipValidator:
 
                 for result in results:
                     address = result.get('address', {})
-                    found_street = address.get('road')
+                    found_street_raw = address.get('road')
+                    # Strip any embedded house number from the road name
+                    if found_street_raw:
+                        found_street, _ = self._extract_house_number(found_street_raw)
+                    else:
+                        found_street = None
 
                     if found_street and found_street.lower() not in seen_streets:
                         seen_streets.add(found_street.lower())
@@ -1125,7 +1141,12 @@ class ZipValidator:
 
                         for result in results:
                             address = result.get('address', {})
-                            found_street = address.get('road')
+                            found_street_raw = address.get('road')
+                            # Strip any embedded house number from the road name
+                            if found_street_raw:
+                                found_street, _ = self._extract_house_number(found_street_raw)
+                            else:
+                                found_street = None
 
                             if found_street and found_street.lower() not in seen_streets:
                                 seen_streets.add(found_street.lower())
@@ -1204,16 +1225,24 @@ class ZipValidator:
         # Check street match - always try even if city-only match
         if original_street:
             address_data = result.get('address', {})
-            found_street = (
+            found_street_raw = (
                 address_data.get('road') or
                 address_data.get('pedestrian') or
                 address_data.get('footway') or
                 address_data.get('residential')
             )
 
+            # Strip any house number that might be embedded in the road name
+            # (some APIs don't properly separate street and house number)
+            if found_street_raw:
+                found_street, _ = self._extract_house_number(found_street_raw)
+            else:
+                found_street = None
+
             # If we have a street from the response (not city-only), compare it
             if found_street and not is_city_only:
                 similarity = self._string_similarity(original_street, found_street)
+                logger.debug(f"Street comparison: original={original_street!r}, found={found_street!r}, similarity={similarity:.2f}")
 
                 if similarity >= 0.95:
                     # Excellent match
