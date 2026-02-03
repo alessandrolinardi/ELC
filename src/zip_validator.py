@@ -837,6 +837,7 @@ class ZipValidator:
     def _string_similarity(self, s1: str, s2: str) -> float:
         """
         Calculate similarity ratio between two strings.
+        Handles abbreviations like "Alfieri" vs "Vittorio Alfieri".
 
         Returns:
             Similarity score 0.0 to 1.0
@@ -848,6 +849,35 @@ class ZipValidator:
         n1 = self._normalize_street(s1)
         n2 = self._normalize_street(s2)
 
+        if not n1 or not n2:
+            return 0.0
+
+        # Exact match
+        if n1 == n2:
+            return 1.0
+
+        # Check if one is a suffix of the other (handles "Alfieri" vs "Vittorio Alfieri")
+        # This is common in Italian streets where the full name includes a person's first name
+        if n1.endswith(n2) or n2.endswith(n1):
+            return 0.95
+
+        # Check if one is contained in the other
+        if n1 in n2 or n2 in n1:
+            # Give high score if shorter string is significant portion of longer
+            shorter = n1 if len(n1) < len(n2) else n2
+            longer = n2 if len(n1) < len(n2) else n1
+            ratio = len(shorter) / len(longer)
+            if ratio >= 0.5:  # At least half the length
+                return 0.90
+
+        # Check if last words match (common pattern: "V. Alfieri" vs "Vittorio Alfieri")
+        words1 = n1.split()
+        words2 = n2.split()
+        if words1 and words2 and words1[-1] == words2[-1]:
+            # Last word matches - likely same street
+            return 0.90
+
+        # Standard sequence matching
         return SequenceMatcher(None, n1, n2).ratio()
 
     def _clean_zip_code(self, zip_code: str) -> tuple[str, bool]:
