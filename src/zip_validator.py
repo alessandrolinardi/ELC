@@ -972,7 +972,7 @@ class ZipValidator:
         # Standard sequence matching
         return SequenceMatcher(None, n1, n2).ratio()
 
-    def _clean_zip_code(self, zip_code: str) -> tuple[str, bool]:
+    def _clean_zip_code(self, zip_code: str) -> tuple[str, bool, bool]:
         """
         Clean zip code by replacing common typos and padding with leading zeros.
 
@@ -983,7 +983,8 @@ class ZipValidator:
             zip_code: Original zip code
 
         Returns:
-            Tuple of (cleaned_zip, was_cleaned)
+            Tuple of (cleaned_zip, was_cleaned, was_padding_only)
+            - was_padding_only: True if the only change was adding leading zeros
         """
         original = str(zip_code).strip()
 
@@ -1004,13 +1005,21 @@ class ZipValidator:
         # Remove any remaining non-digit characters
         cleaned = re.sub(r'[^\d]', '', cleaned)
 
+        # Check if we only need to pad (before padding)
+        digits_only = cleaned
+        needs_padding = len(cleaned) < 5 and len(cleaned) > 0
+
         # Pad with leading zeros if shorter than 5 digits (Italian CAP)
         # e.g., "187" → "00187" (Rome), "6100" → "06100" (Perugia)
-        if len(cleaned) < 5 and len(cleaned) > 0:
+        if needs_padding:
             cleaned = cleaned.zfill(5)
 
         was_cleaned = cleaned != original.replace(' ', '')
-        return cleaned, was_cleaned
+        # was_padding_only is True if the original digits match the end of cleaned
+        # e.g., "192" → "00192" means digits_only="192" and cleaned ends with "192"
+        was_padding_only = was_cleaned and needs_padding and cleaned.endswith(digits_only)
+
+        return cleaned, was_cleaned, was_padding_only
 
     def _count_different_digits(self, zip1: str, zip2: str) -> int:
         """
@@ -1261,7 +1270,7 @@ class ZipValidator:
             return True, original_zip_raw, 100, "Non-IT country - skipped", True, original_street, 100
 
         # Try to clean up the zip code
-        cleaned_zip, was_cleaned = self._clean_zip_code(original_zip_raw)
+        cleaned_zip, was_cleaned, was_padding_only = self._clean_zip_code(original_zip_raw)
 
         # Track if original ZIP was very incomplete (1-3 digits)
         original_digits = re.sub(r'[^\d]', '', original_zip_raw)
@@ -1402,12 +1411,18 @@ class ZipValidator:
             if city_lower in self.ITALIAN_CAP_RANGES:
                 cap_start, cap_end = self.ITALIAN_CAP_RANGES[city_lower]
                 if cap_start <= working_zip <= cap_end:
+                    # If only padding was needed and ZIP is in valid range, high confidence auto-correct
+                    if was_padding_only:
+                        return False, working_zip, 95, f"Leading zeros added: '{original_zip_raw}' → '{working_zip}' (valid for {city})", street_verified, suggested_street, street_confidence
                     return False, working_zip, 70, f"Street not found - ZIP in city range ({cap_start}-{cap_end})", street_verified, suggested_street, street_confidence
                 else:
                     return False, cap_start, 80, f"ZIP outside city range ({cap_start}-{cap_end})", street_verified, suggested_street, street_confidence
             # No postal code from API - return the cleaned/padded ZIP if it was modified
+            if was_padding_only:
+                # Padding-only is a safe auto-correct
+                return False, working_zip, 95, f"Leading zeros added: '{original_zip_raw}' → '{working_zip}'", street_verified, suggested_street, street_confidence
             if was_cleaned:
-                return False, working_zip, 60, f"No API postal code - using padded ZIP '{original_zip_raw}' → '{working_zip}'", street_verified, suggested_street, street_confidence
+                return False, working_zip, 60, f"No API postal code - using cleaned ZIP '{original_zip_raw}' → '{working_zip}'", street_verified, suggested_street, street_confidence
             return False, working_zip, 50, "No postal code in API response", street_verified, suggested_street, street_confidence
 
         # Handle multiple postcodes
@@ -1424,6 +1439,8 @@ class ZipValidator:
 
         # Exact match
         if working_zip == suggested_zip:
+            if was_padding_only:
+                return False, suggested_zip, 95, f"Leading zeros added: '{original_zip_raw}' → '{suggested_zip}'", street_verified, suggested_street, street_confidence
             if was_cleaned:
                 return False, suggested_zip, 95, f"Typo fixed: '{original_zip_raw}' → '{suggested_zip}'", street_verified, suggested_street, street_confidence
             return True, working_zip, 100, "Exact match", street_verified, suggested_street, street_confidence
