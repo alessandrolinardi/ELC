@@ -1577,6 +1577,17 @@ class ZipValidator:
                 street_verified, suggested_street, street_confidence
             ) = self.validate_address(full_street, city, original_zip, country)
 
+            # FINAL SAFEGUARD: Ensure original house number is ALWAYS preserved in suggestion
+            if suggested_street and full_street:
+                _, original_house_num = self._extract_house_number(full_street)
+                if original_house_num:
+                    # Check if suggestion has the correct house number
+                    suggested_base, suggested_num = self._extract_house_number(suggested_street)
+                    if suggested_num != original_house_num:
+                        # Fix the suggestion to use original house number
+                        suggested_street = f"{suggested_base} {original_house_num}" if suggested_base else f"{suggested_street} {original_house_num}"
+                        logger.debug(f"Fixed suggested_street to preserve house number: {suggested_street}")
+
             # Cross-validate ZIP with province if state column is available
             if state and suggested_zip:
                 province_valid, province_msg = self._validate_zip_province(suggested_zip, state)
