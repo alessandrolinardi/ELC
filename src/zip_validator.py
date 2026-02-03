@@ -1854,9 +1854,18 @@ class ZipValidator:
             if result.auto_corrected and result.suggested_zip and zip_col:
                 df.at[result.row_index, zip_col] = result.suggested_zip
 
-            # Correct street
+            # Correct street (ensure house number is preserved)
             if result.street_auto_corrected and result.suggested_street and street_col:
-                df.at[result.row_index, street_col] = result.suggested_street
+                # Final safeguard: preserve original house number
+                corrected_street = result.suggested_street
+                original_street = result.street
+                if original_street:
+                    _, orig_house = self._extract_house_number(original_street)
+                    if orig_house:
+                        sugg_base, sugg_house = self._extract_house_number(result.suggested_street)
+                        if sugg_house != orig_house:
+                            corrected_street = f"{sugg_base} {orig_house}" if sugg_base else f"{result.suggested_street} {orig_house}"
+                df.at[result.row_index, street_col] = corrected_street
 
             # Fill country code if column exists and value is empty
             if country_col:
@@ -1926,13 +1935,22 @@ class ZipValidator:
         review_items = []
         for r in report.results:
             if not r.is_valid or not r.street_verified:
+                # Fix suggested street to preserve original house number
+                fixed_suggestion = r.suggested_street
+                if r.suggested_street and r.street:
+                    _, orig_house = self._extract_house_number(r.street)
+                    if orig_house:
+                        sugg_base, sugg_house = self._extract_house_number(r.suggested_street)
+                        if sugg_house != orig_house:
+                            fixed_suggestion = f"{sugg_base} {orig_house}" if sugg_base else f"{r.suggested_street} {orig_house}"
+
                 review_items.append({
                     'Row': r.row_index + 2,
                     'Name': r.name,
                     'City': r.city,
                     'Country': f"{r.country_code}{'*' if r.country_detected else ''}",
                     'Original Street': r.street,
-                    'Suggested Street': r.suggested_street or '-',
+                    'Suggested Street': fixed_suggestion or '-',
                     'Street Conf.': f"{r.street_confidence}%" if r.street_confidence else '-',
                     'Street Action': (
                         'Verified' if r.street_verified else
