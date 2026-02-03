@@ -154,16 +154,20 @@ def is_ip_banned(ip: str) -> Tuple[bool, Optional[str]]:
 def _get_daily_totals(client, ip_hash: str, today: str) -> Tuple[int, int]:
     """Get daily totals for global and per-IP usage."""
     try:
-        # Get global daily total
-        global_response = client.table("rate_limits").select("request_count").eq(
+        # Get global daily total - use gte/lte for date to handle timezone differences
+        global_response = client.table("rate_limits").select("request_count, date, ip_hash").gte(
             "date", today
-        ).execute()
+        ).lte("date", today).execute()
+
+        logger.debug(f"Global query for date={today}: found {len(global_response.data or [])} records")
         global_today = sum(r.get("request_count", 0) for r in (global_response.data or []))
 
         # Get IP daily total
         ip_response = client.table("rate_limits").select("request_count").eq(
             "ip_hash", ip_hash
-        ).eq("date", today).execute()
+        ).gte("date", today).lte("date", today).execute()
+
+        logger.debug(f"IP query for ip_hash={ip_hash[:8]}..., date={today}: found {len(ip_response.data or [])} records")
         ip_today = sum(r.get("request_count", 0) for r in (ip_response.data or []))
 
         return global_today, ip_today
@@ -419,3 +423,56 @@ def cleanup_old_records():
         logger.info(f"Cleaned up rate limit records older than {cutoff_date}")
     except Exception as e:
         logger.error(f"Error cleaning up old records: {e}")
+
+
+def get_debug_info(ip: str) -> dict:
+    """
+    Get debug information about rate limiting state.
+    Useful for troubleshooting.
+    """
+    client = _get_supabase_client()
+    now = datetime.now()
+    today = now.strftime("%Y-%m-%d")
+    current_hour = now.strftime("%Y-%m-%d-%H")
+    ip_hash = _get_ip_hash(ip)
+
+    debug_info = {
+        "client_ip": ip,
+        "ip_hash": ip_hash,
+        "today": today,
+        "current_hour": current_hour,
+        "supabase_connected": client is not None,
+        "records_today": [],
+        "all_records_count": 0
+    }
+
+    if client is None:
+        return debug_info
+
+    try:
+        # Get all records for today
+        today_response = client.table("rate_limits").select("*").gte(
+            "date", today
+        ).lte("date", today).execute()
+
+        debug_info["records_today"] = [
+            {
+                "ip_hash": r.get("ip_hash", "")[:8] + "...",
+                "date": str(r.get("date")),
+                "hour": r.get("hour"),
+                "request_count": r.get("request_count"),
+                "matches_current_ip": r.get("ip_hash") == ip_hash
+            }
+            for r in (today_response.data or [])
+        ]
+        debug_info["all_records_count"] = len(today_response.data or [])
+
+        # Check if any records match current IP
+        matching = [r for r in (today_response.data or []) if r.get("ip_hash") == ip_hash]
+        debug_info["matching_ip_records"] = len(matching)
+        debug_info["matching_ip_total"] = sum(r.get("request_count", 0) for r in matching)
+
+    except Exception as e:
+        debug_info["error"] = str(e)
+
+    return debug_info

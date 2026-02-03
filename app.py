@@ -26,7 +26,8 @@ from src.logging_config import setup_logging, get_streamlit_handler, DEBUG, INFO
 from src.security import (
     check_rate_limit, record_usage, get_usage_stats, get_client_ip,
     validate_excel_content, sanitize_filename, record_failed_attempt,
-    MAX_VALIDATIONS_PER_DAY_PER_IP, MAX_VALIDATIONS_PER_HOUR_PER_IP
+    MAX_VALIDATIONS_PER_DAY_PER_IP, MAX_VALIDATIONS_PER_HOUR_PER_IP,
+    get_debug_info
 )
 
 
@@ -624,6 +625,25 @@ def zip_validator_page():
 
     usage_pct = (ip_today / ip_limit) * 100
     st.caption(f"📊 Utilizzo API: {ip_today}/{ip_limit} oggi ({usage_pct:.0f}%) | {ip_this_hour}/{ip_hourly_limit} questa ora | Max righe: {MAX_EXCEL_ROWS}")
+
+    # Debug expander for rate limiting troubleshooting
+    with st.expander("🔧 Debug Rate Limiting", expanded=False):
+        debug_info = get_debug_info(client_ip)
+        st.write(f"**Client IP:** `{debug_info.get('client_ip', 'N/A')}`")
+        st.write(f"**IP Hash:** `{debug_info.get('ip_hash', 'N/A')}`")
+        st.write(f"**Today:** `{debug_info.get('today', 'N/A')}`")
+        st.write(f"**Current Hour:** `{debug_info.get('current_hour', 'N/A')}`")
+        st.write(f"**Supabase Connected:** `{debug_info.get('supabase_connected', False)}`")
+        st.write(f"**Records Today:** `{debug_info.get('all_records_count', 0)}`")
+        st.write(f"**Matching IP Records:** `{debug_info.get('matching_ip_records', 0)}`")
+        st.write(f"**Matching IP Total:** `{debug_info.get('matching_ip_total', 0)}`")
+        if debug_info.get('records_today'):
+            st.write("**Today's Records:**")
+            for r in debug_info['records_today']:
+                match_icon = "✅" if r.get('matches_current_ip') else "❌"
+                st.write(f"  {match_icon} `{r.get('ip_hash')}` | date: `{r.get('date')}` | hour: `{r.get('hour')}` | count: `{r.get('request_count')}`")
+        if debug_info.get('error'):
+            st.error(f"Error: {debug_info.get('error')}")
 
     process_button = st.button(
         "🔍 Avvia Validazione",
