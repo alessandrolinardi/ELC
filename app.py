@@ -592,9 +592,8 @@ def zip_validator_page():
 
 **7. Limiti di utilizzo**
 - Max **1.000 righe** per file
-- Max **2.000 validazioni/giorno** per utente
-- Max **500 validazioni/ora** per utente
-- I limiti sono persistenti (non si resettano con refresh)
+- Max **1.000 validazioni** ogni 12 ore (reset alle 00:00 e 12:00)
+- I limiti sono persistenti e condivisi tra tutti gli utenti
 
 **8. Scarica i risultati**
 - **File Corretto**: Excel pronto per ShippyPro (COD=0, correzioni applicate)
