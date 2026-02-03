@@ -722,15 +722,21 @@ class ZipValidator:
         Returns:
             Suggested street with original house number appended
         """
-        # Extract house number from original street
+        if not suggested_name:
+            return original_street
+
+        # Extract house number from original street - ALWAYS preserve this
         _, original_house_num = self._extract_house_number(original_street)
 
-        # Strip any house number from the API suggestion (Google might return one)
-        suggested_street_only, _ = self._extract_house_number(suggested_name)
+        # Strip any house number from the API suggestion (Google might return a different one)
+        suggested_street_only, api_house_num = self._extract_house_number(suggested_name)
 
-        # Combine the cleaned suggestion with the original house number
-        if original_house_num:
-            return f"{suggested_street_only} {original_house_num}"
+        # Use original house number if available, otherwise keep API's (if any)
+        final_house_num = original_house_num or api_house_num
+
+        # Combine the cleaned suggestion with the house number
+        if final_house_num:
+            return f"{suggested_street_only} {final_house_num}"
         return suggested_street_only
 
     def _extract_location_prefix(self, street: str) -> tuple[str, str]:
