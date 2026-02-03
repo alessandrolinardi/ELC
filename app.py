@@ -23,6 +23,11 @@ from src.address_book import (
     get_address_display_name, get_address_summary, Address, is_sheets_configured
 )
 from src.logging_config import setup_logging, get_streamlit_handler, DEBUG, INFO
+from src.security import (
+    check_rate_limit, record_usage, get_usage_stats, get_client_ip,
+    validate_excel_content, sanitize_filename, record_failed_attempt,
+    MAX_VALIDATIONS_PER_DAY_PER_IP, MAX_VALIDATIONS_PER_HOUR_PER_IP
+)
 
 
 # Initialize logging (only once per session)
@@ -37,8 +42,7 @@ if 'logging_initialized' not in st.session_state:
 MAX_FILE_SIZE_MB = 50  # Maximum file size in MB
 MAX_PDF_PAGES = 500    # Maximum pages in PDF
 MAX_EXCEL_ROWS = 1000  # Maximum rows in Excel for ZIP validation
-MAX_VALIDATIONS_PER_DAY = 2000  # Daily limit for Google API calls
-MIN_SECONDS_BETWEEN_VALIDATIONS = 10  # Cooldown between validation runs
+# Note: API rate limits are now handled by src/security.py with persistent storage
 
 
 def check_file_size(file, max_mb: int = MAX_FILE_SIZE_MB) -> bool:
@@ -64,30 +68,25 @@ def get_file_size_mb(file) -> float:
 def check_daily_api_limit(rows_to_validate: int) -> tuple[bool, str]:
     """
     Check if we're within daily API call limits.
+    Uses persistent file-based storage that survives deploys and refreshes.
     Returns (is_allowed, message).
     """
-    today = datetime.now().strftime("%Y-%m-%d")
+    client_ip = get_client_ip()
+    allowed, message, usage_info = check_rate_limit(client_ip, rows_to_validate)
 
-    # Initialize or reset daily counter
-    if 'api_usage_date' not in st.session_state or st.session_state.api_usage_date != today:
-        st.session_state.api_usage_date = today
-        st.session_state.api_calls_today = 0
+    if not allowed:
+        return False, message
 
-    current_usage = st.session_state.api_calls_today
-    projected_usage = current_usage + rows_to_validate
-
-    if projected_usage > MAX_VALIDATIONS_PER_DAY:
-        remaining = MAX_VALIDATIONS_PER_DAY - current_usage
-        return False, f"Limite giornaliero API raggiunto. Usati: {current_usage}/{MAX_VALIDATIONS_PER_DAY}. Rimanenti: {remaining}"
-
-    return True, f"Utilizzo API: {current_usage} + {rows_to_validate} = {projected_usage}/{MAX_VALIDATIONS_PER_DAY}"
+    # Build informative message
+    ip_today = usage_info.get('ip_today', 0)
+    ip_limit = usage_info.get('ip_daily_limit', MAX_VALIDATIONS_PER_DAY_PER_IP)
+    return True, f"Utilizzo API: {ip_today} + {rows_to_validate} = {ip_today + rows_to_validate}/{ip_limit}"
 
 
 def record_api_usage(rows_validated: int):
-    """Record API usage for rate limiting."""
-    if 'api_calls_today' not in st.session_state:
-        st.session_state.api_calls_today = 0
-    st.session_state.api_calls_today += rows_validated
+    """Record API usage for persistent rate limiting."""
+    client_ip = get_client_ip()
+    record_usage(client_ip, rows_validated)
 
 
 def check_cooldown() -> tuple[bool, int]:
@@ -572,16 +571,17 @@ def zip_validator_page():
             help="Attualmente la validazione supporta solo indirizzi italiani"
         )
 
-    # Show usage limits
+    # Show usage limits (now using persistent storage)
     st.markdown("---")
-    today = datetime.now().strftime("%Y-%m-%d")
-    if 'api_usage_date' not in st.session_state or st.session_state.api_usage_date != today:
-        current_usage = 0
-    else:
-        current_usage = st.session_state.get('api_calls_today', 0)
+    client_ip = get_client_ip()
+    usage_stats = get_usage_stats(client_ip)
+    ip_today = usage_stats.get('ip_today', 0)
+    ip_limit = usage_stats.get('ip_daily_limit', MAX_VALIDATIONS_PER_DAY_PER_IP)
+    ip_this_hour = usage_stats.get('ip_this_hour', 0)
+    ip_hourly_limit = usage_stats.get('ip_hourly_limit', MAX_VALIDATIONS_PER_HOUR_PER_IP)
 
-    usage_pct = (current_usage / MAX_VALIDATIONS_PER_DAY) * 100
-    st.caption(f"📊 Utilizzo API oggi: {current_usage}/{MAX_VALIDATIONS_PER_DAY} ({usage_pct:.0f}%) | Max righe per file: {MAX_EXCEL_ROWS}")
+    usage_pct = (ip_today / ip_limit) * 100
+    st.caption(f"📊 Utilizzo API: {ip_today}/{ip_limit} oggi ({usage_pct:.0f}%) | {ip_this_hour}/{ip_hourly_limit} questa ora | Max righe: {MAX_EXCEL_ROWS}")
 
     process_button = st.button(
         "🔍 Avvia Validazione",
@@ -623,6 +623,13 @@ def zip_validator_page():
 
                 # Store original df before any filtering
                 original_df = df.copy()
+
+                # Security check: validate Excel content for malicious formulas
+                content_valid, content_error = validate_excel_content(df)
+                if not content_valid:
+                    st.error(f"❌ Contenuto non valido: {content_error}")
+                    record_failed_attempt(get_client_ip())
+                    st.stop()
 
                 st.write(f"✓ Righe trovate: {len(df)}")
                 st.write(f"✓ Colonne: {', '.join(df.columns[:8].tolist())}...")
