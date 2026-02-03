@@ -429,10 +429,18 @@ class ZipValidator:
         # Try Google first (best accuracy, handles neighborhoods like "Cascina Merlata")
         if self._google_available:
             result = self._query_google(street, city, country)
-            if result and result.get('address', {}).get('postcode'):
+            if result:
+                # If Google found something, use it (even if no postcode)
+                # Don't fall back to slower APIs
                 return result
+            # Google returned nothing - try city-only query with Google
+            city_result = self._query_google("", city, country)
+            if city_result:
+                city_result['_city_only'] = True
+                return city_result
+            # Google found nothing at all - fall through to other APIs
 
-        # Try Photon second (fast, no rate limits)
+        # Try Photon second (fast, no rate limits) - only if Google not available or failed
         if self._photon_available:
             # Build query string for Photon
             parts = [p for p in [street, city, country] if p and p.strip()]
@@ -1014,7 +1022,7 @@ class ZipValidator:
     def _search_similar_streets(self, street: str, city: str) -> list[tuple[str, float, dict]]:
         """
         Search for streets similar to the input in the given city.
-        Uses Photon API only for maximum speed.
+        Uses Google API (if available) or Photon API for speed.
 
         Args:
             street: Street to search for
@@ -1033,8 +1041,18 @@ class ZipValidator:
             # Extract street components
             street_prefix, street_name = self._extract_street_name(street)
 
-            # Use Photon API (fast, no rate limits)
-            if self._photon_available:
+            # Try Google first (if available) - best accuracy
+            if self._google_available:
+                result = self._query_google(street, city, "Italy")
+                if result:
+                    found_street = result.get('address', {}).get('road')
+                    if found_street and found_street.lower() not in seen_streets:
+                        seen_streets.add(found_street.lower())
+                        similarity = self._string_similarity(street, found_street)
+                        matches.append((found_street, similarity, result))
+
+            # Try Photon as fallback (fast, no rate limits)
+            if not matches and self._photon_available:
                 query = f"{street}, {city}, Italy"
                 results = self._query_photon(query, limit=10)
 
