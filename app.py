@@ -665,18 +665,54 @@ def zip_validator_page():
             # Validate - use Google Maps API if key is configured in secrets
             google_api_key = None
             try:
-                # Try nested under [google] first (user's format)
-                if "google" in st.secrets and "GOOGLE_MAPS_API_KEY" in st.secrets["google"]:
-                    google_api_key = st.secrets["google"]["GOOGLE_MAPS_API_KEY"]
-                    st.success("🗺️ Google Maps API attivo (da [google])")
-                # Try direct access as fallback
-                elif "GOOGLE_MAPS_API_KEY" in st.secrets:
-                    google_api_key = st.secrets["GOOGLE_MAPS_API_KEY"]
+                # Try multiple access patterns for the Google API key
+                key_found = False
+
+                # Pattern 1: Nested under [google] section
+                if not key_found:
+                    try:
+                        if "google" in st.secrets:
+                            val = st.secrets["google"]["GOOGLE_MAPS_API_KEY"]
+                            if val and str(val).strip():
+                                google_api_key = str(val).strip()
+                                key_found = True
+                    except:
+                        pass
+
+                # Pattern 2: Direct top-level key
+                if not key_found:
+                    try:
+                        val = st.secrets["GOOGLE_MAPS_API_KEY"]
+                        if val and str(val).strip():
+                            google_api_key = str(val).strip()
+                            key_found = True
+                    except:
+                        pass
+
+                # Pattern 3: Search for any key containing "google" and "api"
+                if not key_found:
+                    try:
+                        for section_key in st.secrets:
+                            section = st.secrets[section_key]
+                            if hasattr(section, 'keys'):
+                                for k in section.keys():
+                                    if 'google' in k.lower() and 'api' in k.lower():
+                                        val = section[k]
+                                        if val and str(val).strip():
+                                            google_api_key = str(val).strip()
+                                            key_found = True
+                                            break
+                            if key_found:
+                                break
+                    except:
+                        pass
+
+                if key_found and google_api_key:
                     st.success("🗺️ Google Maps API attivo")
                 else:
-                    st.warning("⚠️ GOOGLE_MAPS_API_KEY non trovata - usando Nominatim (lento)")
-            except Exception as e:
-                st.warning(f"⚠️ Errore secrets: {e}")
+                    google_api_key = None
+            except:
+                google_api_key = None
 
             validator = ZipValidator(
                 confidence_threshold=confidence_threshold,
