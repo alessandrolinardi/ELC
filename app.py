@@ -512,16 +512,45 @@ def label_sorter_page():
 def zip_validator_page():
     """Page for Address Validator feature."""
     st.markdown("# 📍 Address Validator")
-    st.markdown("*Valida e correggi indirizzi, CAP e vie*")
+    st.markdown("*Valida e correggi indirizzi, CAP e vie con Google Maps API*")
 
     # User guide
-    st.info(
-        "**Come usare questo strumento:**\n"
-        "- Carica un file Excel con il formato corretto. "
-        "[Scarica il template](https://docs.google.com/spreadsheets/d/1eKfU6G-wzpNa8HZDcuddpJAZHEzWUKJUFw-y5LFDKOU/edit?usp=sharing)\n"
-        "- Il sistema valida CAP e verifica che le vie esistano\n"
-        "- Al termine, scarica il file corretto e caricalo su ShippyPro"
-    )
+    with st.expander("📖 Come usare questo strumento", expanded=False):
+        st.markdown("""
+**1. Prepara il file Excel**
+- Scarica il [template](https://docs.google.com/spreadsheets/d/1eKfU6G-wzpNa8HZDcuddpJAZHEzWUKJUFw-y5LFDKOU/edit?usp=sharing) con il formato corretto
+- Colonne richieste: **Street 1**, **City**, **Zip**, **Country**
+- Colonne opzionali: Street 2, State/Province, Contact Name, Phone
+
+**2. Cosa viene validato**
+- **CAP**: Verifica correttezza e suggerisce correzioni per errori di battitura
+- **Vie**: Verifica esistenza via tramite Google Maps API
+- **Numeri civici**: Il numero civico originale viene SEMPRE preservato
+
+**3. Legenda risultati**
+| Simbolo | Significato |
+|---------|-------------|
+| ✓ | Indirizzo verificato correttamente |
+| 🔄 | Corretto automaticamente (confidenza alta) |
+| ⚠️ | Da verificare manualmente |
+| - | Non validato / non applicabile |
+
+**4. Funzionalità avanzate**
+- **Centro Commerciale**: Indirizzi come "C.C. Le Grange Via Roma 1" vengono separati automaticamente
+- **Abbreviazioni**: "V." → "Via", "C.so" → "Corso" vengono gestite
+- **CAP incompleti**: "187" viene corretto in "00187" (Roma)
+
+**5. Limiti di utilizzo**
+- Max **1.000 righe** per file
+- Max **2.000 validazioni/giorno** per utente
+- Max **500 validazioni/ora** per utente
+- I limiti sono persistenti (non si resettano con refresh)
+
+**6. Scarica i risultati**
+- **File Corretto**: Excel pronto per ShippyPro con correzioni applicate
+- **Report Revisione**: Dettaglio di tutti gli indirizzi da verificare
+        """)
+        st.info("💡 **Suggerimento**: Per file grandi, dividili in batch da 500-1000 righe")
 
     st.markdown("---")
 
