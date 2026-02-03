@@ -23,6 +23,11 @@ from src.address_book import (
     get_address_display_name, get_address_summary, Address, is_sheets_configured
 )
 from src.logging_config import setup_logging, get_streamlit_handler, DEBUG, INFO
+from src.security import (
+    check_rate_limit, record_usage, get_usage_stats, get_client_ip,
+    validate_excel_content, sanitize_filename, record_failed_attempt,
+    MAX_VALIDATIONS_PER_DAY_PER_IP, MAX_VALIDATIONS_PER_HOUR_PER_IP
+)
 
 
 # Initialize logging (only once per session)
@@ -37,8 +42,7 @@ if 'logging_initialized' not in st.session_state:
 MAX_FILE_SIZE_MB = 50  # Maximum file size in MB
 MAX_PDF_PAGES = 500    # Maximum pages in PDF
 MAX_EXCEL_ROWS = 1000  # Maximum rows in Excel for ZIP validation
-MAX_VALIDATIONS_PER_DAY = 2000  # Daily limit for Google API calls
-MIN_SECONDS_BETWEEN_VALIDATIONS = 10  # Cooldown between validation runs
+# Note: API rate limits are now handled by src/security.py with persistent storage
 
 
 def check_file_size(file, max_mb: int = MAX_FILE_SIZE_MB) -> bool:
@@ -64,30 +68,25 @@ def get_file_size_mb(file) -> float:
 def check_daily_api_limit(rows_to_validate: int) -> tuple[bool, str]:
     """
     Check if we're within daily API call limits.
+    Uses persistent file-based storage that survives deploys and refreshes.
     Returns (is_allowed, message).
     """
-    today = datetime.now().strftime("%Y-%m-%d")
+    client_ip = get_client_ip()
+    allowed, message, usage_info = check_rate_limit(client_ip, rows_to_validate)
 
-    # Initialize or reset daily counter
-    if 'api_usage_date' not in st.session_state or st.session_state.api_usage_date != today:
-        st.session_state.api_usage_date = today
-        st.session_state.api_calls_today = 0
+    if not allowed:
+        return False, message
 
-    current_usage = st.session_state.api_calls_today
-    projected_usage = current_usage + rows_to_validate
-
-    if projected_usage > MAX_VALIDATIONS_PER_DAY:
-        remaining = MAX_VALIDATIONS_PER_DAY - current_usage
-        return False, f"Limite giornaliero API raggiunto. Usati: {current_usage}/{MAX_VALIDATIONS_PER_DAY}. Rimanenti: {remaining}"
-
-    return True, f"Utilizzo API: {current_usage} + {rows_to_validate} = {projected_usage}/{MAX_VALIDATIONS_PER_DAY}"
+    # Build informative message
+    ip_today = usage_info.get('ip_today', 0)
+    ip_limit = usage_info.get('ip_daily_limit', MAX_VALIDATIONS_PER_DAY_PER_IP)
+    return True, f"Utilizzo API: {ip_today} + {rows_to_validate} = {ip_today + rows_to_validate}/{ip_limit}"
 
 
 def record_api_usage(rows_validated: int):
-    """Record API usage for rate limiting."""
-    if 'api_calls_today' not in st.session_state:
-        st.session_state.api_calls_today = 0
-    st.session_state.api_calls_today += rows_validated
+    """Record API usage for persistent rate limiting."""
+    client_ip = get_client_ip()
+    record_usage(client_ip, rows_validated)
 
 
 def check_cooldown() -> tuple[bool, int]:
@@ -513,16 +512,58 @@ def label_sorter_page():
 def zip_validator_page():
     """Page for Address Validator feature."""
     st.markdown("# 📍 Address Validator")
-    st.markdown("*Valida e correggi indirizzi, CAP e vie*")
+    st.markdown("*Valida e correggi indirizzi, CAP e vie con Google Maps API*")
 
     # User guide
-    st.info(
-        "**Come usare questo strumento:**\n"
-        "- Carica un file Excel con il formato corretto. "
-        "[Scarica il template](https://docs.google.com/spreadsheets/d/1eKfU6G-wzpNa8HZDcuddpJAZHEzWUKJUFw-y5LFDKOU/edit?usp=sharing)\n"
-        "- Il sistema valida CAP e verifica che le vie esistano\n"
-        "- Al termine, scarica il file corretto e caricalo su ShippyPro"
-    )
+    with st.expander("📖 Come usare questo strumento", expanded=False):
+        st.markdown("""
+**1. Prepara il file Excel**
+- Scarica il [template](https://docs.google.com/spreadsheets/d/1eKfU6G-wzpNa8HZDcuddpJAZHEzWUKJUFw-y5LFDKOU/edit?usp=sharing) con il formato corretto
+- Colonne richieste: **Street 1**, **City**, **Zip**, **Country**
+- Colonne opzionali: Street 2, State/Province, Phone, Order Number, Cash on Delivery
+
+**2. Cosa viene validato**
+- **CAP**: Verifica correttezza e suggerisce correzioni per errori di battitura
+- **Vie**: Verifica esistenza via tramite Google Maps API
+- **Numeri civici**: Il numero civico originale viene SEMPRE preservato
+- **PO (Order Number)**: Verifica che contenga un numero PO valido (es: 3501494822)
+- **Contrassegno (COD)**: Viene automaticamente impostato a 0
+
+**3. Legenda risultati**
+| Simbolo | Significato |
+|---------|-------------|
+| ✓ | Verificato correttamente |
+| 🔄 | Corretto automaticamente |
+| ⚠️ | Da verificare manualmente |
+| ❌ | Errore (blocca download) |
+| - | Non validato / non applicabile |
+
+**4. Validazione PO (Order Number)**
+- Il campo "Order Number" deve contenere un **PO valido** (10 cifre, inizia con 350)
+- Il PO può essere embedded: `SBX-Mat-pt.2-3501494822-18` → estrae `3501494822`
+- **Se il PO non è valido, il download viene bloccato**
+- Lista PO validi: contatta l'amministratore per aggiungerne di nuovi
+
+**5. Contrassegno (Cash on Delivery)**
+- Il campo COD viene **automaticamente impostato a 0** nel file corretto
+- Nella preview vedrai `50→0` se il valore originale era diverso da 0
+
+**6. Funzionalità avanzate**
+- **Centro Commerciale**: "C.C. Le Grange Via Roma 1" viene separato automaticamente
+- **Abbreviazioni**: "V." → "Via", "C.so" → "Corso" vengono gestite
+- **CAP incompleti**: "187" viene corretto in "00187" (Roma)
+
+**7. Limiti di utilizzo**
+- Max **1.000 righe** per file
+- Max **2.000 validazioni/giorno** per utente
+- Max **500 validazioni/ora** per utente
+- I limiti sono persistenti (non si resettano con refresh)
+
+**8. Scarica i risultati**
+- **File Corretto**: Excel pronto per ShippyPro (COD=0, correzioni applicate)
+- **Report Revisione**: Dettaglio di tutti gli indirizzi da verificare
+        """)
+        st.info("💡 **Suggerimento**: Per file grandi, dividili in batch da 500-1000 righe")
 
     st.markdown("---")
 
@@ -572,16 +613,17 @@ def zip_validator_page():
             help="Attualmente la validazione supporta solo indirizzi italiani"
         )
 
-    # Show usage limits
+    # Show usage limits (now using persistent storage)
     st.markdown("---")
-    today = datetime.now().strftime("%Y-%m-%d")
-    if 'api_usage_date' not in st.session_state or st.session_state.api_usage_date != today:
-        current_usage = 0
-    else:
-        current_usage = st.session_state.get('api_calls_today', 0)
+    client_ip = get_client_ip()
+    usage_stats = get_usage_stats(client_ip)
+    ip_today = usage_stats.get('ip_today', 0)
+    ip_limit = usage_stats.get('ip_daily_limit', MAX_VALIDATIONS_PER_DAY_PER_IP)
+    ip_this_hour = usage_stats.get('ip_this_hour', 0)
+    ip_hourly_limit = usage_stats.get('ip_hourly_limit', MAX_VALIDATIONS_PER_HOUR_PER_IP)
 
-    usage_pct = (current_usage / MAX_VALIDATIONS_PER_DAY) * 100
-    st.caption(f"📊 Utilizzo API oggi: {current_usage}/{MAX_VALIDATIONS_PER_DAY} ({usage_pct:.0f}%) | Max righe per file: {MAX_EXCEL_ROWS}")
+    usage_pct = (ip_today / ip_limit) * 100
+    st.caption(f"📊 Utilizzo API: {ip_today}/{ip_limit} oggi ({usage_pct:.0f}%) | {ip_this_hour}/{ip_hourly_limit} questa ora | Max righe: {MAX_EXCEL_ROWS}")
 
     process_button = st.button(
         "🔍 Avvia Validazione",
@@ -623,6 +665,13 @@ def zip_validator_page():
 
                 # Store original df before any filtering
                 original_df = df.copy()
+
+                # Security check: validate Excel content for malicious formulas
+                content_valid, content_error = validate_excel_content(df)
+                if not content_valid:
+                    st.error(f"❌ Contenuto non valido: {content_error}")
+                    record_failed_attempt(get_client_ip())
+                    st.stop()
 
                 st.write(f"✓ Righe trovate: {len(df)}")
                 st.write(f"✓ Colonne: {', '.join(df.columns[:8].tolist())}...")
@@ -792,6 +841,15 @@ def zip_validator_page():
             not_verified = report.total_rows - report.street_verified_count - report.street_corrected_count - report.skipped_count
             st.metric("⚠️ Da verificare", max(0, not_verified))
 
+        # PO validation warning
+        if report.po_invalid_count > 0:
+            st.markdown("#### 🚨 Numeri Ordine (PO)")
+            st.error(f"**ATTENZIONE:** {report.po_invalid_count} righe hanno un PO non valido o mancante!")
+            st.warning(
+                "I PO devono essere numeri a 10 cifre che iniziano con '350' (es: 3501494822).\n\n"
+                "Il download sarà disabilitato finché tutti i PO non saranno corretti."
+            )
+
         # Preview ALL results (valid, corrected, and needs review)
         st.markdown("### 📋 Dettaglio validazione")
 
@@ -833,6 +891,14 @@ def zip_validator_page():
             else:
                 cod_stato = "0"
 
+            # PO status
+            if r.po_invalid:
+                po_stato = f"❌ {r.po_value[:20]}..." if len(r.po_value) > 20 else f"❌ {r.po_value}"
+            elif r.po_extracted:
+                po_stato = f"✓ {r.po_extracted}"
+            else:
+                po_stato = "-"
+
             preview_data.append({
                 "Città": r.city if r.city else "-",
                 "Via Orig.": r.street if r.street else "-",
@@ -844,6 +910,7 @@ def zip_validator_page():
                 "🌍": country_stato,
                 "📱": phone_stato,
                 "💰": cod_stato,
+                "🛒": po_stato,
                 "Note": r.reason  # Full reason, no truncation
             })
 
@@ -872,11 +939,17 @@ def zip_validator_page():
             st.caption(
                 "**Legenda:** ✓ = OK | 🔄 = Auto-corretto | ⚠️ = Da verificare | "
                 "🌍 IT* = Paese auto-rilevato | 📱+ = Tel. default (393445556667) | "
-                "💰 50→0 = COD impostato a 0"
+                "💰 50→0 = COD impostato a 0 | 🛒 ❌ = PO non valido"
             )
 
         # Downloads - now using pre-generated files from session state
         st.markdown("### 📥 Download")
+
+        # Disable downloads if there are invalid POs
+        download_disabled = report.po_invalid_count > 0
+        if download_disabled:
+            st.error("⛔ Download disabilitato: correggi prima i PO non validi nel file originale")
+
         col_dl1, col_dl2 = st.columns(2)
 
         with col_dl1:
@@ -886,7 +959,8 @@ def zip_validator_page():
                 file_name=f"indirizzi_corretti_{results['timestamp']}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
-                key="download_corrected"
+                key="download_corrected",
+                disabled=download_disabled
             )
 
         with col_dl2:
@@ -896,7 +970,8 @@ def zip_validator_page():
                 file_name=f"report_revisione_{results['timestamp']}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
-                key="download_review"
+                key="download_review",
+                disabled=download_disabled
             )
 
         # Button to clear results and start over
