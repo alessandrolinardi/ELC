@@ -5,6 +5,7 @@ App Streamlit multi-funzione per la gestione delle spedizioni.
 
 import io
 import csv
+import re
 import logging
 import requests
 from datetime import datetime, date, time, timedelta
@@ -44,6 +45,41 @@ MAX_FILE_SIZE_MB = 50  # Maximum file size in MB
 MAX_PDF_PAGES = 500    # Maximum pages in PDF
 MAX_EXCEL_ROWS = 1000  # Maximum rows in Excel for ZIP validation
 # Note: API rate limits are now handled by src/security.py with persistent storage
+
+
+def fix_suggested_street(original_street: str, suggested_street: str) -> str:
+    """
+    Ensure the suggested street preserves the original house number.
+
+    This is a final safeguard to prevent showing wrong house numbers in the UI.
+    Example: Original "Via Riserva Nuova 4" with suggestion "Via Riserva Nuova 2"
+             should display "Via Riserva Nuova 4" (preserving original house number).
+    """
+    if not suggested_street or not original_street:
+        return suggested_street or "-"
+
+    # Extract house number from original street
+    # Match house numbers at the end: "21", "11/A", "123bis", etc.
+    orig_match = re.search(r'\s+(\d+[/\-]?\w*(?:\s+\d+[/\-]?\w*)*)\s*$', original_street)
+    if not orig_match:
+        return suggested_street  # No house number in original, return suggestion as-is
+
+    original_house_num = orig_match.group(1)
+
+    # Extract house number from suggested street
+    sugg_match = re.search(r'\s+(\d+[/\-]?\w*(?:\s+\d+[/\-]?\w*)*)\s*$', suggested_street)
+
+    if sugg_match:
+        # Suggestion has a house number - check if it matches original
+        suggested_house_num = sugg_match.group(1)
+        if suggested_house_num != original_house_num:
+            # Replace wrong house number with original
+            suggested_base = suggested_street[:sugg_match.start()].strip()
+            return f"{suggested_base} {original_house_num}"
+        return suggested_street  # House numbers match
+    else:
+        # Suggestion has no house number - append original
+        return f"{suggested_street} {original_house_num}"
 
 
 def check_file_size(file, max_mb: int = MAX_FILE_SIZE_MB) -> bool:
@@ -917,7 +953,7 @@ def zip_validator_page():
             preview_data.append({
                 "Città": r.city if r.city else "-",
                 "Via Orig.": r.street if r.street else "-",
-                "Via Sugg.": r.suggested_street if r.suggested_street else "-",
+                "Via Sugg.": fix_suggested_street(r.street, r.suggested_street) if r.suggested_street else "-",
                 "🛣️": street_stato,
                 "ZIP Orig.": r.original_zip,
                 "ZIP Sugg.": r.suggested_zip or "-",
