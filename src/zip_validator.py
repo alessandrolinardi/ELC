@@ -6,10 +6,12 @@ is used as a reliable fallback.
 """
 
 import time
+import json
 import requests
 from dataclasses import dataclass
 from typing import Optional, Callable
 from io import BytesIO
+from pathlib import Path
 import re
 from difflib import SequenceMatcher
 
@@ -47,6 +49,10 @@ class ValidationResult:
     original_phone: str = ""         # Original phone value
     cod_changed: bool = False        # True if Cash on Delivery will be set to 0
     original_cod: str = ""           # Original COD value
+    # PO validation
+    po_invalid: bool = False         # True if Order Number has invalid/missing PO
+    po_value: str = ""               # Original Order Number value
+    po_extracted: str = ""           # Extracted PO number (if found)
 
 
 @dataclass
@@ -61,6 +67,8 @@ class ValidationReport:
     # Street stats
     street_verified_count: int = 0
     street_corrected_count: int = 0
+    # PO validation stats
+    po_invalid_count: int = 0        # Count of rows with invalid/missing PO
 
 
 class ZipValidator:
@@ -183,6 +191,64 @@ class ZipValidator:
         self._photon_available = True  # Track if Photon is responding
         self._photon_empty_count = 0  # Track consecutive empty results from Photon
         self._city_cache = {}  # Cache for city lookups: city_name -> result
+        self._valid_po_numbers = self._load_valid_po_numbers()  # Load valid PO numbers
+
+    def _load_valid_po_numbers(self) -> set:
+        """Load valid PO numbers from JSON file."""
+        po_file = Path(__file__).parent.parent / "data" / "valid_po_numbers.json"
+        try:
+            if po_file.exists():
+                with open(po_file, 'r') as f:
+                    data = json.load(f)
+                    return set(data.get('po_numbers', []))
+        except (json.JSONDecodeError, IOError) as e:
+            logger.warning(f"Could not load PO numbers: {e}")
+        return set()
+
+    def extract_po_from_string(self, value: str) -> Optional[str]:
+        """
+        Extract PO number from a string that may contain other characters.
+
+        PO numbers are 10-digit numbers starting with 350.
+        Examples:
+            "3501494822" -> "3501494822"
+            "SBX-Mat-pt.2-3501494822-18" -> "3501494822"
+            "Order 3501487603 shipped" -> "3501487603"
+
+        Returns:
+            Extracted PO number or None if not found
+        """
+        if not value:
+            return None
+
+        # Look for 10-digit numbers starting with 350
+        matches = re.findall(r'350\d{7}', str(value))
+        if matches:
+            return matches[0]  # Return first match
+        return None
+
+    def validate_po_number(self, order_number: str) -> tuple[bool, str, str]:
+        """
+        Validate that an Order Number contains a valid PO number.
+
+        Args:
+            order_number: The Order Number field value
+
+        Returns:
+            Tuple of (is_valid, extracted_po, error_message)
+        """
+        if not order_number or str(order_number).lower() in ('nan', 'none', ''):
+            return False, "", "Order Number vuoto"
+
+        extracted_po = self.extract_po_from_string(str(order_number))
+
+        if not extracted_po:
+            return False, "", f"Nessun PO trovato in '{order_number}'"
+
+        if extracted_po not in self._valid_po_numbers:
+            return False, extracted_po, f"PO {extracted_po} non valido (non in lista)"
+
+        return True, extracted_po, ""
 
     def _query_photon(self, query: str, limit: int = 5) -> list[dict]:
         """
@@ -1461,6 +1527,7 @@ class ZipValidator:
         skipped_count = 0
         street_verified_count = 0
         street_corrected_count = 0
+        po_invalid_count = 0
 
         col_map = self._map_columns(df)
         logger.debug(f"Column mapping: {col_map}")
@@ -1514,6 +1581,20 @@ class ZipValidator:
                 original_cod = str(cod_raw).strip() if pd.notna(cod_raw) else ''
                 # COD needs to be changed if it's not 0
                 cod_changed = original_cod != '0' and original_cod.lower() != 'nan' and original_cod != ''
+
+            # Get Order Number if available - validate PO number
+            order_col = col_map.get('order_number')
+            po_value = ''
+            po_extracted = ''
+            po_invalid = False
+            if order_col:
+                order_raw = row.get(order_col, '')
+                po_value = str(order_raw).strip() if pd.notna(order_raw) else ''
+                if po_value and po_value.lower() != 'nan':
+                    po_valid, po_extracted, po_error = self.validate_po_number(po_value)
+                    po_invalid = not po_valid
+                    if po_invalid:
+                        logger.warning(f"Row {idx}: Invalid PO - {po_error}")
 
             # Get country from column or auto-detect
             country_detected = False
@@ -1627,7 +1708,10 @@ class ZipValidator:
                 phone_missing=phone_missing,
                 original_phone=original_phone,
                 cod_changed=cod_changed,
-                original_cod=original_cod
+                original_cod=original_cod,
+                po_invalid=po_invalid,
+                po_value=po_value,
+                po_extracted=po_extracted
             )
             results.append(result)
 
@@ -1644,6 +1728,9 @@ class ZipValidator:
             elif street_auto_correct:
                 street_corrected_count += 1
 
+            if po_invalid:
+                po_invalid_count += 1
+
             # Rate limiting - only needed for Nominatim fallback
             if not self._photon_available:
                 time.sleep(self.REQUEST_DELAY)
@@ -1655,6 +1742,8 @@ class ZipValidator:
         logger.info(
             f"Streets: {street_verified_count} verified, {street_corrected_count} corrected"
         )
+        if po_invalid_count > 0:
+            logger.warning(f"PO validation: {po_invalid_count} invalid PO numbers found")
 
         report = ValidationReport(
             total_rows=total,
@@ -1664,7 +1753,8 @@ class ZipValidator:
             skipped_count=skipped_count,
             results=results,
             street_verified_count=street_verified_count,
-            street_corrected_count=street_corrected_count
+            street_corrected_count=street_corrected_count,
+            po_invalid_count=po_invalid_count
         )
         return report, df
 
@@ -1712,6 +1802,7 @@ class ZipValidator:
             'country': ['country', 'paese', 'nazione'],
             'phone': ['phone', 'telefono', 'tel', 'phone number', 'telephone'],
             'cash_on_delivery': ['cash on delivery', 'cod', 'contrassegno', 'cash_on_delivery'],
+            'order_number': ['order number', 'order', 'ordine', 'numero ordine', 'po', 'purchase order'],
         }
 
         for field, possible_names in mappings.items():
