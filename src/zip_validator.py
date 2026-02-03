@@ -636,10 +636,13 @@ class ZipValidator:
         # If no pattern matches, default to Italy
         return 'IT'
 
+    # Italian prepositions that can vary between address sources
+    ITALIAN_PREPOSITIONS = ['di', 'del', 'della', 'delle', 'dei', 'degli', 'dello', 'al', 'alla', 'alle', 'ai', 'agli', 'allo']
+
     def _normalize_street(self, street: str) -> str:
         """
         Normalize street name for comparison.
-        Removes common prefixes and standardizes format.
+        Removes common prefixes, prepositions, and standardizes format.
         """
         if not street:
             return ""
@@ -661,6 +664,11 @@ class ZipValidator:
 
         # Remove house numbers at the end for comparison (e.g., "21 21", "11/A", "123")
         normalized = re.sub(r'\s+\d+[/\-]?\w*(\s+\d+[/\-]?\w*)*\s*$', '', normalized).strip()
+
+        # Remove Italian prepositions that may vary between sources (e.g., "di Valle Aurelia" vs "Valle Aurelia")
+        words = normalized.split()
+        words = [w for w in words if w not in self.ITALIAN_PREPOSITIONS]
+        normalized = ' '.join(words)
 
         return normalized
 
@@ -1202,12 +1210,21 @@ class ZipValidator:
                 elif similarity >= 0.85:
                     # Good match - likely minor typo in street name
                     street_verified = True
-                    suggested_street = self._build_street_suggestion(found_street, original_street)
+                    potential_suggestion = self._build_street_suggestion(found_street, original_street)
+                    # Only show suggestion if it's actually different from original
+                    if self._normalize_street(potential_suggestion) != self._normalize_street(original_street):
+                        suggested_street = potential_suggestion
                     street_confidence = int(similarity * 100)
                 elif similarity >= 0.70:
                     # Moderate match - suggest correction
                     street_verified = False
-                    suggested_street = self._build_street_suggestion(found_street, original_street)
+                    potential_suggestion = self._build_street_suggestion(found_street, original_street)
+                    # Only show suggestion if it's actually different from original
+                    if self._normalize_street(potential_suggestion) != self._normalize_street(original_street):
+                        suggested_street = potential_suggestion
+                    else:
+                        # Streets are effectively the same - verify without suggestion
+                        street_verified = True
                     street_confidence = int(similarity * 100)
                 else:
                     # Low match - search for similar streets
