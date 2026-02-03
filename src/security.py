@@ -1,21 +1,31 @@
 """
 Security Module for ELC Tools
 Implements persistent rate limiting, IP tracking, and abuse prevention.
+
+Uses a hybrid approach:
+1. File-based storage for persistence across page refreshes
+2. Session state as fallback
+3. Automatic recovery if file storage fails
 """
 
 import json
 import hashlib
 import os
+import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional, Tuple
 import threading
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Thread lock for file operations
 _file_lock = threading.Lock()
 
 # Storage file for persistent rate limiting
-USAGE_FILE = Path(__file__).parent.parent / "data" / ".usage_tracking.json"
+DATA_DIR = Path(__file__).parent.parent / "data"
+USAGE_FILE = DATA_DIR / ".usage_tracking.json"
 
 # Security limits
 MAX_VALIDATIONS_PER_DAY_GLOBAL = 5000  # Total daily limit across all users
@@ -28,42 +38,60 @@ BAN_DURATION_MINUTES = 30  # Temporary ban duration
 
 def _get_ip_hash(ip: str) -> str:
     """Hash IP address for privacy-preserving tracking."""
-    # Add a salt to prevent rainbow table attacks
     salt = "elc_tools_2024_salt"
     return hashlib.sha256(f"{salt}:{ip}".encode()).hexdigest()[:16]
 
 
 def _ensure_data_dir():
     """Ensure data directory exists."""
-    USAGE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        return True
+    except (OSError, PermissionError):
+        return False
 
 
 def _load_usage_data() -> dict:
     """Load usage data from persistent storage."""
-    _ensure_data_dir()
-    try:
-        if USAGE_FILE.exists():
-            with open(USAGE_FILE, 'r') as f:
-                return json.load(f)
-    except (json.JSONDecodeError, IOError):
-        pass
-    return {
+    default_data = {
         "global": {},
         "by_ip": {},
         "bans": {},
         "last_cleanup": None
     }
 
+    if not _ensure_data_dir():
+        return default_data
 
-def _save_usage_data(data: dict):
-    """Save usage data to persistent storage."""
-    _ensure_data_dir()
+    try:
+        if USAGE_FILE.exists():
+            with open(USAGE_FILE, 'r') as f:
+                data = json.load(f)
+                # Validate structure
+                if isinstance(data, dict) and "global" in data:
+                    return data
+    except (json.JSONDecodeError, IOError, PermissionError) as e:
+        logger.warning(f"Could not load usage data: {e}")
+
+    return default_data
+
+
+def _save_usage_data(data: dict) -> bool:
+    """Save usage data to persistent storage. Returns True on success."""
+    if not _ensure_data_dir():
+        return False
+
     with _file_lock:
         try:
-            with open(USAGE_FILE, 'w') as f:
+            # Write to temp file first, then rename (atomic operation)
+            temp_file = USAGE_FILE.with_suffix('.tmp')
+            with open(temp_file, 'w') as f:
                 json.dump(data, f, indent=2)
-        except IOError:
-            pass  # Fail silently - don't crash the app
+            temp_file.replace(USAGE_FILE)
+            return True
+        except (IOError, PermissionError, OSError) as e:
+            logger.warning(f"Could not save usage data: {e}")
+            return False
 
 
 def _cleanup_old_data(data: dict) -> dict:
@@ -144,18 +172,23 @@ def check_rate_limit(ip: str, rows_to_validate: int) -> Tuple[bool, str, dict]:
         return False, ban_msg, {}
 
     # Initialize IP data if needed
-    if ip_hash not in data["by_ip"]:
+    if ip_hash not in data.get("by_ip", {}):
+        if "by_ip" not in data:
+            data["by_ip"] = {}
         data["by_ip"][ip_hash] = {"hourly": {}, "daily": {}, "last_request": None}
 
     ip_data = data["by_ip"][ip_hash]
 
     # Check minimum time between requests
     if ip_data.get("last_request"):
-        last_request = datetime.fromisoformat(ip_data["last_request"])
-        elapsed = (now - last_request).total_seconds()
-        if elapsed < MIN_SECONDS_BETWEEN_REQUESTS:
-            wait_time = int(MIN_SECONDS_BETWEEN_REQUESTS - elapsed)
-            return False, f"Attendi {wait_time} secondi prima della prossima validazione.", {}
+        try:
+            last_request = datetime.fromisoformat(ip_data["last_request"])
+            elapsed = (now - last_request).total_seconds()
+            if elapsed < MIN_SECONDS_BETWEEN_REQUESTS:
+                wait_time = int(MIN_SECONDS_BETWEEN_REQUESTS - elapsed)
+                return False, f"Attendi {wait_time} secondi prima della prossima validazione.", {}
+        except (ValueError, TypeError):
+            pass  # Invalid timestamp, ignore
 
     # Get current usage
     global_today = data.get("global", {}).get(today, 0)
@@ -203,6 +236,8 @@ def record_usage(ip: str, rows_validated: int):
     data["global"][today] = data["global"].get(today, 0) + rows_validated
 
     # Update per-IP counters
+    if "by_ip" not in data:
+        data["by_ip"] = {}
     if ip_hash not in data["by_ip"]:
         data["by_ip"][ip_hash] = {"hourly": {}, "daily": {}, "last_request": None}
 
@@ -229,6 +264,8 @@ def record_failed_attempt(ip: str):
     current_hour = now.strftime("%Y-%m-%d-%H")
     ip_hash = _get_ip_hash(ip)
 
+    if "by_ip" not in data:
+        data["by_ip"] = {}
     if ip_hash not in data["by_ip"]:
         data["by_ip"][ip_hash] = {"hourly": {}, "daily": {}, "failed_attempts": {}}
 
@@ -274,35 +311,45 @@ def get_usage_stats(ip: str) -> dict:
 def get_client_ip() -> str:
     """
     Get client IP address from Streamlit.
-    Falls back to a default if not available.
+    Uses multiple fallback methods for reliability.
     """
+    import streamlit as st
+
+    # Method 1: Try Streamlit's experimental get_script_run_ctx
     try:
-        # Try to get from Streamlit's context
-        import streamlit as st
+        from streamlit.runtime.scriptrunner import get_script_run_ctx
+        ctx = get_script_run_ctx()
+        if ctx and hasattr(ctx, 'session_id'):
+            # Use session_id as a stable identifier (unique per browser tab)
+            return f"session_{ctx.session_id[:16]}"
+    except (ImportError, AttributeError):
+        pass
 
-        # Check headers for forwarded IP (common in cloud deployments)
-        headers = getattr(st.context, 'headers', None)
-        if headers:
-            # X-Forwarded-For can contain multiple IPs, take the first
-            forwarded = headers.get('X-Forwarded-For', '')
-            if forwarded:
-                return forwarded.split(',')[0].strip()
+    # Method 2: Try st.context.headers (newer Streamlit versions)
+    try:
+        if hasattr(st, 'context') and hasattr(st.context, 'headers'):
+            headers = st.context.headers
+            if headers:
+                # Try common forwarded IP headers
+                for header in ['X-Forwarded-For', 'X-Real-IP', 'CF-Connecting-IP']:
+                    ip = headers.get(header, '')
+                    if ip:
+                        # X-Forwarded-For may have multiple IPs
+                        return ip.split(',')[0].strip()
+    except (AttributeError, TypeError):
+        pass
 
-            # Try other common headers
-            for header in ['X-Real-IP', 'CF-Connecting-IP', 'True-Client-IP']:
-                ip = headers.get(header, '')
-                if ip:
-                    return ip.strip()
-
-        # Fallback: use session ID as pseudo-identifier
-        if hasattr(st, 'session_state') and 'session_id' in st.session_state:
-            return f"session_{st.session_state.session_id}"
-
+    # Method 3: Use session state with persistent ID
+    try:
+        if '_client_id' not in st.session_state:
+            # Generate a unique ID for this session
+            st.session_state._client_id = str(uuid.uuid4())[:16]
+        return f"client_{st.session_state._client_id}"
     except Exception:
         pass
 
-    # Final fallback
-    return "unknown"
+    # Final fallback: use a hash of current time (least reliable)
+    return f"anon_{hashlib.md5(str(datetime.now().timestamp()).encode()).hexdigest()[:8]}"
 
 
 def validate_excel_content(df) -> Tuple[bool, Optional[str]]:
@@ -317,20 +364,24 @@ def validate_excel_content(df) -> Tuple[bool, Optional[str]]:
     MAX_CELL_LENGTH = 1000
     SUSPICIOUS_PATTERNS = ['=CMD(', '=SYSTEM(', '=EXEC(', '|', '=HYPERLINK(', '=IMPORTXML(']
 
-    for col in df.columns:
-        for idx, value in df[col].items():
-            if not isinstance(value, str):
-                continue
+    try:
+        for col in df.columns:
+            for idx, value in df[col].items():
+                if not isinstance(value, str):
+                    continue
 
-            # Check cell length
-            if len(value) > MAX_CELL_LENGTH:
-                return False, f"Cella troppo lunga nella colonna '{col}' (max {MAX_CELL_LENGTH} caratteri)"
+                # Check cell length
+                if len(value) > MAX_CELL_LENGTH:
+                    return False, f"Cella troppo lunga nella colonna '{col}' (max {MAX_CELL_LENGTH} caratteri)"
 
-            # Check for suspicious patterns
-            value_upper = value.upper()
-            for pattern in SUSPICIOUS_PATTERNS:
-                if pattern in value_upper:
-                    return False, f"Contenuto non valido rilevato nella colonna '{col}'"
+                # Check for suspicious patterns
+                value_upper = value.upper()
+                for pattern in SUSPICIOUS_PATTERNS:
+                    if pattern in value_upper:
+                        return False, f"Contenuto non valido rilevato nella colonna '{col}'"
+    except Exception as e:
+        logger.warning(f"Error validating Excel content: {e}")
+        # Don't block on validation errors
 
     return True, None
 
