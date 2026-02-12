@@ -1820,7 +1820,8 @@ class ZipValidator:
                 # Check if Street 2 contains location info (C.C., Centro Commerciale, etc.)
                 street2_lower = street2.lower().strip()
                 for prefix in self.LOCATION_PREFIXES:
-                    if street2_lower.startswith(prefix.strip()):
+                    # Don't strip prefix - 'cc ' has intentional trailing space to avoid matching 'cciaa' etc.
+                    if street2_lower.startswith(prefix):
                         street2_is_location = True
                         break
 
