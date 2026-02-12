@@ -28,7 +28,7 @@ from src.security import (
     check_rate_limit, record_usage, get_usage_stats, get_client_ip,
     validate_excel_content, sanitize_filename, record_failed_attempt,
     MAX_VALIDATIONS_PER_DAY_PER_IP, MAX_VALIDATIONS_PER_HOUR_PER_IP,
-    get_debug_info
+    get_debug_info, MIN_SECONDS_BETWEEN_REQUESTS
 )
 
 
@@ -135,8 +135,8 @@ def check_cooldown() -> tuple[bool, int]:
         return True, 0
 
     elapsed = (datetime.now() - st.session_state.last_validation_time).total_seconds()
-    if elapsed < MIN_SECONDS_BETWEEN_VALIDATIONS:
-        return False, int(MIN_SECONDS_BETWEEN_VALIDATIONS - elapsed)
+    if elapsed < MIN_SECONDS_BETWEEN_REQUESTS:
+        return False, int(MIN_SECONDS_BETWEEN_REQUESTS - elapsed)
 
     return True, 0
 
