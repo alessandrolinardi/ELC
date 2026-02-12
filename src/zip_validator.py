@@ -3,16 +3,21 @@ Address Validator Module
 Validates and corrects addresses (ZIP codes and streets) using Photon API (primary)
 with Nominatim API fallback. Photon has no rate limits (~10x faster), while Nominatim
 is used as a reliable fallback.
+
+Includes caching layer with Supabase for faster repeated validations.
 """
 
 import time
 import json
+import hashlib
 import requests
 from dataclasses import dataclass
 from typing import Optional, Callable
 from io import BytesIO
 from pathlib import Path
+from datetime import datetime, timedelta
 import re
+import unicodedata
 from difflib import SequenceMatcher
 
 import pandas as pd
@@ -192,6 +197,194 @@ class ZipValidator:
         self._photon_empty_count = 0  # Track consecutive empty results from Photon
         self._city_cache = {}  # Cache for city lookups: city_name -> result
         self._valid_po_numbers = self._load_valid_po_numbers()  # Load valid PO numbers
+        self._supabase_client = self._init_supabase_client()  # Cache client
+        self._cache_hits = 0  # Track cache statistics
+        self._cache_misses = 0
+
+    def _init_supabase_client(self):
+        """Initialize Supabase client for address caching."""
+        try:
+            import streamlit as st
+            from supabase import create_client
+
+            if "supabase" not in st.secrets:
+                logger.debug("Supabase not configured - caching disabled")
+                return None
+
+            url = st.secrets["supabase"]["url"]
+            key = st.secrets["supabase"]["key"]
+            return create_client(url, key)
+        except Exception as e:
+            logger.warning(f"Could not initialize Supabase for caching: {e}")
+            return None
+
+    def _normalize_for_cache(self, text: str) -> str:
+        """
+        Normalize text for cache key generation.
+
+        - Lowercase
+        - Remove accents (città → citta)
+        - Remove punctuation
+        - Expand common abbreviations
+        - Collapse whitespace
+        """
+        if not text:
+            return ""
+
+        # Lowercase
+        s = text.lower().strip()
+
+        # Remove accents: città → citta
+        s = ''.join(
+            c for c in unicodedata.normalize('NFD', s)
+            if unicodedata.category(c) != 'Mn'
+        )
+
+        # Remove punctuation except spaces
+        s = re.sub(r'[,.\-\'\"()/]', ' ', s)
+
+        # Expand common Italian abbreviations
+        abbreviations = [
+            (r'\bv\.?\s', 'via '),
+            (r'\bp\.za\s', 'piazza '),
+            (r'\bp\.zza\s', 'piazza '),
+            (r'\bp\.zzale\s', 'piazzale '),
+            (r'\bc\.so\s', 'corso '),
+            (r'\bl\.go\s', 'largo '),
+            (r'\bvl\.?\s', 'viale '),
+            (r'\bv\.le\s', 'viale '),
+            (r'\bstr\.?\s', 'strada '),
+        ]
+        for pattern, replacement in abbreviations:
+            s = re.sub(pattern, replacement, s)
+
+        # Collapse multiple spaces
+        s = re.sub(r'\s+', ' ', s).strip()
+
+        return s
+
+    def _get_cache_key(self, street: str, city: str) -> str:
+        """
+        Generate cache key from street and city.
+
+        The key is based on normalized street name (without house number) and city.
+        """
+        # Extract street name without house number
+        street_name, _ = self._extract_house_number(street)
+
+        # Normalize both parts
+        norm_street = self._normalize_for_cache(street_name)
+        norm_city = self._normalize_for_cache(city)
+
+        # Create hash
+        key_string = f"{norm_street}|{norm_city}"
+        return hashlib.md5(key_string.encode()).hexdigest()
+
+    def _lookup_cache(self, street: str, city: str) -> Optional[dict]:
+        """
+        Look up address in cache.
+
+        Returns cached result if found and not expired, None otherwise.
+        """
+        if not self._supabase_client:
+            return None
+
+        try:
+            cache_key = self._get_cache_key(street, city)
+
+            response = self._supabase_client.table("address_cache").select("*").eq(
+                "street_hash", cache_key
+            ).eq("city_normalized", self._normalize_for_cache(city)).execute()
+
+            if response.data and len(response.data) > 0:
+                record = response.data[0]
+
+                # Check if expired
+                if record.get('expires_at'):
+                    expires = datetime.fromisoformat(record['expires_at'].replace('Z', '+00:00')).replace(tzinfo=None)
+                    if datetime.now() > expires:
+                        logger.debug(f"Cache expired for {cache_key[:8]}...")
+                        return None
+
+                # Update times_used
+                self._supabase_client.table("address_cache").update({
+                    "times_used": record.get('times_used', 0) + 1,
+                    "updated_at": datetime.now().isoformat()
+                }).eq("id", record['id']).execute()
+
+                self._cache_hits += 1
+                logger.debug(f"Cache HIT for {city}: {street[:30]}... (used {record.get('times_used', 0)+1}x)")
+
+                return {
+                    'validated_zip': record.get('validated_zip'),
+                    'validated_street': record.get('validated_street'),
+                    'confidence': record.get('confidence', 90),
+                    'times_used': record.get('times_used', 0) + 1
+                }
+
+            self._cache_misses += 1
+            return None
+
+        except Exception as e:
+            logger.warning(f"Cache lookup error: {e}")
+            return None
+
+    def _write_cache(self, street: str, city: str, validated_zip: str,
+                     validated_street: str, confidence: int):
+        """
+        Write validation result to cache.
+
+        Only caches results with confidence >= threshold (auto-corrected).
+        """
+        if not self._supabase_client:
+            return
+
+        # Only cache high-confidence results
+        if confidence < self.confidence_threshold:
+            return
+
+        try:
+            cache_key = self._get_cache_key(street, city)
+            norm_city = self._normalize_for_cache(city)
+
+            # Extract just the street name for storage (without house number)
+            street_name_only, _ = self._extract_house_number(validated_street or street)
+
+            record = {
+                "street_hash": cache_key,
+                "city_normalized": norm_city,
+                "original_street": street[:255] if street else None,
+                "original_city": city[:100] if city else None,
+                "validated_zip": validated_zip,
+                "validated_street": street_name_only[:255] if street_name_only else None,
+                "confidence": confidence,
+                "times_used": 1,
+                "created_at": datetime.now().isoformat(),
+                "updated_at": datetime.now().isoformat(),
+                "expires_at": (datetime.now() + timedelta(days=90)).isoformat()
+            }
+
+            # Upsert (insert or update if exists)
+            self._supabase_client.table("address_cache").upsert(
+                record,
+                on_conflict="street_hash,city_normalized"
+            ).execute()
+
+            logger.debug(f"Cache WRITE for {city}: {street[:30]}... (conf: {confidence}%)")
+
+        except Exception as e:
+            logger.warning(f"Cache write error: {e}")
+
+    def get_cache_stats(self) -> dict:
+        """Get cache hit/miss statistics."""
+        total = self._cache_hits + self._cache_misses
+        hit_rate = (self._cache_hits / total * 100) if total > 0 else 0
+        return {
+            "hits": self._cache_hits,
+            "misses": self._cache_misses,
+            "total": total,
+            "hit_rate": f"{hit_rate:.1f}%"
+        }
 
     def _load_valid_po_numbers(self) -> set:
         """Load valid PO numbers from JSON file."""
@@ -1288,6 +1481,41 @@ class ZipValidator:
         if country.upper() not in ('IT', 'ITALY'):
             return True, original_zip_raw, 100, "Non-IT country - skipped", True, original_street, 100
 
+        # Check cache first (before API calls)
+        cached = self._lookup_cache(original_street, city)
+        if cached:
+            # Cache hit! Use cached result
+            cached_zip = cached.get('validated_zip')
+            cached_street = cached.get('validated_street')
+            cached_confidence = cached.get('confidence', 90)
+            times_used = cached.get('times_used', 1)
+
+            # Boost confidence for frequently validated addresses
+            confidence_boost = min(times_used, 10)  # Max +10%
+            final_confidence = min(cached_confidence + confidence_boost, 100)
+
+            # Rebuild suggested street with original house number
+            _, original_house_num = self._extract_house_number(original_street)
+            if cached_street and original_house_num:
+                suggested_street_with_num = f"{cached_street} {original_house_num}"
+            else:
+                suggested_street_with_num = cached_street
+
+            # Check if cached ZIP matches original (after cleaning)
+            cleaned_original, _, _ = self._clean_zip_code(original_zip_raw)
+            zip_matches = cached_zip == cleaned_original
+
+            reason = f"Cached result (used {times_used}x)"
+            return (
+                zip_matches,
+                cached_zip,
+                final_confidence,
+                reason,
+                True,  # street_verified (was validated before)
+                suggested_street_with_num if suggested_street_with_num != original_street else None,
+                final_confidence
+            )
+
         # Try to clean up the zip code
         cleaned_zip, was_cleaned, was_padding_only = self._clean_zip_code(original_zip_raw)
 
@@ -1723,6 +1951,24 @@ class ZipValidator:
                 suggested_street and
                 street_confidence >= self.street_confidence_threshold
             )
+
+            # Write to cache if result is high-confidence (will be auto-corrected or verified)
+            # This caches results that meet our quality threshold for future lookups
+            should_cache = (
+                (zip_auto_correct or is_valid) and  # ZIP is good
+                (street_verified or street_auto_correct) and  # Street is good
+                confidence >= self.confidence_threshold
+            )
+            if should_cache and suggested_zip:
+                # Extract street name without house number for caching
+                street_to_cache = suggested_street if suggested_street else full_street
+                self._write_cache(
+                    street=full_street,
+                    city=city,
+                    validated_zip=suggested_zip if zip_auto_correct else original_zip,
+                    validated_street=street_to_cache,
+                    confidence=confidence
+                )
 
             result = ValidationResult(
                 row_index=idx,
