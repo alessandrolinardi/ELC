@@ -1813,9 +1813,20 @@ class ZipValidator:
 
             name = str(row.get(col_map.get('name', ''), ''))
             street = str(row.get(col_map.get('street', ''), ''))
-            # Combine Street 1 and Street 2 if both present
+            # Get Street 2 (may contain location info like C.C. moved by preprocessing)
             street2 = str(row.get(col_map.get('street2', ''), '')) if col_map.get('street2') else ''
+            street2_is_location = False
             if street2 and street2.lower() != 'nan':
+                # Check if Street 2 contains location info (C.C., Centro Commerciale, etc.)
+                street2_lower = street2.lower().strip()
+                for prefix in self.LOCATION_PREFIXES:
+                    if street2_lower.startswith(prefix.strip()):
+                        street2_is_location = True
+                        break
+
+            # Build full_street for API validation
+            # Don't include street2 if it's just location info (C.C., etc.) - it confuses the API
+            if street2 and street2.lower() != 'nan' and not street2_is_location:
                 full_street = f"{street}, {street2}".strip(', ')
             else:
                 full_street = street
