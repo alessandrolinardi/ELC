@@ -813,26 +813,45 @@ class ZipValidator:
 
     def _extract_location_prefix(self, street: str) -> tuple[str, str]:
         """
-        Extract location prefix (Centro Commerciale, C.C., etc.) from street address.
+        Extract location info (Centro Commerciale, C.C., etc.) from street address.
 
-        Moves location prefixes to a separate field so the actual street address
-        can be validated independently.
-
-        Example:
-            Input: "C.C. Le Grange Via Casilina inc. Via Marello 1"
-            Output: ("Via Casilina inc. Via Marello 1", "C.C. Le Grange")
+        Handles both:
+        - Prefixes: "C.C. Le Grange Via Roma 1" → ("Via Roma 1", "C.C. Le Grange")
+        - Suffixes: "Via Roma 1 - cc il miglio" → ("Via Roma 1", "cc il miglio")
 
         Args:
             street: Original street address
 
         Returns:
             Tuple of (clean_street, extracted_location)
-            If no location prefix found, returns (original_street, "")
+            If no location found, returns (original_street, "")
         """
         if not street:
             return street, ""
 
         street_lower = street.lower().strip()
+
+        # First check for SUFFIX patterns (e.g., "Via Roma 1 - cc il miglio")
+        # Common separators: " - ", " – ", ", ", " ("
+        suffix_separators = [' - ', ' – ', ' -', '- ', ', c.c.', ', cc ', ' (']
+
+        for separator in suffix_separators:
+            if separator in street_lower:
+                sep_idx = street_lower.find(separator)
+                potential_suffix = street_lower[sep_idx + len(separator):].strip()
+
+                # Check if what follows the separator is a location prefix
+                for prefix in self.LOCATION_PREFIXES:
+                    if potential_suffix.startswith(prefix) or potential_suffix == prefix.strip():
+                        # Found a location suffix - extract it
+                        clean_street = street[:sep_idx].strip()
+                        location = street[sep_idx:].strip()
+                        # Remove leading separator from location
+                        for sep in [' - ', ' – ', '-', ', ']:
+                            if location.lower().startswith(sep):
+                                location = location[len(sep):].strip()
+                                break
+                        return clean_street, location
 
         # Check if the street starts with a location prefix
         for prefix in self.LOCATION_PREFIXES:
