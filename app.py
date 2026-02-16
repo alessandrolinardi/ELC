@@ -703,11 +703,12 @@ def zip_validator_page():
             st.error(f"❌ File troppo grande. Massimo: {MAX_FILE_SIZE_MB}MB")
             st.stop()
 
-        # Security check: cooldown between validations
-        cooldown_ok, seconds_remaining = check_cooldown()
-        if not cooldown_ok:
-            st.warning(f"⏳ Attendi {seconds_remaining} secondi prima della prossima validazione.")
-            st.stop()
+        # Security check: cooldown between validations (skipped with PIN)
+        if not pin_valid:
+            cooldown_ok, seconds_remaining = check_cooldown()
+            if not cooldown_ok:
+                st.warning(f"⏳ Attendi {seconds_remaining} secondi prima della prossima validazione.")
+                st.stop()
 
         try:
             # Read Excel
@@ -746,13 +747,16 @@ def zip_validator_page():
                     st.info("💡 Suggerimento: dividi il file in batch più piccoli.")
                     st.stop()
 
-                # Security check: daily API limit
-                daily_ok, daily_msg = check_daily_api_limit(len(df))
-                if not daily_ok:
-                    st.error(f"❌ {daily_msg}")
-                    st.info("💡 Il limite si resetta a mezzanotte.")
-                    st.stop()
-                st.write(f"✓ {daily_msg}")
+                # Security check: daily API limit (skipped with PIN)
+                if pin_valid:
+                    st.write("✓ Limite API bypassato con PIN")
+                else:
+                    daily_ok, daily_msg = check_daily_api_limit(len(df))
+                    if not daily_ok:
+                        st.error(f"❌ {daily_msg}")
+                        st.info("💡 Il limite si resetta a mezzanotte.")
+                        st.stop()
+                    st.write(f"✓ {daily_msg}")
 
                 status.update(label=f"✅ File letto ({len(df)} righe)", state="complete")
 
