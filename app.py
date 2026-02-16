@@ -579,6 +579,7 @@ def zip_validator_page():
 - Il campo "Order Number" deve contenere un **PO valido** (10 cifre, inizia con 350)
 - Il PO può essere embedded: `SBX-Mat-pt.2-3501494822-18` → estrae `3501494822`
 - **Se il PO non è valido, il download viene bloccato**
+- **Con PIN**: inserisci il PIN per scaricare anche senza PO valido
 - Lista PO validi: contatta l'amministratore per aggiungerne di nuovi
 
 **5. Contrassegno (Cash on Delivery)**
@@ -648,6 +649,19 @@ def zip_validator_page():
             index=0,
             help="Attualmente la validazione supporta solo indirizzi italiani"
         )
+
+    # PIN bypass for PO validation
+    pin_input = st.text_input(
+        "🔑 PIN (opzionale)",
+        type="password",
+        max_chars=4,
+        help="Inserisci il PIN per validare senza PO number"
+    )
+    pin_valid = pin_input == "6472"
+    if pin_input and not pin_valid:
+        st.warning("PIN non valido")
+    elif pin_valid:
+        st.success("PIN corretto - validazione PO disabilitata")
 
     # Show usage limits (now using persistent storage)
     st.markdown("---")
@@ -894,11 +908,15 @@ def zip_validator_page():
         # PO validation warning
         if report.po_invalid_count > 0:
             st.markdown("#### 🚨 Numeri Ordine (PO)")
-            st.error(f"**ATTENZIONE:** {report.po_invalid_count} righe hanno un PO non valido o mancante!")
-            st.warning(
-                "I PO devono essere numeri a 10 cifre che iniziano con '350' (es: 3501494822).\n\n"
-                "Il download sarà disabilitato finché tutti i PO non saranno corretti."
-            )
+            if pin_valid:
+                st.warning(f"⚠️ {report.po_invalid_count} righe hanno un PO non valido o mancante (bypass attivo con PIN)")
+            else:
+                st.error(f"**ATTENZIONE:** {report.po_invalid_count} righe hanno un PO non valido o mancante!")
+                st.warning(
+                    "I PO devono essere numeri a 10 cifre che iniziano con '350' (es: 3501494822).\n\n"
+                    "Il download sarà disabilitato finché tutti i PO non saranno corretti.\n\n"
+                    "💡 Inserisci il PIN per scaricare senza PO valido."
+                )
 
         # Preview ALL results (valid, corrected, and needs review)
         st.markdown("### 📋 Dettaglio validazione")
@@ -995,8 +1013,8 @@ def zip_validator_page():
         # Downloads - now using pre-generated files from session state
         st.markdown("### 📥 Download")
 
-        # Disable downloads if there are invalid POs
-        download_disabled = report.po_invalid_count > 0
+        # Disable downloads if there are invalid POs (unless PIN bypass is active)
+        download_disabled = report.po_invalid_count > 0 and not pin_valid
         if download_disabled:
             st.error("⛔ Download disabilitato: correggi prima i PO non validi nel file originale")
 
