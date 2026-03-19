@@ -1524,7 +1524,7 @@ def main():
     st.markdown(get_nav_css(), unsafe_allow_html=True)
 
     # Actual navigation control — st.radio styled as tabs
-    tool_labels = [t["label"] for t in TOOLS]
+    tool_labels = [f'{t["icon"]} {t["label"]}' for t in TOOLS]
     selected_label = st.radio(
         "nav",
         options=tool_labels,

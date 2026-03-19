@@ -27,21 +27,9 @@ COLORS = {
 # Tool definitions (order matters for the nav bar)
 # ---------------------------------------------------------------------------
 TOOLS = [
-    {
-        "key": "ritiro",
-        "label": "📦 Ritiro Merce",
-        "description": "Genera documenti di ritiro merce",
-    },
-    {
-        "key": "validator",
-        "label": "✅ Validatore Indirizzi",
-        "description": "Valida e correggi indirizzi italiani",
-    },
-    {
-        "key": "label_sorter",
-        "label": "🏷️ Ordina Etichette",
-        "description": "Ordina etichette per CAP / zona",
-    },
+    {"key": "ritiro", "icon": "🚚", "label": "Ritiro"},
+    {"key": "validator", "icon": "📍", "label": "Address Validator"},
+    {"key": "label_sorter", "icon": "📦", "label": "Label Sorter"},
 ]
 
 
