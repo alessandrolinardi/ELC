@@ -13,6 +13,8 @@ import logging
 
 import streamlit as st
 
+from .config import get_supabase_client as _get_shared_supabase_client
+
 logger = logging.getLogger(__name__)
 
 # Security limits - simplified to 12-hour window
@@ -21,21 +23,11 @@ MIN_SECONDS_BETWEEN_REQUESTS = 3  # Minimum gap between requests
 
 
 def _get_supabase_client():
-    """Get Supabase client using Streamlit secrets."""
-    try:
-        from supabase import create_client
-
-        if "supabase" not in st.secrets:
-            logger.warning("Supabase not configured in secrets")
-            return None
-
-        url = st.secrets["supabase"]["url"]
-        key = st.secrets["supabase"]["key"]
-
-        return create_client(url, key)
-    except Exception as e:
-        logger.error(f"Failed to create Supabase client: {e}")
-        return None
+    """Get Supabase client using centralized config."""
+    client = _get_shared_supabase_client()
+    if client is None:
+        logger.warning("Supabase unavailable - blocking requests (fail closed)")
+    return client
 
 
 def _get_current_period() -> Tuple[str, str, datetime]:
@@ -156,8 +148,8 @@ def check_rate_limit(ip: str, rows_to_validate: int) -> Tuple[bool, str, dict]:
     """
     client = _get_supabase_client()
     if client is None:
-        logger.warning("Supabase unavailable - rate limiting disabled")
-        return True, "OK", {}
+        logger.warning("Supabase unavailable - blocking requests (fail closed)")
+        return False, "Servizio temporaneamente non disponibile. Riprova tra qualche minuto.", {}
 
     today, period_id, period_end = _get_current_period()
 
@@ -266,7 +258,7 @@ def validate_excel_content(df) -> Tuple[bool, Optional[str]]:
     Validate Excel content for security issues.
     """
     MAX_CELL_LENGTH = 1000
-    SUSPICIOUS_PATTERNS = ['=CMD(', '=SYSTEM(', '=EXEC(', '|', '=HYPERLINK(', '=IMPORTXML(']
+    SUSPICIOUS_PATTERNS = ['=CMD(', '=SYSTEM(', '=EXEC(', '=HYPERLINK(', '=IMPORTXML(']
 
     try:
         for col in df.columns:

@@ -1,28 +1,28 @@
 """
 Address Validator Module
-Validates and corrects addresses (ZIP codes and streets) using Photon API (primary)
-with Nominatim API fallback. Photon has no rate limits (~10x faster), while Nominatim
-is used as a reliable fallback.
+Validates and corrects addresses using Claude AI for parsing
+and Google Address Validation API for validation.
 
 Includes caching layer with Supabase for faster repeated validations.
 """
 
-import time
+import re
 import json
 import hashlib
-import requests
 from dataclasses import dataclass
 from typing import Optional, Callable
 from io import BytesIO
 from pathlib import Path
 from datetime import datetime, timedelta
-import re
 import unicodedata
-from difflib import SequenceMatcher
 
 import pandas as pd
 
 from .logging_config import get_logger
+from .config import get_supabase_client
+from .models import ParsedAddress, ValidationOutcome, ParsingMetrics
+from .address_parser import AddressParser
+from .address_validator import AddressValidator
 
 # Logger for this module
 logger = get_logger(__name__)
@@ -46,18 +46,18 @@ class ValidationResult:
     suggested_street: Optional[str] = None
     street_confidence: int = 0
     street_auto_corrected: bool = False
-    # Country code (ISO 3166-1 alpha-2)
+    # Country code
     country_code: str = "IT"
-    country_detected: bool = False  # True if country was auto-detected
+    country_detected: bool = False
     # Additional corrections tracking
-    phone_missing: bool = False      # True if phone was empty and will be filled
-    original_phone: str = ""         # Original phone value
-    cod_changed: bool = False        # True if Cash on Delivery will be set to 0
-    original_cod: str = ""           # Original COD value
+    phone_missing: bool = False
+    original_phone: str = ""
+    cod_changed: bool = False
+    original_cod: str = ""
     # PO validation
-    po_invalid: bool = False         # True if Order Number has invalid/missing PO
-    po_value: str = ""               # Original Order Number value
-    po_extracted: str = ""           # Extracted PO number (if found)
+    po_invalid: bool = False
+    po_value: str = ""
+    po_extracted: str = ""
 
 
 @dataclass
@@ -69,229 +69,71 @@ class ValidationReport:
     review_count: int
     skipped_count: int
     results: list[ValidationResult]
-    # Street stats
     street_verified_count: int = 0
     street_corrected_count: int = 0
-    # PO validation stats
-    po_invalid_count: int = 0        # Count of rows with invalid/missing PO
+    po_invalid_count: int = 0
 
 
 class ZipValidator:
     """
-    Validates addresses using Google Maps API (primary, if key provided),
-    Photon API (secondary), and Nominatim API (fallback).
-    Validates both ZIP codes and street names.
+    Validates addresses using Claude AI for parsing
+    and Google Address Validation API for validation.
     """
 
-    # Google Maps Geocoding API (best accuracy, requires API key)
-    GOOGLE_GEOCODE_URL = "https://maps.googleapis.com/maps/api/geocode/json"
-    # Photon API - secondary (no rate limits, ~10x faster than Nominatim)
-    PHOTON_URL = "https://photon.komoot.io/api/"
-    # Nominatim API - fallback (1 req/sec limit)
-    NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
-    USER_AGENT = "ELC-AddressValidator/2.0 (shipping label tool)"
-    REQUEST_DELAY = 1.1  # seconds between requests (Nominatim only)
-    PHOTON_DELAY = 0.1  # minimal delay for Photon (courtesy)
-
-    # Italian CAP ranges for major cities (for additional validation)
-    ITALIAN_CAP_RANGES = {
-        'roma': ('00100', '00199'),
-        'milano': ('20100', '20199'),
-        'napoli': ('80100', '80147'),
-        'torino': ('10100', '10156'),
-        'firenze': ('50100', '50145'),
-        'florence': ('50100', '50145'),
-        'bologna': ('40100', '40141'),
-        'venezia': ('30100', '30176'),
-        'venice': ('30100', '30176'),
-    }
-
-    # Italian province codes to ZIP prefix mapping
-    # Province code -> list of valid ZIP prefixes (first 2-3 digits)
-    ITALIAN_PROVINCE_ZIP = {
-        # Piemonte
-        'TO': ['10'], 'VC': ['13'], 'NO': ['28'], 'CN': ['12'], 'AT': ['14'],
-        'AL': ['15'], 'BI': ['13'], 'VB': ['28'],
-        # Valle d'Aosta
-        'AO': ['11'],
-        # Lombardia
-        'VA': ['21'], 'CO': ['22'], 'SO': ['23'], 'MI': ['20'], 'BG': ['24'],
-        'BS': ['25'], 'PV': ['27'], 'CR': ['26'], 'MN': ['46'], 'LC': ['23'],
-        'LO': ['26'], 'MB': ['20'],
-        # Trentino-Alto Adige
-        'BZ': ['39'], 'TN': ['38'],
-        # Veneto
-        'VR': ['37'], 'VI': ['36'], 'BL': ['32'], 'TV': ['31'], 'VE': ['30'],
-        'PD': ['35'], 'RO': ['45'],
-        # Friuli-Venezia Giulia
-        'UD': ['33'], 'GO': ['34'], 'TS': ['34'], 'PN': ['33'],
-        # Liguria
-        'IM': ['18'], 'SV': ['17'], 'GE': ['16'], 'SP': ['19'],
-        # Emilia-Romagna
-        'PC': ['29'], 'PR': ['43'], 'RE': ['42'], 'MO': ['41'], 'BO': ['40'],
-        'FE': ['44'], 'RA': ['48'], 'FC': ['47'], 'RN': ['47'],
-        # Toscana
-        'MS': ['54'], 'LU': ['55'], 'PT': ['51'], 'FI': ['50'], 'LI': ['57'],
-        'PI': ['56'], 'AR': ['52'], 'SI': ['53'], 'GR': ['58'], 'PO': ['59'],
-        # Umbria
-        'PG': ['06'], 'TR': ['05'],
-        # Marche
-        'PU': ['61'], 'AN': ['60'], 'MC': ['62'], 'AP': ['63'], 'FM': ['63'],
-        # Lazio
-        'VT': ['01'], 'RI': ['02'], 'RM': ['00'], 'LT': ['04'], 'FR': ['03'],
-        # Abruzzo
-        'AQ': ['67'], 'TE': ['64'], 'PE': ['65'], 'CH': ['66'],
-        # Molise
-        'CB': ['86'], 'IS': ['86'],
-        # Campania
-        'CE': ['81'], 'BN': ['82'], 'NA': ['80'], 'AV': ['83'], 'SA': ['84'],
-        # Puglia
-        'FG': ['71'], 'BA': ['70'], 'TA': ['74'], 'BR': ['72'], 'LE': ['73'],
-        'BT': ['76'],
-        # Basilicata
-        'PZ': ['85'], 'MT': ['75'],
-        # Calabria
-        'CS': ['87'], 'CZ': ['88'], 'RC': ['89'], 'KR': ['88'], 'VV': ['89'],
-        # Sicilia
-        'TP': ['91'], 'PA': ['90'], 'ME': ['98'], 'AG': ['92'], 'CL': ['93'],
-        'EN': ['94'], 'CT': ['95'], 'RG': ['97'], 'SR': ['96'],
-        # Sardegna
-        'SS': ['07'], 'NU': ['08'], 'CA': ['09'], 'OR': ['09'], 'SU': ['09'],
-    }
-
-    # Common Italian street prefixes for normalization
-    STREET_PREFIXES = [
-        'via', 'viale', 'piazza', 'piazzale', 'corso', 'largo', 'vicolo',
-        'strada', 'contrada', 'borgata', 'traversa', 'salita', 'discesa',
-        'lungomare', 'lungotevere', 'lungarno', 'circonvallazione'
-    ]
-
-    # Location prefixes that should be moved to Street 2 (Centro Commerciale, etc.)
-    LOCATION_PREFIXES = [
-        'centro commerciale', 'c.c.', 'cc ', 'c/c',
-        'centro direzionale', 'c.d.', 'cd ',
-        'centro servizi', 'c.s.',
-        'parco commerciale', 'p.c.',
-        'galleria commerciale',
-        'outlet',
-        'retail park',
-    ]
+    # Default phone number to use when phone is missing
+    DEFAULT_PHONE = "393445556667"
 
     def __init__(self, confidence_threshold: int = 90, street_confidence_threshold: int = 85,
-                 google_api_key: Optional[str] = None):
+                 google_api_key: Optional[str] = None, anthropic_api_key: Optional[str] = None):
         """
         Initialize validator.
 
         Args:
             confidence_threshold: Minimum confidence for auto-correction of ZIP (default 90%)
             street_confidence_threshold: Minimum confidence for auto-correction of street (default 85%)
-            google_api_key: Optional Google Maps API key for best accuracy
+            google_api_key: Google Address Validation API key
+            anthropic_api_key: Anthropic API key for Claude address parsing
         """
         self.confidence_threshold = confidence_threshold
         self.street_confidence_threshold = street_confidence_threshold
-        self.google_api_key = google_api_key
-        self.session = requests.Session()
-        self.session.headers.update({'User-Agent': self.USER_AGENT})
-        self._google_available = bool(google_api_key)  # Track if Google API is available
-        self._photon_available = True  # Track if Photon is responding
-        self._photon_empty_count = 0  # Track consecutive empty results from Photon
-        self._city_cache = {}  # Cache for city lookups: city_name -> result
-        self._valid_po_numbers = self._load_valid_po_numbers()  # Load valid PO numbers
-        self._supabase_client = self._init_supabase_client()  # Cache client
-        self._cache_hits = 0  # Track cache statistics
+        self.address_parser = AddressParser(api_key=anthropic_api_key)
+        self.address_validator = AddressValidator(api_key=google_api_key)
+        self._valid_po_numbers = self._load_valid_po_numbers()
+        self._supabase_client = get_supabase_client()
+        self._cache_hits = 0
         self._cache_misses = 0
 
-    def _init_supabase_client(self):
-        """Initialize Supabase client for address caching."""
-        try:
-            import streamlit as st
-            from supabase import create_client
-
-            if "supabase" not in st.secrets:
-                logger.debug("Supabase not configured - caching disabled")
-                return None
-
-            url = st.secrets["supabase"]["url"]
-            key = st.secrets["supabase"]["key"]
-            return create_client(url, key)
-        except Exception as e:
-            logger.warning(f"Could not initialize Supabase for caching: {e}")
-            return None
+    # =========================================================================
+    # Cache methods
+    # =========================================================================
 
     def _normalize_for_cache(self, text: str) -> str:
-        """
-        Normalize text for cache key generation.
-
-        - Lowercase
-        - Remove accents (città → citta)
-        - Remove punctuation
-        - Expand common abbreviations
-        - Collapse whitespace
-        """
+        """Normalize text for cache key generation."""
         if not text:
             return ""
-
-        # Lowercase
         s = text.lower().strip()
-
-        # Remove accents: città → citta
         s = ''.join(
             c for c in unicodedata.normalize('NFD', s)
             if unicodedata.category(c) != 'Mn'
         )
-
-        # Remove punctuation except spaces
         s = re.sub(r'[,.\-\'\"()/]', ' ', s)
-
-        # Expand common Italian abbreviations
-        abbreviations = [
-            (r'\bv\.?\s', 'via '),
-            (r'\bp\.za\s', 'piazza '),
-            (r'\bp\.zza\s', 'piazza '),
-            (r'\bp\.zzale\s', 'piazzale '),
-            (r'\bc\.so\s', 'corso '),
-            (r'\bl\.go\s', 'largo '),
-            (r'\bvl\.?\s', 'viale '),
-            (r'\bv\.le\s', 'viale '),
-            (r'\bstr\.?\s', 'strada '),
-        ]
-        for pattern, replacement in abbreviations:
-            s = re.sub(pattern, replacement, s)
-
-        # Collapse multiple spaces
         s = re.sub(r'\s+', ' ', s).strip()
-
         return s
 
     def _get_cache_key(self, street: str, city: str) -> str:
-        """
-        Generate cache key from street and city.
-
-        The key is based on normalized street name (without house number) and city.
-        """
-        # Extract street name without house number
-        street_name, _ = self._extract_house_number(street)
-
-        # Normalize both parts
-        norm_street = self._normalize_for_cache(street_name)
+        """Generate cache key from street and city."""
+        norm_street = self._normalize_for_cache(street)
         norm_city = self._normalize_for_cache(city)
-
-        # Create hash
         key_string = f"{norm_street}|{norm_city}"
         return hashlib.md5(key_string.encode()).hexdigest()
 
     def _lookup_cache(self, street: str, city: str) -> Optional[dict]:
-        """
-        Look up address in cache.
-
-        Returns cached result if found and not expired, None otherwise.
-        """
+        """Look up address in cache. Returns cached result if found and not expired."""
         if not self._supabase_client:
             return None
 
         try:
             cache_key = self._get_cache_key(street, city)
-
             response = self._supabase_client.table("address_cache").select("*").eq(
                 "street_hash", cache_key
             ).eq("city_normalized", self._normalize_for_cache(city)).execute()
@@ -301,26 +143,14 @@ class ZipValidator:
 
                 # Check if expired
                 if record.get('expires_at'):
-                    expires = datetime.fromisoformat(record['expires_at'].replace('Z', '+00:00')).replace(tzinfo=None)
+                    expires = datetime.fromisoformat(
+                        record['expires_at'].replace('Z', '+00:00')
+                    ).replace(tzinfo=None)
                     if datetime.now() > expires:
-                        logger.debug(f"Cache expired for {cache_key[:8]}...")
                         return None
 
-                # Update times_used
-                self._supabase_client.table("address_cache").update({
-                    "times_used": record.get('times_used', 0) + 1,
-                    "updated_at": datetime.now().isoformat()
-                }).eq("id", record['id']).execute()
-
                 self._cache_hits += 1
-                logger.debug(f"Cache HIT for {city}: {street[:30]}... (used {record.get('times_used', 0)+1}x)")
-
-                return {
-                    'validated_zip': record.get('validated_zip'),
-                    'validated_street': record.get('validated_street'),
-                    'confidence': record.get('confidence', 90),
-                    'times_used': record.get('times_used', 0) + 1
-                }
+                return record
 
             self._cache_misses += 1
             return None
@@ -329,48 +159,49 @@ class ZipValidator:
             logger.warning(f"Cache lookup error: {e}")
             return None
 
-    def _write_cache(self, street: str, city: str, validated_zip: str,
-                     validated_street: str, confidence: int):
-        """
-        Write validation result to cache.
-
-        Only caches results with confidence >= threshold (auto-corrected).
-        """
+    def _write_cache(self, street: str, city: str, outcome: ValidationOutcome,
+                     parsed: ParsedAddress):
+        """Write validation result to cache. Only caches high-confidence results."""
         if not self._supabase_client:
             return
 
-        # Only cache high-confidence results
-        if confidence < self.confidence_threshold:
+        # Only cache valid or corrected results
+        if outcome.status == "review":
             return
 
         try:
             cache_key = self._get_cache_key(street, city)
             norm_city = self._normalize_for_cache(city)
 
-            # Extract just the street name for storage (without house number)
-            street_name_only, _ = self._extract_house_number(validated_street or street)
-
             record = {
                 "street_hash": cache_key,
                 "city_normalized": norm_city,
                 "original_street": street[:255] if street else None,
                 "original_city": city[:100] if city else None,
-                "validated_zip": validated_zip,
-                "validated_street": street_name_only[:255] if street_name_only else None,
-                "confidence": confidence,
+                "validated_zip": outcome.output_zip,
+                "validated_street": outcome.output_street[:255] if outcome.output_street else None,
+                "confidence": 95 if outcome.status == "valid" else 90,
                 "times_used": 1,
                 "created_at": datetime.now().isoformat(),
                 "updated_at": datetime.now().isoformat(),
-                "expires_at": (datetime.now() + timedelta(days=90)).isoformat()
+                "expires_at": (datetime.now() + timedelta(days=90)).isoformat(),
+                # New columns for parsed data
+                "parsed_prefix": parsed.street_prefix,
+                "parsed_name": parsed.street_name,
+                "parsed_house_number": parsed.house_number,
+                "parsed_location_info": parsed.location_info,
+                "parsed_country_code": parsed.country_code,
+                "prompt_version": self.address_parser.metrics.prompt_version,
+                "api_status": outcome.status,
+                "api_formatted": outcome.formatted_address[:255] if outcome.formatted_address else None,
+                "api_granularity": outcome.granularity,
+                "api_reasons": json.dumps(outcome.reasons),
             }
 
-            # Upsert (insert or update if exists)
             self._supabase_client.table("address_cache").upsert(
                 record,
                 on_conflict="street_hash,city_normalized"
             ).execute()
-
-            logger.debug(f"Cache WRITE for {city}: {street[:30]}... (conf: {confidence}%)")
 
         except Exception as e:
             logger.warning(f"Cache write error: {e}")
@@ -386,6 +217,10 @@ class ZipValidator:
             "hit_rate": f"{hit_rate:.1f}%"
         }
 
+    # =========================================================================
+    # PO validation (unchanged)
+    # =========================================================================
+
     def _load_valid_po_numbers(self) -> set:
         """Load valid PO numbers from JSON file."""
         po_file = Path(__file__).parent.parent / "data" / "valid_po_numbers.json"
@@ -399,1687 +234,44 @@ class ZipValidator:
         return set()
 
     def extract_po_from_string(self, value: str) -> Optional[str]:
-        """
-        Extract PO number from a string that may contain other characters.
-
-        PO numbers are 10-digit numbers starting with 350.
-        Examples:
-            "3501494822" -> "3501494822"
-            "SBX-Mat-pt.2-3501494822-18" -> "3501494822"
-            "Order 3501487603 shipped" -> "3501487603"
-
-        Returns:
-            Extracted PO number or None if not found
-        """
+        """Extract PO number from a string. PO numbers are 10-digit numbers starting with 350."""
         if not value:
             return None
-
-        # Look for 10-digit numbers starting with 350
         matches = re.findall(r'350\d{7}', str(value))
         if matches:
-            return matches[0]  # Return first match
+            return matches[0]
         return None
 
     def validate_po_number(self, order_number: str) -> tuple[bool, str, str]:
-        """
-        Validate that an Order Number contains a valid PO number.
-
-        Args:
-            order_number: The Order Number field value
-
-        Returns:
-            Tuple of (is_valid, extracted_po, error_message)
-        """
+        """Validate that an Order Number contains a valid PO number."""
         if not order_number or str(order_number).lower() in ('nan', 'none', ''):
             return False, "", "Order Number vuoto"
 
         extracted_po = self.extract_po_from_string(str(order_number))
-
         if not extracted_po:
             return False, "", f"Nessun PO trovato in '{order_number}'"
-
         if extracted_po not in self._valid_po_numbers:
             return False, extracted_po, f"PO {extracted_po} non valido (non in lista)"
-
         return True, extracted_po, ""
 
-    def _query_photon(self, query: str, limit: int = 5) -> list[dict]:
-        """
-        Query Photon API for address.
-
-        Photon returns GeoJSON format. This method converts it to a format
-        compatible with our Nominatim-based processing.
-
-        Args:
-            query: Free-text address query (e.g., "Via Roma 10, Milano, Italy")
-            limit: Maximum results to return
-
-        Returns:
-            List of results in Nominatim-compatible format, or empty list on failure
-        """
-        if not self._photon_available:
-            return []
-
-        try:
-            params = {
-                'q': query,
-                'limit': limit,
-                'lang': 'it'  # Italian language for better results
-            }
-
-            logger.debug(f"Photon query: '{query}'")
-            response = self.session.get(self.PHOTON_URL, params=params, timeout=5)
-            response.raise_for_status()
-            data = response.json()
-
-            # Convert GeoJSON features to Nominatim-like format
-            results = []
-            for feature in data.get('features', []):
-                props = feature.get('properties', {})
-
-                # Build address dict matching Nominatim structure
-                address = {
-                    'road': props.get('street'),
-                    'house_number': props.get('housenumber'),
-                    'postcode': props.get('postcode'),
-                    'city': props.get('city'),
-                    'town': props.get('city'),  # Photon uses 'city' for both
-                    'village': props.get('city'),
-                    'state': props.get('state'),
-                    'country': props.get('country'),
-                    'country_code': props.get('countrycode', '').upper() if props.get('countrycode') else None
-                }
-
-                # Create Nominatim-compatible result
-                result = {
-                    'display_name': props.get('name', ''),
-                    'address': address,
-                    'lat': feature.get('geometry', {}).get('coordinates', [0, 0])[1],
-                    'lon': feature.get('geometry', {}).get('coordinates', [0, 0])[0],
-                    '_source': 'photon'  # Track source
-                }
-                results.append(result)
-
-            if results:
-                logger.debug(f"Photon found {len(results)} results")
-                self._photon_empty_count = 0  # Reset counter on success
-            else:
-                self._photon_empty_count += 1
-                # If Photon returns empty 5 times in a row, assume it's blocked/broken
-                if self._photon_empty_count >= 5:
-                    logger.warning("Photon returning empty results repeatedly - switching to Nominatim")
-                    self._photon_available = False
-            return results
-
-        except requests.exceptions.Timeout:
-            logger.warning("Photon API timeout - will use Nominatim fallback")
-            self._photon_available = False
-            return []
-        except requests.exceptions.HTTPError as e:
-            # 400 errors are likely bad input, don't disable Photon
-            if e.response is not None and e.response.status_code == 400:
-                logger.debug(f"Photon 400 error for query '{query}' - skipping")
-                return []
-            # Other HTTP errors might indicate service issues
-            logger.warning(f"Photon API error: {e} - will use Nominatim fallback")
-            self._photon_available = False
-            return []
-        except requests.exceptions.RequestException as e:
-            logger.warning(f"Photon API error: {e} - will use Nominatim fallback")
-            self._photon_available = False
-            return []
-        except Exception as e:
-            logger.debug(f"Photon query failed: {e}")
-            return []
-
-    def _query_google(self, street: str, city: str, country: str = "Italy") -> Optional[dict]:
-        """
-        Query Google Maps Geocoding API for address.
-
-        Google provides the most accurate results, especially for:
-        - Neighborhoods (e.g., "Cascina Merlata" as part of Milano)
-        - Complex addresses
-        - Recent street names
-
-        Args:
-            street: Street address
-            city: City name
-            country: Country name
-
-        Returns:
-            Result in Nominatim-compatible format, or None
-        """
-        if not self._google_available or not self.google_api_key:
-            return None
-
-        try:
-            # Build address string
-            parts = [p for p in [street, city, country] if p and p.strip()]
-            address = ", ".join(parts)
-
-            params = {
-                'address': address,
-                'key': self.google_api_key,
-                'language': 'it',
-                'region': 'it'
-            }
-
-            logger.debug(f"Google query: '{address}'")
-            response = self.session.get(self.GOOGLE_GEOCODE_URL, params=params, timeout=10)
-            response.raise_for_status()
-            data = response.json()
-
-            if data.get('status') != 'OK':
-                if data.get('status') == 'ZERO_RESULTS':
-                    logger.debug(f"Google: no results for '{address}'")
-                    return None
-                elif data.get('status') in ('OVER_QUERY_LIMIT', 'REQUEST_DENIED'):
-                    logger.warning(f"Google API error: {data.get('status')} - disabling Google")
-                    self._google_available = False
-                    return None
-                else:
-                    logger.debug(f"Google status: {data.get('status')}")
-                    return None
-
-            # Parse first result
-            result = data['results'][0]
-            address_components = result.get('address_components', [])
-
-            # Extract address parts from components
-            street_number = ''
-            route = ''
-            postal_code = ''
-            locality = ''
-            admin_area = ''
-            country_code = ''
-
-            for component in address_components:
-                types = component.get('types', [])
-                if 'street_number' in types:
-                    street_number = component.get('long_name', '')
-                elif 'route' in types:
-                    route = component.get('long_name', '')
-                elif 'postal_code' in types:
-                    postal_code = component.get('long_name', '')
-                elif 'locality' in types:
-                    locality = component.get('long_name', '')
-                elif 'administrative_area_level_2' in types:
-                    admin_area = component.get('short_name', '')
-                elif 'country' in types:
-                    country_code = component.get('short_name', '')
-
-            # Build Nominatim-compatible result
-            address_dict = {
-                'road': route,
-                'house_number': street_number,
-                'postcode': postal_code,
-                'city': locality,
-                'town': locality,
-                'state': admin_area,
-                'country': country,
-                'country_code': country_code
-            }
-
-            nominatim_result = {
-                'display_name': result.get('formatted_address', ''),
-                'address': address_dict,
-                'lat': result.get('geometry', {}).get('location', {}).get('lat'),
-                'lon': result.get('geometry', {}).get('location', {}).get('lng'),
-                '_source': 'google'
-            }
-
-            # Mark as city-only if no street found
-            if not route:
-                nominatim_result['_city_only'] = True
-
-            logger.debug(f"Google found: {locality}, {route}, ZIP: {postal_code}")
-            return nominatim_result
-
-        except requests.exceptions.Timeout:
-            logger.warning("Google API timeout")
-            return None
-        except requests.exceptions.RequestException as e:
-            logger.warning(f"Google API error: {e}")
-            self._google_available = False
-            return None
-        except Exception as e:
-            logger.debug(f"Google query failed: {e}")
-            return None
-
-    def _query_address(self, street: str, city: str, country: str = "Italy") -> Optional[dict]:
-        """
-        Query address using hybrid approach:
-        1. Google Maps (if API key provided) - best accuracy
-        2. Photon (fast, no rate limits)
-        3. Nominatim (fallback, 1 req/sec)
-
-        Args:
-            street: Street address
-            city: City name
-            country: Country name
-
-        Returns:
-            First matching result or None
-        """
-        def find_best_result(results: list, city_name: str) -> Optional[dict]:
-            """Find the best matching result from a list."""
-            best_result = None
-            best_with_street = None
-
-            for result in results:
-                address = result.get('address', {})
-                result_city = (address.get('city') or address.get('town') or '').lower()
-
-                # Check if result matches our city
-                if city_name.lower() in result_city or result_city in city_name.lower():
-                    if address.get('road'):
-                        best_with_street = result
-                        break
-                    elif best_result is None:
-                        best_result = result
-
-            if best_with_street:
-                return best_with_street
-            elif best_result:
-                best_result['_city_only'] = True
-                return best_result
-            return None
-
-        # Try Google first (best accuracy, handles neighborhoods like "Cascina Merlata")
-        if self._google_available:
-            result = self._query_google(street, city, country)
-            if result:
-                # If Google found something, use it (even if no postcode)
-                # Don't fall back to slower APIs
-                return result
-            # Google returned nothing - try city-only query with Google
-            city_result = self._query_google("", city, country)
-            if city_result:
-                city_result['_city_only'] = True
-                return city_result
-            # Google found nothing at all - fall through to other APIs
-
-        # Try Photon second (fast, no rate limits) - only if Google not available or failed
-        if self._photon_available:
-            # Build query string for Photon
-            parts = [p for p in [street, city, country] if p and p.strip()]
-            query = ", ".join(parts)
-
-            results = self._query_photon(query, limit=5)
-            if results:
-                best = find_best_result(results, city)
-                if best and best.get('address', {}).get('postcode'):
-                    return best
-
-            # If no good result, try without house number (e.g., "11/A" or "123")
-            # This helps with addresses like "Piazza Marescotti 11/A"
-            if street:
-                street_no_num = re.sub(r'\s*\d+[/\-]?\w*\s*$', '', street).strip()
-                if street_no_num and street_no_num != street:
-                    parts = [p for p in [street_no_num, city, country] if p and p.strip()]
-                    query = ", ".join(parts)
-                    results = self._query_photon(query, limit=5)
-                    if results:
-                        best = find_best_result(results, city)
-                        if best and best.get('address', {}).get('postcode'):
-                            return best
-
-            # If still no result, try extracting main street from complex addresses
-            # e.g., "C.C. Le Grange Via Casilina inc. Via Marello 1" -> "Via Casilina"
-            if street:
-                # Look for first occurrence of a street prefix
-                street_lower = street.lower()
-                for prefix in self.STREET_PREFIXES:
-                    match = re.search(rf'\b({prefix}\.?\s+\w+)', street_lower)
-                    if match:
-                        # Extract the main street (prefix + first word)
-                        start = match.start()
-                        # Get from original string to preserve case
-                        simple_street = street[start:]
-                        # Cut at "inc.", intersection markers, or next street prefix
-                        simple_street = re.split(r'\s+(?:inc\.?|incr\.?|ang\.?|angolo)\s+', simple_street, maxsplit=1)[0]
-                        simple_street = re.sub(r'\s*\d+[/\-]?\w*\s*$', '', simple_street).strip()
-
-                        if simple_street and simple_street.lower() != street.lower():
-                            parts = [p for p in [simple_street, city, country] if p and p.strip()]
-                            query = ", ".join(parts)
-                            results = self._query_photon(query, limit=5)
-                            if results:
-                                best = find_best_result(results, city)
-                                if best and best.get('address', {}).get('postcode'):
-                                    return best
-                        break
-
-            # Return whatever we have from initial query
-            if results:
-                best = find_best_result(results, city)
-                if best:
-                    return best
-                # Fall back to first result
-                result = results[0]
-                if not result.get('address', {}).get('road'):
-                    result['_city_only'] = True
-                return result
-
-            # No results from Photon - try city-only query
-            # Note: We don't cache successful city lookups because large cities have
-            # multiple ZIP codes (e.g., Milano 20100-20199, Roma 00100-00199)
-            city_lower = city.lower().strip()
-
-            # Only check cache for known "not found" cities to avoid repeated failed queries
-            if city_lower in self._city_cache and self._city_cache[city_lower] is None:
-                # City already known to be not found - fall back to Nominatim
-                logger.debug(f"City '{city}' cached as not found, trying Nominatim")
-                return self._query_nominatim(street, city, country)
-
-            # Try city-only query with Photon (fast)
-            city_query = f"{city}, {country}"
-            city_results = self._query_photon(city_query, limit=3)
-            if city_results:
-                for cr in city_results:
-                    if cr.get('address', {}).get('postcode'):
-                        cr['_city_only'] = True
-                        return cr
-
-            # Photon couldn't find the city - cache as not found and fall back to Nominatim
-            self._city_cache[city_lower] = None
-            logger.debug(f"Photon returned no results, falling back to Nominatim for '{city}'")
-            return self._query_nominatim(street, city, country)
-
-        # Only use Nominatim when Photon service is completely down
-        logger.debug("Using Nominatim fallback (Photon unavailable)")
-        return self._query_nominatim(street, city, country)
-
-    def detect_country_code(self, zip_code: str, city: str = "", street: str = "") -> str:
-        """
-        Detect country code (ISO 3166-1 alpha-2) from address components.
-
-        Args:
-            zip_code: ZIP/postal code
-            city: City name (optional, helps with ambiguous cases)
-            street: Street name (optional, helps detect language)
-
-        Returns:
-            2-letter country code (e.g., 'IT', 'DE', 'FR'). Defaults to 'IT' if uncertain.
-        """
-        zip_clean = re.sub(r'[^A-Z0-9]', '', str(zip_code).upper().strip())
-        city_lower = city.lower().strip() if city else ""
-        street_lower = street.lower().strip() if street else ""
-
-        # UK: Alphanumeric format like "SW1A1AA", "EC1A1BB", "M11AA"
-        if re.match(r'^[A-Z]{1,2}[0-9][0-9A-Z]?\s*[0-9][A-Z]{2}$', zip_clean):
-            return 'GB'
-
-        # Netherlands: 4 digits + 2 letters (1234AB)
-        if re.match(r'^\d{4}[A-Z]{2}$', zip_clean):
-            return 'NL'
-
-        # Portugal: 4 digits - 3 digits (1234-567 or 1234567)
-        if re.match(r'^\d{7}$', zip_clean) or re.match(r'^\d{4}-?\d{3}$', str(zip_code)):
-            return 'PT'
-
-        # 5-digit ZIP codes - need to distinguish by range and context
-        if re.match(r'^\d{5}$', zip_clean):
-            first_two = int(zip_clean[:2])
-            first_digit = int(zip_clean[0])
-
-            # Italy: 00xxx-99xxx, but check for Italian cities/streets
-            italian_cities = ['roma', 'milano', 'napoli', 'torino', 'firenze', 'bologna',
-                              'venezia', 'palermo', 'genova', 'bari', 'catania', 'verona',
-                              'padova', 'trieste', 'brescia', 'parma', 'modena', 'reggio',
-                              'ravenna', 'ferrara', 'rimini', 'livorno', 'cagliari', 'sassari',
-                              'perugia', 'ancona', 'pescara', 'trento', 'bolzano', 'aosta']
-
-            italian_prefixes = ['via ', 'viale ', 'piazza ', 'corso ', 'largo ', 'vicolo ',
-                                'strada ', 'piazzale ', 'lungomare ', 'circonvallazione ']
-
-            # Check for Italian indicators
-            is_italian_city = any(it_city in city_lower for it_city in italian_cities)
-            is_italian_street = any(street_lower.startswith(prefix) for prefix in italian_prefixes)
-
-            if is_italian_city or is_italian_street:
-                return 'IT'
-
-            # Germany: 01xxx-99xxx (overlaps with Italy, use city/street clues)
-            german_cities = ['berlin', 'hamburg', 'münchen', 'munich', 'köln', 'cologne',
-                             'frankfurt', 'stuttgart', 'düsseldorf', 'dortmund', 'essen',
-                             'leipzig', 'bremen', 'dresden', 'hannover', 'nürnberg']
-            german_prefixes = ['straße', 'strasse', 'str.', 'platz', 'weg', 'allee', 'ring']
-
-            is_german_city = any(de_city in city_lower for de_city in german_cities)
-            is_german_street = any(prefix in street_lower for prefix in german_prefixes)
-
-            if is_german_city or is_german_street:
-                return 'DE'
-
-            # France: 01xxx-98xxx
-            french_cities = ['paris', 'marseille', 'lyon', 'toulouse', 'nice', 'nantes',
-                             'strasbourg', 'montpellier', 'bordeaux', 'lille', 'rennes']
-            french_prefixes = ['rue ', 'avenue ', 'boulevard ', 'place ', 'allée ', 'chemin ']
-
-            is_french_city = any(fr_city in city_lower for fr_city in french_cities)
-            is_french_street = any(street_lower.startswith(prefix) for prefix in french_prefixes)
-
-            if is_french_city or is_french_street:
-                return 'FR'
-
-            # Spain: 01xxx-52xxx
-            if first_two <= 52:
-                spanish_cities = ['madrid', 'barcelona', 'valencia', 'sevilla', 'zaragoza',
-                                  'málaga', 'malaga', 'murcia', 'palma', 'bilbao']
-                spanish_prefixes = ['calle ', 'avenida ', 'plaza ', 'paseo ', 'carrer ']
-
-                is_spanish_city = any(es_city in city_lower for es_city in spanish_cities)
-                is_spanish_street = any(street_lower.startswith(prefix) for prefix in spanish_prefixes)
-
-                if is_spanish_city or is_spanish_street:
-                    return 'ES'
-
-            # Default to Italy for 5-digit codes (most common use case for this app)
-            return 'IT'
-
-        # Austria: 4 digits (1xxx-9xxx)
-        if re.match(r'^\d{4}$', zip_clean):
-            austrian_cities = ['wien', 'vienna', 'graz', 'linz', 'salzburg', 'innsbruck']
-            if any(at_city in city_lower for at_city in austrian_cities):
-                return 'AT'
-
-            # Could also be Switzerland, Belgium, etc. - check context
-            swiss_cities = ['zürich', 'zurich', 'genève', 'geneva', 'basel', 'bern', 'lausanne']
-            if any(ch_city in city_lower for ch_city in swiss_cities):
-                return 'CH'
-
-            # Default to Austria for 4-digit
-            return 'AT'
-
-        # If no pattern matches, default to Italy
-        return 'IT'
-
-    # Italian prepositions that can vary between address sources
-    ITALIAN_PREPOSITIONS = ['di', 'del', 'della', 'delle', 'dei', 'degli', 'dello', 'al', 'alla', 'alle', 'ai', 'agli', 'allo']
-
-    def _normalize_street(self, street: str) -> str:
-        """
-        Normalize street name for comparison.
-        Removes common prefixes, prepositions, and standardizes format.
-        """
-        if not street:
-            return ""
-
-        normalized = street.lower().strip()
-
-        # Remove common prefixes for comparison
-        for prefix in self.STREET_PREFIXES:
-            if normalized.startswith(prefix + ' '):
-                normalized = normalized[len(prefix) + 1:]
-                break
-            if normalized.startswith(prefix + '.'):
-                normalized = normalized[len(prefix) + 1:]
-                break
-
-        # Remove punctuation and extra spaces
-        normalized = re.sub(r'[.,;:]', ' ', normalized)
-        normalized = re.sub(r'\s+', ' ', normalized).strip()
-
-        # Remove house numbers at the end for comparison (e.g., "21 21", "11/A", "123")
-        normalized = re.sub(r'\s+\d+[/\-]?\w*(\s+\d+[/\-]?\w*)*\s*$', '', normalized).strip()
-
-        # Remove Italian prepositions that may vary between sources (e.g., "di Valle Aurelia" vs "Valle Aurelia")
-        words = normalized.split()
-        words = [w for w in words if w not in self.ITALIAN_PREPOSITIONS]
-        normalized = ' '.join(words)
-
-        return normalized
-
-    def _extract_street_name(self, street: str) -> tuple[str, str]:
-        """
-        Extract street prefix and name separately.
-
-        Returns:
-            Tuple of (prefix, name)
-        """
-        if not street:
-            return "", ""
-
-        street_lower = street.lower().strip()
-
-        for prefix in self.STREET_PREFIXES:
-            if street_lower.startswith(prefix + ' '):
-                return prefix, street[len(prefix) + 1:].strip()
-            if street_lower.startswith(prefix + '.'):
-                return prefix, street[len(prefix) + 1:].strip()
-
-        return "", street
+    # =========================================================================
+    # Regex fallback (kept for Tier 2/3)
+    # =========================================================================
 
     def _extract_house_number(self, street: str) -> tuple[str, str]:
-        """
-        Extract house number from the end of a street address.
-
-        Returns:
-            Tuple of (street_without_number, house_number)
-        """
+        """Extract house number from the end of a street address."""
         if not street:
             return "", ""
-
-        # Match house numbers at the end: "21", "21 21", "11/A", "123bis", etc.
         match = re.search(r'\s+(\d+[/\-]?\w*(?:\s+\d+[/\-]?\w*)*)\s*$', street)
         if match:
             house_num = match.group(1)
             street_only = street[:match.start()].strip()
             return street_only, house_num
-
         return street, ""
 
-    def _build_street_suggestion(self, suggested_name: str, original_street: str) -> str:
-        """
-        Build a street suggestion preserving the original house number.
-
-        Args:
-            suggested_name: The corrected street name from API (may include a house number)
-            original_street: The original street with house number
-
-        Returns:
-            Suggested street with original house number appended
-        """
-        if not suggested_name:
-            return original_street
-
-        # Extract house number from original street - ALWAYS preserve this
-        _, original_house_num = self._extract_house_number(original_street)
-
-        # Strip any house number from the API suggestion (Google might return a different one)
-        suggested_street_only, api_house_num = self._extract_house_number(suggested_name)
-
-        # Use original house number if available, otherwise keep API's (if any)
-        final_house_num = original_house_num or api_house_num
-
-        # Log for debugging
-        logger.debug(f"_build_street_suggestion: suggested_name={suggested_name!r}, original_street={original_street!r}")
-        logger.debug(f"  -> original_house_num={original_house_num!r}, api_house_num={api_house_num!r}, final={final_house_num!r}")
-
-        # Combine the cleaned suggestion with the house number
-        if final_house_num:
-            result = f"{suggested_street_only} {final_house_num}"
-            logger.debug(f"  -> result={result!r}")
-            return result
-        return suggested_street_only
-
-    def _extract_location_prefix(self, street: str) -> tuple[str, str]:
-        """
-        Extract location info (Centro Commerciale, C.C., etc.) from street address.
-
-        Handles both:
-        - Prefixes: "C.C. Le Grange Via Roma 1" → ("Via Roma 1", "C.C. Le Grange")
-        - Suffixes: "Via Roma 1 - cc il miglio" → ("Via Roma 1", "cc il miglio")
-
-        Args:
-            street: Original street address
-
-        Returns:
-            Tuple of (clean_street, extracted_location)
-            If no location found, returns (original_street, "")
-        """
-        if not street:
-            return street, ""
-
-        street_lower = street.lower().strip()
-
-        # First check for SUFFIX patterns (e.g., "Via Roma 1 - cc il miglio")
-        # Common separators: " - ", " – ", ", ", " ("
-        suffix_separators = [' - ', ' – ', ' -', '- ', ', c.c.', ', cc ', ' (']
-
-        for separator in suffix_separators:
-            if separator in street_lower:
-                sep_idx = street_lower.find(separator)
-                potential_suffix = street_lower[sep_idx + len(separator):].strip()
-
-                # Check if what follows the separator is a location prefix
-                for prefix in self.LOCATION_PREFIXES:
-                    if potential_suffix.startswith(prefix) or potential_suffix == prefix.strip():
-                        # Found a location suffix - extract it
-                        clean_street = street[:sep_idx].strip()
-                        location = street[sep_idx:].strip()
-                        # Remove leading separator from location
-                        for sep in [' - ', ' – ', '-', ', ']:
-                            if location.lower().startswith(sep):
-                                location = location[len(sep):].strip()
-                                break
-                        return clean_street, location
-
-        # Check if the street starts with a location prefix
-        for prefix in self.LOCATION_PREFIXES:
-            if street_lower.startswith(prefix):
-                # Find where the actual street address begins (first STREET_PREFIXES match)
-                for street_prefix in self.STREET_PREFIXES:
-                    match = re.search(rf'\b{street_prefix}\.?\s+', street_lower)
-                    if match:
-                        # Extract: everything before street prefix is location, rest is street
-                        location = street[:match.start()].strip()
-                        clean_street = street[match.start():].strip()
-                        return clean_street, location
-
-                # No standard street prefix found - return original
-                return street, ""
-
-        return street, ""
-
-    def preprocess_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Preprocess DataFrame by moving location prefixes from Street 1 to Street 2.
-
-        This separates Centro Commerciale, C.C., etc. from the actual street address
-        to improve validation accuracy.
-
-        Args:
-            df: Original DataFrame
-
-        Returns:
-            Preprocessed DataFrame with locations moved to Street 2
-        """
-        df = df.copy()
-        col_map = self._map_columns(df)
-        street_col = col_map.get('street')
-        street2_col = col_map.get('street2')
-
-        if not street_col:
-            return df
-
-        # If Street 2 column doesn't exist, create it
-        if not street2_col:
-            # Find position after Street 1 to insert Street 2
-            if street_col in df.columns:
-                col_idx = df.columns.get_loc(street_col) + 1
-                df.insert(col_idx, 'Street 2', '')
-                street2_col = 'Street 2'
-            else:
-                df['Street 2'] = ''
-                street2_col = 'Street 2'
-
-        # Process each row
-        for idx, row in df.iterrows():
-            street_val = str(row.get(street_col, '')).strip()
-            street2_val = str(row.get(street2_col, '')).strip()
-
-            # Skip if Street 1 is empty or nan
-            if not street_val or street_val.lower() == 'nan':
-                continue
-
-            # Extract location prefix
-            clean_street, location = self._extract_location_prefix(street_val)
-
-            # If we extracted a location and Street 2 is empty, move it
-            if location and (not street2_val or street2_val.lower() == 'nan'):
-                df.at[idx, street_col] = clean_street
-                df.at[idx, street2_col] = location
-                logger.debug(f"Row {idx}: Moved '{location}' to Street 2, keeping '{clean_street}' in Street 1")
-
-        return df
-
-    def _looks_like_valid_italian_street(self, street: str) -> bool:
-        """
-        Check if street follows a valid Italian street format.
-        This is a heuristic fallback when API can't verify the street.
-
-        Returns:
-            True if street format appears valid
-        """
-        if not street:
-            return False
-
-        street_lower = street.lower().strip()
-
-        # Check if starts with a known Italian street prefix
-        for prefix in self.STREET_PREFIXES:
-            if street_lower.startswith(prefix + ' ') or street_lower.startswith(prefix + '.'):
-                # Must have something after the prefix (the actual street name)
-                remaining = street_lower[len(prefix):].strip(' .')
-                if len(remaining) >= 2:  # At least 2 chars for a name
-                    return True
-
-        return False
-
-    def _string_similarity(self, s1: str, s2: str) -> float:
-        """
-        Calculate similarity ratio between two strings.
-        Handles abbreviations like "Alfieri" vs "Vittorio Alfieri".
-
-        Returns:
-            Similarity score 0.0 to 1.0
-        """
-        if not s1 or not s2:
-            return 0.0
-
-        # Normalize both strings
-        n1 = self._normalize_street(s1)
-        n2 = self._normalize_street(s2)
-
-        if not n1 or not n2:
-            return 0.0
-
-        # Exact match
-        if n1 == n2:
-            return 1.0
-
-        # Check if one is a suffix of the other (handles "Alfieri" vs "Vittorio Alfieri")
-        # This is common in Italian streets where the full name includes a person's first name
-        if n1.endswith(n2) or n2.endswith(n1):
-            return 0.95
-
-        # Check if one is contained in the other
-        if n1 in n2 or n2 in n1:
-            # Give high score if shorter string is significant portion of longer
-            shorter = n1 if len(n1) < len(n2) else n2
-            longer = n2 if len(n1) < len(n2) else n1
-            ratio = len(shorter) / len(longer)
-            if ratio >= 0.5:  # At least half the length
-                return 0.90
-
-        # Check if last words match (common pattern: "V. Alfieri" vs "Vittorio Alfieri")
-        words1 = n1.split()
-        words2 = n2.split()
-        if words1 and words2 and words1[-1] == words2[-1]:
-            # Last word matches - likely same street
-            return 0.90
-
-        # Standard sequence matching
-        return SequenceMatcher(None, n1, n2).ratio()
-
-    def _clean_zip_code(self, zip_code: str) -> tuple[str, bool, bool]:
-        """
-        Clean zip code by replacing common typos and padding with leading zeros.
-
-        For Italian CAPs (5 digits), if the ZIP is shorter than 5 digits,
-        assumes missing digits are leading zeros (e.g., "187" → "00187").
-
-        Args:
-            zip_code: Original zip code
-
-        Returns:
-            Tuple of (cleaned_zip, was_cleaned, was_padding_only)
-            - was_padding_only: True if the only change was adding leading zeros
-        """
-        original = str(zip_code).strip()
-
-        # Common letter-to-number replacements
-        replacements = {
-            'o': '0', 'O': '0',  # o/O → 0
-            'l': '1', 'I': '1', 'i': '1',  # l/I/i → 1
-            'z': '2', 'Z': '2',  # z/Z → 2
-            's': '5', 'S': '5',  # s/S → 5
-            'b': '8', 'B': '8',  # b/B → 8
-            'g': '9', 'G': '9',  # g/G → 9
-        }
-
-        cleaned = original
-        for char, replacement in replacements.items():
-            cleaned = cleaned.replace(char, replacement)
-
-        # Remove any remaining non-digit characters
-        cleaned = re.sub(r'[^\d]', '', cleaned)
-
-        # Check if we only need to pad (before padding)
-        digits_only = cleaned
-        needs_padding = len(cleaned) < 5 and len(cleaned) > 0
-
-        # Pad with leading zeros if shorter than 5 digits (Italian CAP)
-        # e.g., "187" → "00187" (Rome), "6100" → "06100" (Perugia)
-        if needs_padding:
-            cleaned = cleaned.zfill(5)
-
-        was_cleaned = cleaned != original.replace(' ', '')
-        # was_padding_only is True if the original digits match the end of cleaned
-        # e.g., "192" → "00192" means digits_only="192" and cleaned ends with "192"
-        was_padding_only = was_cleaned and needs_padding and cleaned.endswith(digits_only)
-
-        return cleaned, was_cleaned, was_padding_only
-
-    def _count_different_digits(self, zip1: str, zip2: str) -> int:
-        """
-        Count how many digits are different between two zip codes.
-        """
-        if len(zip1) != len(zip2):
-            return max(len(zip1), len(zip2))
-
-        return sum(1 for a, b in zip(zip1, zip2) if a != b)
-
-    def _is_transposition(self, zip1: str, zip2: str) -> bool:
-        """
-        Check if two zip codes are transpositions (same digits, different order).
-        """
-        if len(zip1) != len(zip2):
-            return False
-
-        return sorted(zip1) == sorted(zip2)
-
-    def _is_adjacent_swap(self, zip1: str, zip2: str) -> bool:
-        """
-        Check if two zip codes differ by a single adjacent digit swap.
-        """
-        if len(zip1) != len(zip2):
-            return False
-
-        diff_positions = [i for i in range(len(zip1)) if zip1[i] != zip2[i]]
-
-        if len(diff_positions) != 2:
-            return False
-
-        i, j = diff_positions
-        if j - i != 1:
-            return False
-
-        return zip1[i] == zip2[j] and zip1[j] == zip2[i]
-
-    def _is_valid_italian_zip_format(self, zip_code: str) -> bool:
-        """Check if zip code has valid Italian CAP format (5 digits)."""
-        return bool(re.match(r'^\d{5}$', str(zip_code).strip()))
-
-    def _search_streets_in_city(self, city: str, limit: int = 50) -> list[dict]:
-        """
-        Search for streets in a city using Nominatim.
-
-        Args:
-            city: City name
-            limit: Maximum results to return
-
-        Returns:
-            List of address results with street information
-        """
-        try:
-            params = {
-                'city': city,
-                'country': 'Italy',
-                'format': 'json',
-                'addressdetails': 1,
-                'limit': limit
-            }
-
-            response = self.session.get(self.NOMINATIM_URL, params=params, timeout=10)
-            response.raise_for_status()
-            return response.json()
-
-        except Exception:
-            return []
-
-    def _query_nominatim(self, street: str, city: str, country: str = "Italy") -> Optional[dict]:
-        """
-        Query Nominatim API for address (used as fallback when Photon fails).
-
-        Args:
-            street: Street address
-            city: City name
-            country: Country name
-
-        Returns:
-            First result from API or None
-        """
-        try:
-            # First try with full address
-            params = {
-                'street': street,
-                'city': city,
-                'country': country,
-                'format': 'json',
-                'addressdetails': 1,
-                'limit': 1
-            }
-
-            logger.debug(f"Nominatim query: street='{street}', city='{city}'")
-            response = self.session.get(self.NOMINATIM_URL, params=params, timeout=10)
-            response.raise_for_status()
-            results = response.json()
-
-            if results:
-                logger.debug(f"Nominatim found address match")
-                result = results[0]
-                result['_source'] = 'nominatim'
-                return result
-
-            # Fallback: city-only search
-            logger.debug(f"No street match, trying city-only for '{city}'")
-            time.sleep(self.REQUEST_DELAY)
-            params = {
-                'city': city,
-                'country': country,
-                'format': 'json',
-                'addressdetails': 1,
-                'limit': 1
-            }
-
-            response = self.session.get(self.NOMINATIM_URL, params=params, timeout=10)
-            response.raise_for_status()
-            results = response.json()
-
-            if results:
-                result = results[0]
-                result['_city_only'] = True  # Mark as city-only match
-                result['_source'] = 'nominatim'
-                logger.debug(f"Nominatim city-only match found")
-                return result
-
-            logger.warning(f"Nominatim: no results for '{city}'")
-            return None
-
-        except Exception:
-            return None
-
-    def _search_similar_streets(self, street: str, city: str) -> list[tuple[str, float, dict]]:
-        """
-        Search for streets similar to the input in the given city.
-        Uses Google API (if available) or Photon API for speed.
-
-        Args:
-            street: Street to search for
-            city: City name
-
-        Returns:
-            List of (street_name, similarity_score, full_result) sorted by similarity
-        """
-        if not street or not city:
-            return []
-
-        matches = []
-        seen_streets = set()
-
-        try:
-            # Extract street components
-            street_prefix, street_name = self._extract_street_name(street)
-
-            # Try Google first (if available) - best accuracy
-            if self._google_available:
-                result = self._query_google(street, city, "Italy")
-                if result:
-                    found_street_raw = result.get('address', {}).get('road')
-                    # Strip any embedded house number from the road name
-                    if found_street_raw:
-                        found_street, _ = self._extract_house_number(found_street_raw)
-                    else:
-                        found_street = None
-                    if found_street and found_street.lower() not in seen_streets:
-                        seen_streets.add(found_street.lower())
-                        similarity = self._string_similarity(street, found_street)
-                        matches.append((found_street, similarity, result))
-
-            # Try Photon as fallback (fast, no rate limits)
-            if not matches and self._photon_available:
-                query = f"{street}, {city}, Italy"
-                results = self._query_photon(query, limit=10)
-
-                for result in results:
-                    address = result.get('address', {})
-                    found_street_raw = address.get('road')
-                    # Strip any embedded house number from the road name
-                    if found_street_raw:
-                        found_street, _ = self._extract_house_number(found_street_raw)
-                    else:
-                        found_street = None
-
-                    if found_street and found_street.lower() not in seen_streets:
-                        seen_streets.add(found_street.lower())
-                        similarity = self._string_similarity(street, found_street)
-                        matches.append((found_street, similarity, result))
-
-                # If no good matches, try alternate query without street number
-                if (not matches or max(m[1] for m in matches) < 0.70) and street_name:
-                    street_name_no_num = re.sub(r',?\s*\d+.*$', '', street_name).strip()
-                    if street_name_no_num:
-                        search_term = f"{street_prefix} {street_name_no_num}".strip() if street_prefix else street_name_no_num
-                        query = f"{search_term}, {city}, Italy"
-                        results = self._query_photon(query, limit=10)
-
-                        for result in results:
-                            address = result.get('address', {})
-                            found_street_raw = address.get('road')
-                            # Strip any embedded house number from the road name
-                            if found_street_raw:
-                                found_street, _ = self._extract_house_number(found_street_raw)
-                            else:
-                                found_street = None
-
-                            if found_street and found_street.lower() not in seen_streets:
-                                seen_streets.add(found_street.lower())
-                                similarity = self._string_similarity(street, found_street)
-                                matches.append((found_street, similarity, result))
-
-            # Sort by similarity and return whatever we have
-            matches.sort(key=lambda x: x[1], reverse=True)
-            return matches
-
-        except Exception:
-            return matches if matches else []
-
-    def validate_address(
-        self,
-        street: str,
-        city: str,
-        original_zip: str,
-        country: str = "IT"
-    ) -> tuple[bool, Optional[str], int, str, bool, Optional[str], int]:
-        """
-        Validate a full address (ZIP and street).
-
-        Args:
-            street: Street address
-            city: City name
-            original_zip: Original zip code to validate
-            country: Country code
-
-        Returns:
-            Tuple of (
-                zip_valid, suggested_zip, zip_confidence, zip_reason,
-                street_verified, suggested_street, street_confidence
-            )
-        """
-        original_zip_raw = str(original_zip).strip()
-        original_street = str(street).strip() if street else ""
-
-        # Default street validation values
-        street_verified = False
-        suggested_street = None
-        street_confidence = 0
-
-        # Only validate Italian addresses for now
-        if country.upper() not in ('IT', 'ITALY'):
-            return True, original_zip_raw, 100, "Non-IT country - skipped", True, original_street, 100
-
-        # Check cache first (before API calls)
-        cached = self._lookup_cache(original_street, city)
-        if cached:
-            # Cache hit! Use cached result
-            cached_zip = cached.get('validated_zip')
-            cached_street = cached.get('validated_street')
-            cached_confidence = cached.get('confidence', 90)
-            times_used = cached.get('times_used', 1)
-
-            # Boost confidence for frequently validated addresses
-            confidence_boost = min(times_used, 10)  # Max +10%
-            final_confidence = min(cached_confidence + confidence_boost, 100)
-
-            # Rebuild suggested street with original house number
-            _, original_house_num = self._extract_house_number(original_street)
-            if cached_street and original_house_num:
-                suggested_street_with_num = f"{cached_street} {original_house_num}"
-            else:
-                suggested_street_with_num = cached_street
-
-            # Check if cached ZIP matches original (after cleaning)
-            cleaned_original, _, _ = self._clean_zip_code(original_zip_raw)
-            zip_matches = cached_zip == cleaned_original
-
-            reason = f"Cached result (used {times_used}x)"
-            return (
-                zip_matches,
-                cached_zip,
-                final_confidence,
-                reason,
-                True,  # street_verified (was validated before)
-                suggested_street_with_num if suggested_street_with_num != original_street else None,
-                final_confidence
-            )
-
-        # Try to clean up the zip code
-        cleaned_zip, was_cleaned, was_padding_only = self._clean_zip_code(original_zip_raw)
-
-        # Track if original ZIP was very incomplete (1-3 digits)
-        original_digits = re.sub(r'[^\d]', '', original_zip_raw)
-        was_incomplete = len(original_digits) < 4
-
-        # Format check on cleaned version
-        if not self._is_valid_italian_zip_format(cleaned_zip):
-            result = self._query_nominatim(original_street or "", city, "Italy")
-            if result:
-                suggested = result.get('address', {}).get('postcode')
-                if suggested:
-                    if ';' in suggested:
-                        suggested = suggested.split(';')[0]
-                    return False, suggested, 75, f"Invalid format '{original_zip_raw}' - suggested from address", False, None, 0
-            return False, None, 0, f"Invalid format '{original_zip_raw}' (must be 5 digits)", False, None, 0
-
-        working_zip = cleaned_zip
-
-        # Query address using hybrid approach (Photon first, then Nominatim)
-        result = self._query_address(original_street or "", city, "Italy")
-
-        if not result:
-            return False, None, 0, "Address not found in API", False, None, 0
-
-        is_city_only = result.get('_city_only', False)
-
-        # Check street match - always try even if city-only match
-        if original_street:
-            address_data = result.get('address', {})
-            found_street_raw = (
-                address_data.get('road') or
-                address_data.get('pedestrian') or
-                address_data.get('footway') or
-                address_data.get('residential')
-            )
-
-            # Strip any house number that might be embedded in the road name
-            # (some APIs don't properly separate street and house number)
-            if found_street_raw:
-                found_street, _ = self._extract_house_number(found_street_raw)
-            else:
-                found_street = None
-
-            # If we have a street from the response (not city-only), compare it
-            if found_street and not is_city_only:
-                similarity = self._string_similarity(original_street, found_street)
-                logger.debug(f"Street comparison: original={original_street!r}, found={found_street!r}, similarity={similarity:.2f}")
-
-                if similarity >= 0.95:
-                    # Excellent match
-                    street_verified = True
-                    street_confidence = 100
-                elif similarity >= 0.85:
-                    # Good match - likely minor typo in street name
-                    street_verified = True
-                    potential_suggestion = self._build_street_suggestion(found_street, original_street)
-                    # Only show suggestion if it's actually different from original
-                    if self._normalize_street(potential_suggestion) != self._normalize_street(original_street):
-                        suggested_street = potential_suggestion
-                    street_confidence = int(similarity * 100)
-                elif similarity >= 0.70:
-                    # Moderate match - suggest correction
-                    street_verified = False
-                    potential_suggestion = self._build_street_suggestion(found_street, original_street)
-                    # Only show suggestion if it's actually different from original
-                    if self._normalize_street(potential_suggestion) != self._normalize_street(original_street):
-                        suggested_street = potential_suggestion
-                    else:
-                        # Streets are effectively the same - verify without suggestion
-                        street_verified = True
-                    street_confidence = int(similarity * 100)
-                else:
-                    # Low match - search for similar streets
-                    # Note: _search_similar_streets handles its own rate limiting
-                    similar = self._search_similar_streets(original_street, city)
-                    if similar:
-                        best_match, best_score, _ = similar[0]
-                        if best_score >= 0.70:
-                            suggested_street = self._build_street_suggestion(best_match, original_street)
-                            street_confidence = int(best_score * 100)
-                        elif best_score >= 0.60:
-                            # Lower threshold for suggestion (not auto-correct)
-                            suggested_street = self._build_street_suggestion(best_match, original_street)
-                            street_confidence = int(best_score * 100)
-            else:
-                # No street in response OR city-only match - search for similar streets
-                # Note: _search_similar_streets handles its own rate limiting
-                similar = self._search_similar_streets(original_street, city)
-                if similar:
-                    best_match, best_score, best_result = similar[0]
-                    if best_score >= 0.85:
-                        # High confidence - verify the street
-                        street_verified = True
-                        suggested_street = self._build_street_suggestion(best_match, original_street) if best_score < 0.95 else None
-                        street_confidence = int(best_score * 100)
-                    elif best_score >= 0.70:
-                        suggested_street = self._build_street_suggestion(best_match, original_street)
-                        street_confidence = int(best_score * 100)
-                    elif best_score >= 0.60:
-                        # Lower threshold for suggestion only
-                        suggested_street = self._build_street_suggestion(best_match, original_street)
-                        street_confidence = int(best_score * 100)
-
-                    # Also get ZIP from best match if available and we're in city-only mode
-                    if best_result and is_city_only and best_score >= 0.70:
-                        better_zip = best_result.get('address', {}).get('postcode')
-                        if better_zip and ';' not in better_zip:
-                            result = best_result
-                else:
-                    # API didn't find a matching street - check if format looks valid
-                    # This prevents showing "-" for correctly formatted streets that OSM doesn't have
-                    if self._looks_like_valid_italian_street(original_street):
-                        if not is_city_only:
-                            # API found the address location, just not the street name
-                            street_verified = True
-                            street_confidence = 75
-                        else:
-                            # City-only match with valid street format - low confidence verify
-                            street_verified = True
-                            street_confidence = 60
-
-        # Now validate ZIP
-        suggested_zip = result.get('address', {}).get('postcode')
-
-        if not suggested_zip:
-            # Try city-only query to get postal code for the city
-            city_query = f"{city}, Italy"
-            city_results = self._query_photon(city_query, limit=3)
-            for city_result in city_results:
-                city_zip = city_result.get('address', {}).get('postcode')
-                if city_zip and ';' not in city_zip:
-                    suggested_zip = city_zip
-                    is_city_only = True
-                    break
-
-        if not suggested_zip:
-            city_lower = city.lower().strip()
-            if city_lower in self.ITALIAN_CAP_RANGES:
-                cap_start, cap_end = self.ITALIAN_CAP_RANGES[city_lower]
-                if cap_start <= working_zip <= cap_end:
-                    # If only padding was needed and ZIP is in valid range, high confidence auto-correct
-                    if was_padding_only:
-                        return False, working_zip, 95, f"Leading zeros added: '{original_zip_raw}' → '{working_zip}' (valid for {city})", street_verified, suggested_street, street_confidence
-                    return False, working_zip, 70, f"Street not found - ZIP in city range ({cap_start}-{cap_end})", street_verified, suggested_street, street_confidence
-                else:
-                    return False, cap_start, 80, f"ZIP outside city range ({cap_start}-{cap_end})", street_verified, suggested_street, street_confidence
-            # No postal code from API - return the cleaned/padded ZIP if it was modified
-            if was_padding_only:
-                # Padding-only is a safe auto-correct
-                return False, working_zip, 95, f"Leading zeros added: '{original_zip_raw}' → '{working_zip}'", street_verified, suggested_street, street_confidence
-            if was_cleaned:
-                return False, working_zip, 60, f"No API postal code - using cleaned ZIP '{original_zip_raw}' → '{working_zip}'", street_verified, suggested_street, street_confidence
-            return False, working_zip, 50, "No postal code in API response", street_verified, suggested_street, street_confidence
-
-        # Handle multiple postcodes
-        if ';' in suggested_zip:
-            suggested_zips = suggested_zip.split(';')
-            if working_zip in suggested_zips:
-                return True, working_zip, 100, "Exact match (one of multiple)", street_verified, suggested_street, street_confidence
-            for sz in suggested_zips:
-                if self._count_different_digits(working_zip, sz) == 1:
-                    suggested_zip = sz
-                    break
-            else:
-                suggested_zip = suggested_zips[0]
-
-        # Exact match
-        if working_zip == suggested_zip:
-            if was_padding_only:
-                return False, suggested_zip, 95, f"Leading zeros added: '{original_zip_raw}' → '{suggested_zip}'", street_verified, suggested_street, street_confidence
-            if was_cleaned:
-                return False, suggested_zip, 95, f"Typo fixed: '{original_zip_raw}' → '{suggested_zip}'", street_verified, suggested_street, street_confidence
-            return True, working_zip, 100, "Exact match", street_verified, suggested_street, street_confidence
-
-        # Calculate confidence
-        diff_count = self._count_different_digits(working_zip, suggested_zip)
-        is_transposition = self._is_transposition(working_zip, suggested_zip)
-        is_adjacent_swap = self._is_adjacent_swap(working_zip, suggested_zip)
-
-        # If original ZIP was incomplete (1-3 digits), suggest the padded version
-        # not the API's suggestion - flag for manual review
-        if was_incomplete and diff_count >= 2:
-            confidence = 50
-            reason = f"Original ZIP '{original_zip_raw}' padded to '{working_zip}' - needs manual review"
-            return False, working_zip, confidence, reason, street_verified, suggested_street, street_confidence
-        elif is_city_only:
-            confidence = 70
-            reason = "City-level match only (street not found)"
-        elif is_adjacent_swap:
-            confidence = 96
-            reason = f"Adjacent digits swapped ({working_zip} → {suggested_zip})"
-        elif is_transposition:
-            confidence = 95
-            reason = f"Digits transposed ({working_zip} → {suggested_zip})"
-        elif diff_count == 1:
-            confidence = 95
-            reason = f"Typo: 1 digit different ({working_zip} → {suggested_zip})"
-        elif diff_count == 2:
-            confidence = 92
-            reason = f"2 digits different ({working_zip} → {suggested_zip})"
-        elif diff_count >= 3 and not is_city_only:
-            # 3+ digits different is suspicious
-            # Check if original ZIP looks correct for the city (same province, city center ZIP)
-            same_province = working_zip[:2] == suggested_zip[:2]
-            is_city_center_zip = working_zip.endswith('100') or working_zip.endswith('00')
-
-            if same_province and is_city_center_zip:
-                # Original ZIP looks like a valid city center ZIP in the same province
-                # API probably found the street in a different town - trust original
-                confidence = 85
-                reason = f"Original ZIP {working_zip} appears correct (city center) - API found {suggested_zip}"
-                return False, working_zip, confidence, reason, street_verified, suggested_street, street_confidence
-            else:
-                confidence = 70
-                reason = f"{diff_count} digits different - verify manually ({working_zip} → {suggested_zip})"
-        else:
-            confidence = 85
-            reason = f"{diff_count} digits different - verify manually"
-
-        if was_cleaned and not was_incomplete:
-            reason = f"Cleaned '{original_zip_raw}' → '{working_zip}'. " + reason
-
-        return False, suggested_zip, confidence, reason, street_verified, suggested_street, street_confidence
-
-    def validate_zip(
-        self,
-        street: str,
-        city: str,
-        original_zip: str,
-        country: str = "IT"
-    ) -> tuple[bool, Optional[str], int, str]:
-        """
-        Validate a single zip code (backwards compatible method).
-
-        Returns:
-            Tuple of (is_valid, suggested_zip, confidence, reason)
-        """
-        zip_valid, suggested_zip, confidence, reason, _, _, _ = self.validate_address(
-            street, city, original_zip, country
-        )
-        return zip_valid, suggested_zip, confidence, reason
-
-    def process_dataframe(
-        self,
-        df: pd.DataFrame,
-        progress_callback: Optional[Callable[[int, int, str], None]] = None,
-        preprocess: bool = True
-    ) -> tuple[ValidationReport, pd.DataFrame]:
-        """
-        Process entire DataFrame and validate all addresses.
-
-        Args:
-            df: DataFrame with address data
-            progress_callback: Optional callback(current, total, message)
-            preprocess: If True, preprocess to move Centro Commerciale to Street 2
-
-        Returns:
-            Tuple of (ValidationReport with all results, preprocessed DataFrame)
-        """
-        logger.info(f"Starting address validation for {len(df)} rows")
-
-        # Preprocess to move Centro Commerciale info to Street 2
-        if preprocess:
-            logger.info("Preprocessing: moving location prefixes to Street 2")
-            df = self.preprocess_dataframe(df)
-
-        results = []
-        valid_count = 0
-        corrected_count = 0
-        review_count = 0
-        skipped_count = 0
-        street_verified_count = 0
-        street_corrected_count = 0
-        po_invalid_count = 0
-
-        col_map = self._map_columns(df)
-        logger.debug(f"Column mapping: {col_map}")
-
-        # Only city and zip are required; country can be auto-detected
-        if not all(col_map.get(k) for k in ['city', 'zip']):
-            raise ValueError(
-                f"Missing required columns. Found: {list(df.columns)}\n"
-                f"Need: City, Zip (Country is optional - will be auto-detected)"
-            )
-
-        has_country_col = col_map.get('country') is not None
-        has_state_col = col_map.get('state') is not None
-        total = len(df)
-
-        for idx, row in df.iterrows():
-            if progress_callback:
-                progress_callback(idx + 1, total, f"Validating row {idx + 1}...")
-
-            name = str(row.get(col_map.get('name', ''), ''))
-            street = str(row.get(col_map.get('street', ''), ''))
-            # Get Street 2 (may contain location info like C.C. moved by preprocessing)
-            street2 = str(row.get(col_map.get('street2', ''), '')) if col_map.get('street2') else ''
-            street2_is_location = False
-            if street2 and street2.lower() != 'nan':
-                # Check if Street 2 contains location info (C.C., Centro Commerciale, etc.)
-                street2_lower = street2.lower().strip()
-                for prefix in self.LOCATION_PREFIXES:
-                    # Don't strip prefix - 'cc ' has intentional trailing space to avoid matching 'cciaa' etc.
-                    if street2_lower.startswith(prefix):
-                        street2_is_location = True
-                        break
-
-            # Build full_street for API validation
-            # Don't include street2 if it's just location info (C.C., etc.) - it confuses the API
-            if street2 and street2.lower() != 'nan' and not street2_is_location:
-                full_street = f"{street}, {street2}".strip(', ')
-            else:
-                full_street = street
-            city = str(row.get(col_map['city'], ''))
-            original_zip = str(row.get(col_map['zip'], ''))
-            # Get state/province if available (for ZIP validation)
-            state = ''
-            if has_state_col:
-                state_raw = row.get(col_map['state'], '')
-                state = str(state_raw).strip() if pd.notna(state_raw) else ''
-
-            # Get phone if available - track if missing
-            phone_col = col_map.get('phone')
-            original_phone = ''
-            phone_missing = False
-            if phone_col:
-                phone_raw = row.get(phone_col, '')
-                original_phone = str(phone_raw).strip() if pd.notna(phone_raw) else ''
-                phone_missing = not original_phone or original_phone.lower() == 'nan'
-
-            # Get Cash on Delivery if available - track if needs to be set to 0
-            cod_col = col_map.get('cash_on_delivery')
-            original_cod = ''
-            cod_changed = False
-            if cod_col:
-                cod_raw = row.get(cod_col, '')
-                original_cod = str(cod_raw).strip() if pd.notna(cod_raw) else ''
-                # COD needs to be changed if it's not 0
-                cod_changed = original_cod != '0' and original_cod.lower() != 'nan' and original_cod != ''
-
-            # Get Order Number if available - validate PO number
-            order_col = col_map.get('order_number')
-            po_value = ''
-            po_extracted = ''
-            po_invalid = False
-            if order_col:
-                order_raw = row.get(order_col, '')
-                po_value = str(order_raw).strip() if pd.notna(order_raw) else ''
-                if po_value and po_value.lower() != 'nan':
-                    po_valid, po_extracted, po_error = self.validate_po_number(po_value)
-                    po_invalid = not po_valid
-                    if po_invalid:
-                        logger.warning(f"Row {idx}: Invalid PO - {po_error}")
-
-            # Get country from column or auto-detect
-            country_detected = False
-            if has_country_col:
-                country_raw = row.get(col_map['country'], '')
-                country = str(country_raw).strip() if pd.notna(country_raw) and str(country_raw).strip() else ''
-            else:
-                country = ''
-
-            # Auto-detect country if not provided or empty
-            if not country:
-                country = self.detect_country_code(original_zip, city, street)
-                country_detected = True
-
-            # Normalize country to 2-letter code
-            country_upper = country.upper()
-            if country_upper in ('ITALY', 'ITALIA'):
-                country = 'IT'
-            elif country_upper in ('GERMANY', 'DEUTSCHLAND'):
-                country = 'DE'
-            elif country_upper in ('FRANCE'):
-                country = 'FR'
-            elif country_upper in ('SPAIN', 'ESPAÑA', 'ESPANA'):
-                country = 'ES'
-            elif country_upper in ('UNITED KINGDOM', 'UK', 'GREAT BRITAIN'):
-                country = 'GB'
-            elif len(country) == 2:
-                country = country_upper
-            else:
-                # If still not a 2-letter code, try to detect
-                country = self.detect_country_code(original_zip, city, street)
-                country_detected = True
-
-            # Skip non-IT countries (only validate Italian addresses)
-            if country not in ('IT',):
-                results.append(ValidationResult(
-                    row_index=idx,
-                    name=name,
-                    city=city,
-                    street=street,
-                    original_zip=original_zip,
-                    suggested_zip=original_zip,
-                    confidence=100,
-                    reason=f"Non-IT country ({country}) - skipped",
-                    is_valid=True,
-                    street_verified=True,
-                    street_confidence=100,
-                    country_code=country,
-                    country_detected=country_detected,
-                    phone_missing=phone_missing,
-                    original_phone=original_phone,
-                    cod_changed=cod_changed,
-                    original_cod=original_cod
-                ))
-                skipped_count += 1
-                continue
-
-            # Validate full address (use combined street for better results)
-            (
-                is_valid, suggested_zip, confidence, reason,
-                street_verified, suggested_street, street_confidence
-            ) = self.validate_address(full_street, city, original_zip, country)
-
-            # FINAL SAFEGUARD: Ensure original house number is ALWAYS preserved in suggestion
-            if suggested_street and full_street:
-                _, original_house_num = self._extract_house_number(full_street)
-                if original_house_num:
-                    # Check if suggestion has the correct house number
-                    suggested_base, suggested_num = self._extract_house_number(suggested_street)
-                    if suggested_num != original_house_num:
-                        # Fix the suggestion to use original house number
-                        suggested_street = f"{suggested_base} {original_house_num}" if suggested_base else f"{suggested_street} {original_house_num}"
-                        logger.debug(f"Fixed suggested_street to preserve house number: {suggested_street}")
-
-            # Cross-validate ZIP with province if state column is available
-            if state and suggested_zip:
-                province_valid, province_msg = self._validate_zip_province(suggested_zip, state)
-                if not province_valid:
-                    # ZIP doesn't match province - flag for review
-                    is_valid = False
-                    confidence = min(confidence, 70)
-                    reason = f"{reason}. Warning: {province_msg}"
-
-            # Determine ZIP action
-            zip_auto_correct = not is_valid and confidence >= self.confidence_threshold and suggested_zip
-
-            # Determine street action
-            street_auto_correct = (
-                not street_verified and
-                suggested_street and
-                street_confidence >= self.street_confidence_threshold
-            )
-
-            # Write to cache if result is high-confidence (will be auto-corrected or verified)
-            # This caches results that meet our quality threshold for future lookups
-            should_cache = (
-                (zip_auto_correct or is_valid) and  # ZIP is good
-                (street_verified or street_auto_correct) and  # Street is good
-                confidence >= self.confidence_threshold
-            )
-            if should_cache and suggested_zip:
-                # Extract street name without house number for caching
-                street_to_cache = suggested_street if suggested_street else full_street
-                self._write_cache(
-                    street=full_street,
-                    city=city,
-                    validated_zip=suggested_zip if zip_auto_correct else original_zip,
-                    validated_street=street_to_cache,
-                    confidence=confidence
-                )
-
-            result = ValidationResult(
-                row_index=idx,
-                name=name,
-                city=city,
-                street=street,  # Keep original street (not combined) for output
-                original_zip=original_zip,
-                suggested_zip=suggested_zip,
-                confidence=confidence,
-                reason=reason,
-                is_valid=is_valid,
-                auto_corrected=zip_auto_correct,
-                street_verified=street_verified,
-                suggested_street=suggested_street,
-                street_confidence=street_confidence,
-                street_auto_corrected=street_auto_correct,
-                country_code=country,
-                country_detected=country_detected,
-                phone_missing=phone_missing,
-                original_phone=original_phone,
-                cod_changed=cod_changed,
-                original_cod=original_cod,
-                po_invalid=po_invalid,
-                po_value=po_value,
-                po_extracted=po_extracted
-            )
-            results.append(result)
-
-            # Count stats
-            if is_valid:
-                valid_count += 1
-            elif zip_auto_correct:
-                corrected_count += 1
-            else:
-                review_count += 1
-
-            if street_verified:
-                street_verified_count += 1
-            elif street_auto_correct:
-                street_corrected_count += 1
-
-            if po_invalid:
-                po_invalid_count += 1
-
-            # Rate limiting - only needed for Nominatim fallback
-            if not self._photon_available:
-                time.sleep(self.REQUEST_DELAY)
-
-        logger.info(
-            f"Validation complete: {valid_count} valid, {corrected_count} corrected, "
-            f"{review_count} need review, {skipped_count} skipped"
-        )
-        logger.info(
-            f"Streets: {street_verified_count} verified, {street_corrected_count} corrected"
-        )
-        if po_invalid_count > 0:
-            logger.warning(f"PO validation: {po_invalid_count} invalid PO numbers found")
-
-        report = ValidationReport(
-            total_rows=total,
-            valid_count=valid_count,
-            corrected_count=corrected_count,
-            review_count=review_count,
-            skipped_count=skipped_count,
-            results=results,
-            street_verified_count=street_verified_count,
-            street_corrected_count=street_corrected_count,
-            po_invalid_count=po_invalid_count
-        )
-        return report, df
-
-    def _validate_zip_province(self, zip_code: str, province: str) -> tuple[bool, str]:
-        """
-        Validate if ZIP code matches the Italian province.
-
-        Args:
-            zip_code: 5-digit Italian CAP
-            province: 2-letter Italian province code (e.g., 'MI', 'RM')
-
-        Returns:
-            Tuple (is_valid, message)
-        """
-        if not province or not zip_code or len(zip_code) != 5:
-            return True, ""  # Can't validate, assume OK
-
-        province_upper = province.upper().strip()
-        zip_prefix = zip_code[:2]
-
-        if province_upper in self.ITALIAN_PROVINCE_ZIP:
-            valid_prefixes = self.ITALIAN_PROVINCE_ZIP[province_upper]
-            if zip_prefix in valid_prefixes:
-                return True, f"ZIP matches province {province_upper}"
-            else:
-                return False, f"ZIP {zip_code} doesn't match province {province_upper} (expected {valid_prefixes[0]}xxx)"
-
-        return True, ""  # Unknown province, assume OK
-
-    # Default phone number to use when phone is missing
-    DEFAULT_PHONE = "393445556667"
+    # =========================================================================
+    # Column mapping (unchanged)
+    # =========================================================================
 
     def _map_columns(self, df: pd.DataFrame) -> dict:
         """Map DataFrame columns to expected fields."""
@@ -2107,29 +299,342 @@ class ZipValidator:
 
         return col_map
 
+    # =========================================================================
+    # Main pipeline
+    # =========================================================================
+
+    def process_dataframe(
+        self,
+        df: pd.DataFrame,
+        progress_callback: Optional[Callable[[int, int, str], None]] = None
+    ) -> tuple[ValidationReport, pd.DataFrame]:
+        """
+        Process entire DataFrame and validate all addresses.
+
+        Args:
+            df: DataFrame with address data
+            progress_callback: Optional callback(current, total, message)
+
+        Returns:
+            Tuple of (ValidationReport with all results, DataFrame)
+        """
+        logger.info(f"Starting address validation for {len(df)} rows")
+
+        results = []
+        valid_count = 0
+        corrected_count = 0
+        review_count = 0
+        skipped_count = 0
+        street_verified_count = 0
+        street_corrected_count = 0
+        po_invalid_count = 0
+
+        col_map = self._map_columns(df)
+        logger.debug(f"Column mapping: {col_map}")
+
+        if not all(col_map.get(k) for k in ['city', 'zip']):
+            raise ValueError(
+                f"Missing required columns. Found: {list(df.columns)}\n"
+                f"Need: City, Zip"
+            )
+
+        has_country_col = col_map.get('country') is not None
+        has_state_col = col_map.get('state') is not None
+        total = len(df)
+
+        # --- Step 1: Claude batch parse all addresses ---
+        if progress_callback:
+            progress_callback(0, 100, "Parsing addresses with AI...")
+
+        raw_addresses = []
+        for idx, row in df.iterrows():
+            street = str(row.get(col_map.get('street', ''), ''))
+            city = str(row.get(col_map['city'], ''))
+            zip_val = str(row.get(col_map['zip'], ''))
+            raw_addresses.append({"street": street, "city": city, "zip": zip_val})
+
+        parsed_addresses = self.address_parser.parse_all(raw_addresses)
+
+        if progress_callback:
+            progress_callback(20, 100, "Parsing complete")
+
+        logger.info(f"Parsing complete: {self.address_parser.metrics.claude_parsed} by Claude, "
+                     f"{self.address_parser.metrics.regex_fallback} by regex")
+
+        # --- Step 2: Validate each address ---
+        for i, (idx, row) in enumerate(df.iterrows()):
+            if progress_callback:
+                pct = 20 + int((i + 1) / total * 80)
+                progress_callback(pct, 100, f"Validating address {i + 1}/{total}...")
+
+            parsed = parsed_addresses[i]
+
+            name = str(row.get(col_map.get('name', ''), ''))
+            street = str(row.get(col_map.get('street', ''), ''))
+            city = str(row.get(col_map['city'], ''))
+            original_zip = str(row.get(col_map['zip'], ''))
+
+            # Get state/province if available
+            state = ''
+            if has_state_col:
+                state_raw = row.get(col_map['state'], '')
+                state = str(state_raw).strip() if pd.notna(state_raw) else ''
+
+            # Get phone — track if missing
+            phone_col = col_map.get('phone')
+            original_phone = ''
+            phone_missing = False
+            if phone_col:
+                phone_raw = row.get(phone_col, '')
+                original_phone = str(phone_raw).strip() if pd.notna(phone_raw) else ''
+                phone_missing = not original_phone or original_phone.lower() == 'nan'
+
+            # Get COD — track if needs to be set to 0
+            cod_col = col_map.get('cash_on_delivery')
+            original_cod = ''
+            cod_changed = False
+            if cod_col:
+                cod_raw = row.get(cod_col, '')
+                original_cod = str(cod_raw).strip() if pd.notna(cod_raw) else ''
+                cod_changed = original_cod != '0' and original_cod.lower() != 'nan' and original_cod != ''
+
+            # Get Order Number — validate PO
+            order_col = col_map.get('order_number')
+            po_value = ''
+            po_extracted = ''
+            po_invalid = False
+            if order_col:
+                order_raw = row.get(order_col, '')
+                po_value = str(order_raw).strip() if pd.notna(order_raw) else ''
+                if po_value and po_value.lower() != 'nan':
+                    po_valid, po_extracted, po_error = self.validate_po_number(po_value)
+                    po_invalid = not po_valid
+
+            # Get country from Claude parsing or Excel column
+            country = parsed.country_code
+            country_detected = True
+            if has_country_col:
+                country_raw = row.get(col_map['country'], '')
+                country_explicit = str(country_raw).strip() if pd.notna(country_raw) and str(country_raw).strip() else ''
+                if country_explicit:
+                    # Normalize to 2-letter code
+                    country_upper = country_explicit.upper()
+                    if country_upper in ('ITALY', 'ITALIA'):
+                        country = 'IT'
+                    elif country_upper in ('GERMANY', 'DEUTSCHLAND'):
+                        country = 'DE'
+                    elif country_upper in ('FRANCE',):
+                        country = 'FR'
+                    elif country_upper in ('SPAIN', 'ESPAÑA', 'ESPANA'):
+                        country = 'ES'
+                    elif country_upper in ('UNITED KINGDOM', 'UK', 'GREAT BRITAIN'):
+                        country = 'GB'
+                    elif len(country_explicit) == 2:
+                        country = country_upper
+                    country_detected = False
+
+            # Skip non-IT countries
+            if country not in ('IT',):
+                results.append(ValidationResult(
+                    row_index=idx,
+                    name=name,
+                    city=city,
+                    street=street,
+                    original_zip=original_zip,
+                    suggested_zip=original_zip,
+                    confidence=100,
+                    reason=f"Non-IT country ({country}) - skipped",
+                    is_valid=True,
+                    street_verified=True,
+                    street_confidence=100,
+                    country_code=country,
+                    country_detected=country_detected,
+                    phone_missing=phone_missing,
+                    original_phone=original_phone,
+                    cod_changed=cod_changed,
+                    original_cod=original_cod
+                ))
+                skipped_count += 1
+                continue
+
+            # Pad ZIP for Italian addresses
+            try:
+                zip_padded = str(int(float(str(original_zip)))).zfill(5)
+            except (ValueError, TypeError):
+                zip_padded = str(original_zip).strip()
+
+            # --- Call Google Address Validation API ---
+            api_response = self.address_validator.validate_address(
+                parsed, city, zip_padded, state
+            )
+
+            if not api_response or "result" not in api_response:
+                # API unavailable — mark for review
+                results.append(ValidationResult(
+                    row_index=idx,
+                    name=name,
+                    city=city,
+                    street=street,
+                    original_zip=original_zip,
+                    suggested_zip=None,
+                    confidence=0,
+                    reason="Google API unavailable",
+                    is_valid=False,
+                    country_code=country,
+                    country_detected=country_detected,
+                    phone_missing=phone_missing,
+                    original_phone=original_phone,
+                    cod_changed=cod_changed,
+                    original_cod=original_cod,
+                    po_invalid=po_invalid,
+                    po_value=po_value,
+                    po_extracted=po_extracted
+                ))
+                review_count += 1
+                continue
+
+            # --- Interpret verdict ---
+            api_result = api_response["result"]
+            outcome = self.address_validator.interpret_verdict(
+                api_result.get("verdict", {}),
+                api_result.get("address", {}),
+                parsed,
+                zip_padded,
+                city
+            )
+
+            # --- Cross-check ZIP with Italian comuni database ---
+            check_zip = outcome.output_zip or zip_padded
+            if check_zip:
+                # Check 1: Is this CAP even valid in Italy?
+                if not self.address_validator.is_valid_italian_cap(check_zip):
+                    outcome.status = "review"
+                    outcome.reasons.append(f"CAP {check_zip} does not exist in Italy")
+                else:
+                    # Check 2: Does this CAP match the comune (city)?
+                    comune_valid, comune_msg = self.address_validator.validate_zip_comune(
+                        check_zip, city, state
+                    )
+                    if not comune_valid:
+                        # Downgrade to review — corrected ZIP still doesn't match comune
+                        if outcome.status in ("valid", "corrected"):
+                            outcome.status = "review"
+                        outcome.reasons.append(comune_msg)
+                    elif state:
+                        # Check 3: Does this CAP match the provincia?
+                        prov_valid, prov_msg = self.address_validator.validate_zip_province(
+                            check_zip, state
+                        )
+                        if not prov_valid:
+                            outcome.status = "review"
+                            outcome.reasons.append(prov_msg)
+
+            # --- Build suggested street: API name + original house number ---
+            suggested_street = None
+            if outcome.street_corrected or outcome.silent_correction:
+                suggested_street = f"{outcome.output_street} {parsed.house_number}".strip()
+
+            # --- Map outcome to ValidationResult ---
+            is_valid = outcome.status == "valid"
+            auto_corrected = outcome.status == "corrected"
+            street_verified = outcome.street_confirmed and not outcome.street_corrected
+            street_auto_corrected = outcome.street_corrected
+
+            # Confidence mapping from verdict
+            if is_valid:
+                confidence = 100
+            elif auto_corrected:
+                confidence = 95
+            else:
+                confidence = 50
+
+            reason = "; ".join(outcome.reasons) if outcome.reasons else outcome.action
+
+            # Write to cache for good results
+            if outcome.status in ("valid", "corrected"):
+                self._write_cache(street, city, outcome, parsed)
+
+            # Handle location info → Street 2 (prefer API's point_of_interest, fall back to Claude's)
+            location_info = outcome.location_info or parsed.location_info
+            street2_col = col_map.get('street2')
+            if location_info and street2_col:
+                existing_street2 = str(row.get(street2_col, '')).strip()
+                if not existing_street2 or existing_street2.lower() == 'nan':
+                    df.at[idx, street2_col] = location_info
+                elif location_info.lower() not in existing_street2.lower():
+                    df.at[idx, street2_col] = f"{existing_street2} - {location_info}"
+
+            result = ValidationResult(
+                row_index=idx,
+                name=name,
+                city=city,
+                street=street,
+                original_zip=original_zip,
+                suggested_zip=outcome.output_zip if outcome.output_zip else None,
+                confidence=confidence,
+                reason=reason,
+                is_valid=is_valid,
+                auto_corrected=auto_corrected,
+                street_verified=street_verified,
+                suggested_street=suggested_street,
+                street_confidence=95 if street_verified else (85 if street_auto_corrected else 0),
+                street_auto_corrected=street_auto_corrected,
+                country_code=country,
+                country_detected=country_detected,
+                phone_missing=phone_missing,
+                original_phone=original_phone,
+                cod_changed=cod_changed,
+                original_cod=original_cod,
+                po_invalid=po_invalid,
+                po_value=po_value,
+                po_extracted=po_extracted
+            )
+            results.append(result)
+
+            # Count stats
+            if is_valid:
+                valid_count += 1
+            elif auto_corrected:
+                corrected_count += 1
+            else:
+                review_count += 1
+
+            if street_verified:
+                street_verified_count += 1
+            elif street_auto_corrected:
+                street_corrected_count += 1
+
+            if po_invalid:
+                po_invalid_count += 1
+
+        logger.info(
+            f"Validation complete: {valid_count} valid, {corrected_count} corrected, "
+            f"{review_count} need review, {skipped_count} skipped"
+        )
+
+        report = ValidationReport(
+            total_rows=total,
+            valid_count=valid_count,
+            corrected_count=corrected_count,
+            review_count=review_count,
+            skipped_count=skipped_count,
+            results=results,
+            street_verified_count=street_verified_count,
+            street_corrected_count=street_corrected_count,
+            po_invalid_count=po_invalid_count
+        )
+        return report, df
+
+    # =========================================================================
+    # Excel output
+    # =========================================================================
+
     def generate_corrected_excel(
         self,
         original_df: pd.DataFrame,
         report: ValidationReport
     ) -> bytes:
-        """
-        Generate corrected Excel with auto-corrections applied.
-        Maintains the exact same column structure as the input file.
-
-        Corrections applied:
-        - ZIP: Corrected if auto_corrected flag is set
-        - Street: Corrected if street_auto_corrected flag is set
-        - Country: Filled from address detection if empty
-        - Phone: Filled with default (393445556667) if empty
-        - Cash on Delivery: Always set to 0
-
-        Args:
-            original_df: Original DataFrame
-            report: Validation report
-
-        Returns:
-            Excel file as bytes
-        """
+        """Generate corrected Excel with auto-corrections applied."""
         from openpyxl.utils import get_column_letter
 
         logger.info(f"Generating corrected Excel with {len(report.results)} rows")
@@ -2148,29 +653,15 @@ class ZipValidator:
             if result.auto_corrected and result.suggested_zip and zip_col:
                 df.at[result.row_index, zip_col] = result.suggested_zip
 
-            # Correct street (ensure house number is preserved)
+            # Correct street (house number already correct from ParsedAddress)
             if result.street_auto_corrected and result.suggested_street and street_col:
-                # Final safeguard: preserve original house number
-                corrected_street = result.suggested_street
-                original_street = result.street
-                if original_street:
-                    _, orig_house = self._extract_house_number(original_street)
-                    if orig_house:
-                        sugg_base, sugg_house = self._extract_house_number(result.suggested_street)
-                        if sugg_house != orig_house:
-                            corrected_street = f"{sugg_base} {orig_house}" if sugg_base else f"{result.suggested_street} {orig_house}"
-                df.at[result.row_index, street_col] = corrected_street
+                df.at[result.row_index, street_col] = result.suggested_street
 
-            # Fill country code if column exists and value is empty
+            # Fill country code if empty
             if country_col:
                 current_country = df.at[result.row_index, country_col]
                 if not str(current_country).strip() or str(current_country).lower() == 'nan':
-                    # Detect country from address
-                    street_val = str(df.at[result.row_index, street_col]) if street_col else ''
-                    city_val = str(df.at[result.row_index, city_col]) if city_col else ''
-                    zip_val = str(df.at[result.row_index, zip_col]) if zip_col else ''
-                    detected_country = self.detect_country_code(zip_val, city_val, street_val)
-                    df.at[result.row_index, country_col] = detected_country
+                    df.at[result.row_index, country_col] = result.country_code
 
             # Fill phone with default if empty
             if phone_col:
@@ -2178,14 +669,14 @@ class ZipValidator:
                 if pd.isna(current_phone) or not str(current_phone).strip() or str(current_phone).lower() == 'nan':
                     df.at[result.row_index, phone_col] = self.DEFAULT_PHONE
 
-            # Set Cash on Delivery to 0 always
-            if cod_col:
+            # Set Cash on Delivery to 0 always (IT addresses only)
+            if cod_col and result.country_code == 'IT':
                 df.at[result.row_index, cod_col] = 0
 
-        # Ensure ZIP column is stored as string with leading zeros preserved
-        if zip_col:
-            df[zip_col] = df[zip_col].apply(
-                lambda x: str(x).zfill(5) if pd.notna(x) and str(x).strip() else x
+        # Sanitize string cells to prevent Excel formula injection
+        for col in df.columns:
+            df[col] = df[col].apply(
+                lambda x: "'" + str(x) if isinstance(x, str) and x and x[0] in ('=', '+', '-', '@', '\t', '\r', '\n') else x
             )
 
         output = BytesIO()
@@ -2194,57 +685,55 @@ class ZipValidator:
             df.to_excel(writer, index=False, sheet_name='Corrected')
             worksheet = writer.sheets['Corrected']
 
-            # Format ZIP column as text to preserve leading zeros
+            # Format ZIP column as text with leading zeros preserved (IT only)
             if zip_col:
                 from openpyxl.styles import numbers
-                zip_col_idx = list(df.columns).index(zip_col) + 1  # 1-indexed
-                for row in range(2, len(df) + 2):  # Start from row 2 (after header)
+                zip_col_idx = list(df.columns).index(zip_col) + 1
+                country_col = col_map.get('country')
+                country_col_idx = list(df.columns).index(country_col) + 1 if country_col else None
+                for row in range(2, len(df) + 2):
                     cell = worksheet.cell(row=row, column=zip_col_idx)
-                    cell.number_format = numbers.FORMAT_TEXT
+                    cell.number_format = '@'
+                    raw = cell.value
+                    if raw is not None:
+                        # Only pad to 5 digits for Italian addresses
+                        is_it = True
+                        if country_col_idx:
+                            country_cell = worksheet.cell(row=row, column=country_col_idx)
+                            is_it = str(country_cell.value).upper().strip() in ('IT', 'ITALY', 'ITALIA', '')
+                        if is_it:
+                            try:
+                                cell.value = str(int(float(str(raw)))).zfill(5)
+                            except (ValueError, TypeError):
+                                cell.value = str(raw)
+                        else:
+                            cell.value = str(raw)
 
             # Auto-fit column widths
-            for idx, col in enumerate(df.columns):
+            for col_idx, col in enumerate(df.columns):
                 max_length = max(
                     df[col].astype(str).map(len).max() if len(df) > 0 else 0,
                     len(str(col))
-                ) + 2  # Add padding
-                # Cap at 50 chars width
+                ) + 2
                 column_width = min(max_length, 50)
-                worksheet.column_dimensions[get_column_letter(idx + 1)].width = column_width
+                worksheet.column_dimensions[get_column_letter(col_idx + 1)].width = column_width
 
         return output.getvalue()
 
     def generate_review_report(self, report: ValidationReport) -> bytes:
-        """
-        Generate Excel report for items needing manual review.
-
-        Args:
-            report: Validation report
-
-        Returns:
-            Excel file as bytes
-        """
+        """Generate Excel report for items needing manual review."""
         from openpyxl.utils import get_column_letter
 
         review_items = []
         for r in report.results:
             if not r.is_valid or not r.street_verified:
-                # Fix suggested street to preserve original house number
-                fixed_suggestion = r.suggested_street
-                if r.suggested_street and r.street:
-                    _, orig_house = self._extract_house_number(r.street)
-                    if orig_house:
-                        sugg_base, sugg_house = self._extract_house_number(r.suggested_street)
-                        if sugg_house != orig_house:
-                            fixed_suggestion = f"{sugg_base} {orig_house}" if sugg_base else f"{r.suggested_street} {orig_house}"
-
                 review_items.append({
                     'Row': r.row_index + 2,
                     'Name': r.name,
                     'City': r.city,
                     'Country': f"{r.country_code}{'*' if r.country_detected else ''}",
                     'Original Street': r.street,
-                    'Suggested Street': fixed_suggestion or '-',
+                    'Suggested Street': r.suggested_street or '-',
                     'Street Conf.': f"{r.street_confidence}%" if r.street_confidence else '-',
                     'Street Action': (
                         'Verified' if r.street_verified else
@@ -2263,20 +752,25 @@ class ZipValidator:
                 })
 
         df = pd.DataFrame(review_items)
+
+        # Sanitize string cells to prevent Excel formula injection
+        for col in df.columns:
+            df[col] = df[col].apply(
+                lambda x: "'" + str(x) if isinstance(x, str) and x and x[0] in ('=', '+', '-', '@', '\t', '\r', '\n') else x
+            )
+
         output = BytesIO()
 
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             df.to_excel(writer, index=False, sheet_name='Review')
             worksheet = writer.sheets['Review']
 
-            # Auto-fit column widths
-            for idx, col in enumerate(df.columns):
+            for col_idx, col in enumerate(df.columns):
                 max_length = max(
                     df[col].astype(str).map(len).max() if len(df) > 0 else 0,
                     len(col)
-                ) + 2  # Add padding
-                # Cap at 60 chars width
+                ) + 2
                 column_width = min(max_length, 60)
-                worksheet.column_dimensions[get_column_letter(idx + 1)].width = column_width
+                worksheet.column_dimensions[get_column_letter(col_idx + 1)].width = column_width
 
         return output.getvalue()

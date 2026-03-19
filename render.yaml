@@ -1,0 +1,30 @@
+services:
+  - type: web
+    name: elc-tools
+    runtime: python
+    plan: starter
+    buildCommand: pip install -r requirements.txt
+    startCommand: >-
+      streamlit run app.py
+      --server.port $PORT
+      --server.address 0.0.0.0
+      --server.headless true
+      --server.enableCORS false
+      --server.enableXsrfProtection true
+    healthCheckPath: /_stcore/health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11"
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: GOOGLE_ADDRESS_VALIDATION_API_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: ZAPIER_WEBHOOK_URL
+        sync: false
+      - key: BYPASS_PIN
+        sync: false

@@ -1,0 +1,992 @@
+[
+    {
+        "codice_regione": "19",
+        "sigla_provincia": "AG",
+        "denominazione_provincia": "Agrigento",
+        "tipologia_provincia": "Libero consorzio di comuni",
+        "numero_comuni": "43",
+        "superficie_kmq": "3053.8476",
+        "codice_sovracomunale": "084"
+    },
+    {
+        "codice_regione": "01",
+        "sigla_provincia": "AL",
+        "denominazione_provincia": "Alessandria",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "187",
+        "superficie_kmq": "3558.4988",
+        "codice_sovracomunale": "006"
+    },
+    {
+        "codice_regione": "11",
+        "sigla_provincia": "AN",
+        "denominazione_provincia": "Ancona",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "47",
+        "superficie_kmq": "1962.8560",
+        "codice_sovracomunale": "042"
+    },
+    {
+        "codice_regione": "09",
+        "sigla_provincia": "AR",
+        "denominazione_provincia": "Arezzo",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "36",
+        "superficie_kmq": "3233.6923",
+        "codice_sovracomunale": "051"
+    },
+    {
+        "codice_regione": "11",
+        "sigla_provincia": "AP",
+        "denominazione_provincia": "Ascoli Piceno",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "33",
+        "superficie_kmq": "1228.6084",
+        "codice_sovracomunale": "044"
+    },
+    {
+        "codice_regione": "01",
+        "sigla_provincia": "AT",
+        "denominazione_provincia": "Asti",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "117",
+        "superficie_kmq": "1509.8837",
+        "codice_sovracomunale": "005"
+    },
+    {
+        "codice_regione": "15",
+        "sigla_provincia": "AV",
+        "denominazione_provincia": "Avellino",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "118",
+        "superficie_kmq": "2806.5339",
+        "codice_sovracomunale": "064"
+    },
+    {
+        "codice_regione": "16",
+        "sigla_provincia": "BA",
+        "denominazione_provincia": "Bari",
+        "tipologia_provincia": "Citta metropolitana",
+        "numero_comuni": "41",
+        "superficie_kmq": "3862.3178",
+        "codice_sovracomunale": "272"
+    },
+    {
+        "codice_regione": "16",
+        "sigla_provincia": "BT",
+        "denominazione_provincia": "Barletta-Andria-Trani",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "10",
+        "superficie_kmq": "1542.5857",
+        "codice_sovracomunale": "110"
+    },
+    {
+        "codice_regione": "05",
+        "sigla_provincia": "BL",
+        "denominazione_provincia": "Belluno",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "60",
+        "superficie_kmq": "3609.4576",
+        "codice_sovracomunale": "025"
+    },
+    {
+        "codice_regione": "15",
+        "sigla_provincia": "BN",
+        "denominazione_provincia": "Benevento",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "78",
+        "superficie_kmq": "2079.5411",
+        "codice_sovracomunale": "062"
+    },
+    {
+        "codice_regione": "03",
+        "sigla_provincia": "BG",
+        "denominazione_provincia": "Bergamo",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "243",
+        "superficie_kmq": "2755.2379",
+        "codice_sovracomunale": "016"
+    },
+    {
+        "codice_regione": "01",
+        "sigla_provincia": "BI",
+        "denominazione_provincia": "Biella",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "74",
+        "superficie_kmq": "912.8755",
+        "codice_sovracomunale": "096"
+    },
+    {
+        "codice_regione": "08",
+        "sigla_provincia": "BO",
+        "denominazione_provincia": "Bologna",
+        "tipologia_provincia": "Citta metropolitana",
+        "numero_comuni": "55",
+        "superficie_kmq": "3702.7025",
+        "codice_sovracomunale": "237"
+    },
+    {
+        "codice_regione": "04",
+        "sigla_provincia": "BZ",
+        "denominazione_provincia": "Bolzano/Bozen",
+        "tipologia_provincia": "Provincia autonoma",
+        "numero_comuni": "116",
+        "superficie_kmq": "7399.8664",
+        "codice_sovracomunale": "021"
+    },
+    {
+        "codice_regione": "03",
+        "sigla_provincia": "BS",
+        "denominazione_provincia": "Brescia",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "205",
+        "superficie_kmq": "4785.0574",
+        "codice_sovracomunale": "017"
+    },
+    {
+        "codice_regione": "16",
+        "sigla_provincia": "BR",
+        "denominazione_provincia": "Brindisi",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "20",
+        "superficie_kmq": "1861.4470",
+        "codice_sovracomunale": "074"
+    },
+    {
+        "codice_regione": "20",
+        "sigla_provincia": "CA",
+        "denominazione_provincia": "Cagliari",
+        "tipologia_provincia": "citta metropolitana",
+        "numero_comuni": "70",
+        "superficie_kmq": "4310.5465",
+        "codice_sovracomunale": "318"
+    },
+    {
+        "codice_regione": "19",
+        "sigla_provincia": "CL",
+        "denominazione_provincia": "Caltanissetta",
+        "tipologia_provincia": "Libero consorzio di comuni",
+        "numero_comuni": "22",
+        "superficie_kmq": "2137.8780",
+        "codice_sovracomunale": "085"
+    },
+    {
+        "codice_regione": "14",
+        "sigla_provincia": "CB",
+        "denominazione_provincia": "Campobasso",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "84",
+        "superficie_kmq": "2926.2366",
+        "codice_sovracomunale": "070"
+    },
+    {
+        "codice_regione": "15",
+        "sigla_provincia": "CE",
+        "denominazione_provincia": "Caserta",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "104",
+        "superficie_kmq": "2652.8768",
+        "codice_sovracomunale": "061"
+    },
+    {
+        "codice_regione": "19",
+        "sigla_provincia": "CT",
+        "denominazione_provincia": "Catania",
+        "tipologia_provincia": "Citta metropolitana",
+        "numero_comuni": "58",
+        "superficie_kmq": "3575.7472",
+        "codice_sovracomunale": "287"
+    },
+    {
+        "codice_regione": "18",
+        "sigla_provincia": "CZ",
+        "denominazione_provincia": "Catanzaro",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "80",
+        "superficie_kmq": "2415.4630",
+        "codice_sovracomunale": "079"
+    },
+    {
+        "codice_regione": "13",
+        "sigla_provincia": "CH",
+        "denominazione_provincia": "Chieti",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "104",
+        "superficie_kmq": "2599.7078",
+        "codice_sovracomunale": "069"
+    },
+    {
+        "codice_regione": "03",
+        "sigla_provincia": "CO",
+        "denominazione_provincia": "Como",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "147",
+        "superficie_kmq": "1280.1198",
+        "codice_sovracomunale": "013"
+    },
+    {
+        "codice_regione": "18",
+        "sigla_provincia": "CS",
+        "denominazione_provincia": "Cosenza",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "150",
+        "superficie_kmq": "6707.7324",
+        "codice_sovracomunale": "078"
+    },
+    {
+        "codice_regione": "03",
+        "sigla_provincia": "CR",
+        "denominazione_provincia": "Cremona",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "113",
+        "superficie_kmq": "1768.9441",
+        "codice_sovracomunale": "019"
+    },
+    {
+        "codice_regione": "18",
+        "sigla_provincia": "KR",
+        "denominazione_provincia": "Crotone",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "27",
+        "superficie_kmq": "1735.2799",
+        "codice_sovracomunale": "101"
+    },
+    {
+        "codice_regione": "01",
+        "sigla_provincia": "CN",
+        "denominazione_provincia": "Cuneo",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "247",
+        "superficie_kmq": "6897.5707",
+        "codice_sovracomunale": "004"
+    },
+    {
+        "codice_regione": "19",
+        "sigla_provincia": "EN",
+        "denominazione_provincia": "Enna",
+        "tipologia_provincia": "Libero consorzio di comuni",
+        "numero_comuni": "20",
+        "superficie_kmq": "2574.4569",
+        "codice_sovracomunale": "086"
+    },
+    {
+        "codice_regione": "11",
+        "sigla_provincia": "FM",
+        "denominazione_provincia": "Fermo",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "40",
+        "superficie_kmq": "862.9883",
+        "codice_sovracomunale": "109"
+    },
+    {
+        "codice_regione": "08",
+        "sigla_provincia": "FE",
+        "denominazione_provincia": "Ferrara",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "21",
+        "superficie_kmq": "2626.8845",
+        "codice_sovracomunale": "038"
+    },
+    {
+        "codice_regione": "09",
+        "sigla_provincia": "FI",
+        "denominazione_provincia": "Firenze",
+        "tipologia_provincia": "Citta metropolitana",
+        "numero_comuni": "41",
+        "superficie_kmq": "3513.2944",
+        "codice_sovracomunale": "248"
+    },
+    {
+        "codice_regione": "16",
+        "sigla_provincia": "FG",
+        "denominazione_provincia": "Foggia",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "61",
+        "superficie_kmq": "7006.6136",
+        "codice_sovracomunale": "071"
+    },
+    {
+        "codice_regione": "08",
+        "sigla_provincia": "FC",
+        "denominazione_provincia": "Forlì-Cesena",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "30",
+        "superficie_kmq": "2378.2176",
+        "codice_sovracomunale": "040"
+    },
+    {
+        "codice_regione": "12",
+        "sigla_provincia": "FR",
+        "denominazione_provincia": "Frosinone",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "91",
+        "superficie_kmq": "3246.9386",
+        "codice_sovracomunale": "060"
+    },
+    {
+        "codice_regione": "20",
+        "sigla_provincia": "OT",
+        "denominazione_provincia": "Gallura Nord-Est Sardegna",
+        "tipologia_provincia": "provincia",
+        "numero_comuni": "26",
+        "superficie_kmq": "3409.6307",
+        "codice_sovracomunale": "113"
+    },
+    {
+        "codice_regione": "07",
+        "sigla_provincia": "GE",
+        "denominazione_provincia": "Genova",
+        "tipologia_provincia": "Citta metropolitana",
+        "numero_comuni": "67",
+        "superficie_kmq": "1834.6835",
+        "codice_sovracomunale": "210"
+    },
+    {
+        "codice_regione": "06",
+        "sigla_provincia": "GO",
+        "denominazione_provincia": "Gorizia",
+        "tipologia_provincia": "Unità non amministrativa",
+        "numero_comuni": "25",
+        "superficie_kmq": "475.2688",
+        "codice_sovracomunale": "031"
+    },
+    {
+        "codice_regione": "09",
+        "sigla_provincia": "GR",
+        "denominazione_provincia": "Grosseto",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "28",
+        "superficie_kmq": "4502.9989",
+        "codice_sovracomunale": "053"
+    },
+    {
+        "codice_regione": "07",
+        "sigla_provincia": "IM",
+        "denominazione_provincia": "Imperia",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "66",
+        "superficie_kmq": "1156.1005",
+        "codice_sovracomunale": "008"
+    },
+    {
+        "codice_regione": "14",
+        "sigla_provincia": "IS",
+        "denominazione_provincia": "Isernia",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "52",
+        "superficie_kmq": "1535.1224",
+        "codice_sovracomunale": "094"
+    },
+    {
+        "codice_regione": "13",
+        "sigla_provincia": "AQ",
+        "denominazione_provincia": "L'Aquila",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "108",
+        "superficie_kmq": "5048.0699",
+        "codice_sovracomunale": "066"
+    },
+    {
+        "codice_regione": "07",
+        "sigla_provincia": "SP",
+        "denominazione_provincia": "La Spezia",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "32",
+        "superficie_kmq": "882.3510",
+        "codice_sovracomunale": "011"
+    },
+    {
+        "codice_regione": "12",
+        "sigla_provincia": "LT",
+        "denominazione_provincia": "Latina",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "33",
+        "superficie_kmq": "2258.0156",
+        "codice_sovracomunale": "059"
+    },
+    {
+        "codice_regione": "16",
+        "sigla_provincia": "LE",
+        "denominazione_provincia": "Lecce",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "96",
+        "superficie_kmq": "2797.9263",
+        "codice_sovracomunale": "075"
+    },
+    {
+        "codice_regione": "03",
+        "sigla_provincia": "LC",
+        "denominazione_provincia": "Lecco",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "84",
+        "superficie_kmq": "805.2910",
+        "codice_sovracomunale": "097"
+    },
+    {
+        "codice_regione": "09",
+        "sigla_provincia": "LI",
+        "denominazione_provincia": "Livorno",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "19",
+        "superficie_kmq": "1215.7028",
+        "codice_sovracomunale": "049"
+    },
+    {
+        "codice_regione": "03",
+        "sigla_provincia": "LO",
+        "denominazione_provincia": "Lodi",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "60",
+        "superficie_kmq": "783.5348",
+        "codice_sovracomunale": "098"
+    },
+    {
+        "codice_regione": "09",
+        "sigla_provincia": "LU",
+        "denominazione_provincia": "Lucca",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "33",
+        "superficie_kmq": "1773.9099",
+        "codice_sovracomunale": "046"
+    },
+    {
+        "codice_regione": "11",
+        "sigla_provincia": "MC",
+        "denominazione_provincia": "Macerata",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "55",
+        "superficie_kmq": "2779.7043",
+        "codice_sovracomunale": "043"
+    },
+    {
+        "codice_regione": "03",
+        "sigla_provincia": "MN",
+        "denominazione_provincia": "Mantova",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "64",
+        "superficie_kmq": "2342.0232",
+        "codice_sovracomunale": "020"
+    },
+    {
+        "codice_regione": "09",
+        "sigla_provincia": "MS",
+        "denominazione_provincia": "Massa-Carrara",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "17",
+        "superficie_kmq": "1154.5549",
+        "codice_sovracomunale": "045"
+    },
+    {
+        "codice_regione": "17",
+        "sigla_provincia": "MT",
+        "denominazione_provincia": "Matera",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "31",
+        "superficie_kmq": "3479.1405",
+        "codice_sovracomunale": "077"
+    },
+    {
+        "codice_regione": "20",
+        "sigla_provincia": "VS",
+        "denominazione_provincia": "Medio Campidano",
+        "tipologia_provincia": "provincia",
+        "numero_comuni": "28",
+        "superficie_kmq": "1518.0980",
+        "codice_sovracomunale": "117"
+    },
+    {
+        "codice_regione": "19",
+        "sigla_provincia": "ME",
+        "denominazione_provincia": "Messina",
+        "tipologia_provincia": "Citta metropolitana",
+        "numero_comuni": "108",
+        "superficie_kmq": "3265.6742",
+        "codice_sovracomunale": "283"
+    },
+    {
+        "codice_regione": "03",
+        "sigla_provincia": "MI",
+        "denominazione_provincia": "Milano",
+        "tipologia_provincia": "Citta metropolitana",
+        "numero_comuni": "133",
+        "superficie_kmq": "1574.7666",
+        "codice_sovracomunale": "215"
+    },
+    {
+        "codice_regione": "08",
+        "sigla_provincia": "MO",
+        "denominazione_provincia": "Modena",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "47",
+        "superficie_kmq": "2687.9155",
+        "codice_sovracomunale": "036"
+    },
+    {
+        "codice_regione": "03",
+        "sigla_provincia": "MB",
+        "denominazione_provincia": "Monza e della Brianza",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "55",
+        "superficie_kmq": "405.1954",
+        "codice_sovracomunale": "108"
+    },
+    {
+        "codice_regione": "15",
+        "sigla_provincia": "NA",
+        "denominazione_provincia": "Napoli",
+        "tipologia_provincia": "Citta metropolitana",
+        "numero_comuni": "92",
+        "superficie_kmq": "1180.1855",
+        "codice_sovracomunale": "263"
+    },
+    {
+        "codice_regione": "01",
+        "sigla_provincia": "NO",
+        "denominazione_provincia": "Novara",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "87",
+        "superficie_kmq": "1340.1408",
+        "codice_sovracomunale": "003"
+    },
+    {
+        "codice_regione": "20",
+        "sigla_provincia": "NU",
+        "denominazione_provincia": "Nuoro",
+        "tipologia_provincia": "provincia",
+        "numero_comuni": "53",
+        "superficie_kmq": "3992.0931",
+        "codice_sovracomunale": "114"
+    },
+    {
+        "codice_regione": "20",
+        "sigla_provincia": "OG",
+        "denominazione_provincia": "Ogliastra",
+        "tipologia_provincia": "provincia",
+        "numero_comuni": "23",
+        "superficie_kmq": "1854.9309",
+        "codice_sovracomunale": "116"
+    },
+    {
+        "codice_regione": "20",
+        "sigla_provincia": "OR",
+        "denominazione_provincia": "Oristano",
+        "tipologia_provincia": "provincia",
+        "numero_comuni": "87",
+        "superficie_kmq": "2991.3615",
+        "codice_sovracomunale": "115"
+    },
+    {
+        "codice_regione": "05",
+        "sigla_provincia": "PD",
+        "denominazione_provincia": "Padova",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "101",
+        "superficie_kmq": "2143.0099",
+        "codice_sovracomunale": "028"
+    },
+    {
+        "codice_regione": "19",
+        "sigla_provincia": "PA",
+        "denominazione_provincia": "Palermo",
+        "tipologia_provincia": "Citta metropolitana",
+        "numero_comuni": "82",
+        "superficie_kmq": "5007.2455",
+        "codice_sovracomunale": "282"
+    },
+    {
+        "codice_regione": "08",
+        "sigla_provincia": "PR",
+        "denominazione_provincia": "Parma",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "44",
+        "superficie_kmq": "3446.5930",
+        "codice_sovracomunale": "034"
+    },
+    {
+        "codice_regione": "03",
+        "sigla_provincia": "PV",
+        "denominazione_provincia": "Pavia",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "184",
+        "superficie_kmq": "2966.6124",
+        "codice_sovracomunale": "018"
+    },
+    {
+        "codice_regione": "10",
+        "sigla_provincia": "PG",
+        "denominazione_provincia": "Perugia",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "59",
+        "superficie_kmq": "6337.4156",
+        "codice_sovracomunale": "054"
+    },
+    {
+        "codice_regione": "11",
+        "sigla_provincia": "PU",
+        "denominazione_provincia": "Pesaro e Urbino",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "50",
+        "superficie_kmq": "2511.7349",
+        "codice_sovracomunale": "041"
+    },
+    {
+        "codice_regione": "13",
+        "sigla_provincia": "PE",
+        "denominazione_provincia": "Pescara",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "46",
+        "superficie_kmq": "1229.5741",
+        "codice_sovracomunale": "068"
+    },
+    {
+        "codice_regione": "08",
+        "sigla_provincia": "PC",
+        "denominazione_provincia": "Piacenza",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "46",
+        "superficie_kmq": "2585.9915",
+        "codice_sovracomunale": "033"
+    },
+    {
+        "codice_regione": "09",
+        "sigla_provincia": "PI",
+        "denominazione_provincia": "Pisa",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "37",
+        "superficie_kmq": "2444.7171",
+        "codice_sovracomunale": "050"
+    },
+    {
+        "codice_regione": "09",
+        "sigla_provincia": "PT",
+        "denominazione_provincia": "Pistoia",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "20",
+        "superficie_kmq": "964.6782",
+        "codice_sovracomunale": "047"
+    },
+    {
+        "codice_regione": "06",
+        "sigla_provincia": "PN",
+        "denominazione_provincia": "Pordenone",
+        "tipologia_provincia": "Unità non amministrativa",
+        "numero_comuni": "50",
+        "superficie_kmq": "2274.8873",
+        "codice_sovracomunale": "093"
+    },
+    {
+        "codice_regione": "17",
+        "sigla_provincia": "PZ",
+        "denominazione_provincia": "Potenza",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "100",
+        "superficie_kmq": "6594.7331",
+        "codice_sovracomunale": "076"
+    },
+    {
+        "codice_regione": "09",
+        "sigla_provincia": "PO",
+        "denominazione_provincia": "Prato",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "7",
+        "superficie_kmq": "365.3896",
+        "codice_sovracomunale": "100"
+    },
+    {
+        "codice_regione": "19",
+        "sigla_provincia": "RG",
+        "denominazione_provincia": "Ragusa",
+        "tipologia_provincia": "Libero consorzio di comuni",
+        "numero_comuni": "12",
+        "superficie_kmq": "1623.8624",
+        "codice_sovracomunale": "088"
+    },
+    {
+        "codice_regione": "08",
+        "sigla_provincia": "RA",
+        "denominazione_provincia": "Ravenna",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "18",
+        "superficie_kmq": "1859.1320",
+        "codice_sovracomunale": "039"
+    },
+    {
+        "codice_regione": "18",
+        "sigla_provincia": "RC",
+        "denominazione_provincia": "Reggio Calabria",
+        "tipologia_provincia": "Citta metropolitana",
+        "numero_comuni": "97",
+        "superficie_kmq": "3209.3179",
+        "codice_sovracomunale": "280"
+    },
+    {
+        "codice_regione": "08",
+        "sigla_provincia": "RE",
+        "denominazione_provincia": "Reggio nell'Emilia",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "42",
+        "superficie_kmq": "2291.1120",
+        "codice_sovracomunale": "035"
+    },
+    {
+        "codice_regione": "12",
+        "sigla_provincia": "RI",
+        "denominazione_provincia": "Rieti",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "73",
+        "superficie_kmq": "2749.5890",
+        "codice_sovracomunale": "057"
+    },
+    {
+        "codice_regione": "08",
+        "sigla_provincia": "RN",
+        "denominazione_provincia": "Rimini",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "27",
+        "superficie_kmq": "922.7185",
+        "codice_sovracomunale": "099"
+    },
+    {
+        "codice_regione": "12",
+        "sigla_provincia": "RM",
+        "denominazione_provincia": "Roma",
+        "tipologia_provincia": "Citta metropolitana",
+        "numero_comuni": "121",
+        "superficie_kmq": "5366.6113",
+        "codice_sovracomunale": "258"
+    },
+    {
+        "codice_regione": "05",
+        "sigla_provincia": "RO",
+        "denominazione_provincia": "Rovigo",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "50",
+        "superficie_kmq": "1824.5619",
+        "codice_sovracomunale": "029"
+    },
+    {
+        "codice_regione": "15",
+        "sigla_provincia": "SA",
+        "denominazione_provincia": "Salerno",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "158",
+        "superficie_kmq": "4956.2757",
+        "codice_sovracomunale": "065"
+    },
+    {
+        "codice_regione": "20",
+        "sigla_provincia": "SS",
+        "denominazione_provincia": "Sassari",
+        "tipologia_provincia": "citta metropolitana",
+        "numero_comuni": "66",
+        "superficie_kmq": "4285.4411",
+        "codice_sovracomunale": "312"
+    },
+    {
+        "codice_regione": "07",
+        "sigla_provincia": "SV",
+        "denominazione_provincia": "Savona",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "69",
+        "superficie_kmq": "1546.3207",
+        "codice_sovracomunale": "009"
+    },
+    {
+        "codice_regione": "09",
+        "sigla_provincia": "SI",
+        "denominazione_provincia": "Siena",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "35",
+        "superficie_kmq": "3820.9566",
+        "codice_sovracomunale": "052"
+    },
+    {
+        "codice_regione": "19",
+        "sigla_provincia": "SR",
+        "denominazione_provincia": "Siracusa",
+        "tipologia_provincia": "Libero consorzio di comuni",
+        "numero_comuni": "21",
+        "superficie_kmq": "2123.7064",
+        "codice_sovracomunale": "089"
+    },
+    {
+        "codice_regione": "03",
+        "sigla_provincia": "SO",
+        "denominazione_provincia": "Sondrio",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "77",
+        "superficie_kmq": "3195.7783",
+        "codice_sovracomunale": "014"
+    },
+    {
+        "codice_regione": "20",
+        "sigla_provincia": "CI",
+        "denominazione_provincia": "Sulcis Iglesiente",
+        "tipologia_provincia": "provincia",
+        "numero_comuni": "24",
+        "superficie_kmq": "1747.3795",
+        "codice_sovracomunale": "119"
+    },
+    {
+        "codice_regione": "16",
+        "sigla_provincia": "TA",
+        "denominazione_provincia": "Taranto",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "29",
+        "superficie_kmq": "2467.6295",
+        "codice_sovracomunale": "073"
+    },
+    {
+        "codice_regione": "13",
+        "sigla_provincia": "TE",
+        "denominazione_provincia": "Teramo",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "47",
+        "superficie_kmq": "1953.9881",
+        "codice_sovracomunale": "067"
+    },
+    {
+        "codice_regione": "10",
+        "sigla_provincia": "TR",
+        "denominazione_provincia": "Terni",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "33",
+        "superficie_kmq": "2126.9428",
+        "codice_sovracomunale": "055"
+    },
+    {
+        "codice_regione": "01",
+        "sigla_provincia": "TO",
+        "denominazione_provincia": "Torino",
+        "tipologia_provincia": "Citta metropolitana",
+        "numero_comuni": "312",
+        "superficie_kmq": "6828.1721",
+        "codice_sovracomunale": "201"
+    },
+    {
+        "codice_regione": "19",
+        "sigla_provincia": "TP",
+        "denominazione_provincia": "Trapani",
+        "tipologia_provincia": "Libero consorzio di comuni",
+        "numero_comuni": "25",
+        "superficie_kmq": "2470.0623",
+        "codice_sovracomunale": "081"
+    },
+    {
+        "codice_regione": "04",
+        "sigla_provincia": "TN",
+        "denominazione_provincia": "Trento",
+        "tipologia_provincia": "Provincia autonoma",
+        "numero_comuni": "166",
+        "superficie_kmq": "6207.7060",
+        "codice_sovracomunale": "022"
+    },
+    {
+        "codice_regione": "05",
+        "sigla_provincia": "TV",
+        "denominazione_provincia": "Treviso",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "94",
+        "superficie_kmq": "2478.9348",
+        "codice_sovracomunale": "026"
+    },
+    {
+        "codice_regione": "06",
+        "sigla_provincia": "TS",
+        "denominazione_provincia": "Trieste",
+        "tipologia_provincia": "Unità non amministrativa",
+        "numero_comuni": "6",
+        "superficie_kmq": "212.5113",
+        "codice_sovracomunale": "032"
+    },
+    {
+        "codice_regione": "06",
+        "sigla_provincia": "UD",
+        "denominazione_provincia": "Udine",
+        "tipologia_provincia": "Unità non amministrativa",
+        "numero_comuni": "134",
+        "superficie_kmq": "4970.4991",
+        "codice_sovracomunale": "030"
+    },
+    {
+        "codice_regione": "02",
+        "sigla_provincia": "AO",
+        "denominazione_provincia": "Valle d'Aosta/Vallée d'Aoste",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "74",
+        "superficie_kmq": "3260.5014",
+        "codice_sovracomunale": "007"
+    },
+    {
+        "codice_regione": "03",
+        "sigla_provincia": "VA",
+        "denominazione_provincia": "Varese",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "136",
+        "superficie_kmq": "1198.6802",
+        "codice_sovracomunale": "012"
+    },
+    {
+        "codice_regione": "05",
+        "sigla_provincia": "VE",
+        "denominazione_provincia": "Venezia",
+        "tipologia_provincia": "Citta metropolitana",
+        "numero_comuni": "44",
+        "superficie_kmq": "2480.3727",
+        "codice_sovracomunale": "227"
+    },
+    {
+        "codice_regione": "01",
+        "sigla_provincia": "VB",
+        "denominazione_provincia": "Verbano-Cusio-Ossola",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "74",
+        "superficie_kmq": "2262.1551",
+        "codice_sovracomunale": "103"
+    },
+    {
+        "codice_regione": "01",
+        "sigla_provincia": "VC",
+        "denominazione_provincia": "Vercelli",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "82",
+        "superficie_kmq": "2082.4067",
+        "codice_sovracomunale": "002"
+    },
+    {
+        "codice_regione": "05",
+        "sigla_provincia": "VR",
+        "denominazione_provincia": "Verona",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "98",
+        "superficie_kmq": "3096.0219",
+        "codice_sovracomunale": "023"
+    },
+    {
+        "codice_regione": "18",
+        "sigla_provincia": "VV",
+        "denominazione_provincia": "Vibo Valentia",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "50",
+        "superficie_kmq": "1149.3157",
+        "codice_sovracomunale": "102"
+    },
+    {
+        "codice_regione": "05",
+        "sigla_provincia": "VI",
+        "denominazione_provincia": "Vicenza",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "112",
+        "superficie_kmq": "2721.8512",
+        "codice_sovracomunale": "024"
+    },
+    {
+        "codice_regione": "12",
+        "sigla_provincia": "VT",
+        "denominazione_provincia": "Viterbo",
+        "tipologia_provincia": "Provincia",
+        "numero_comuni": "60",
+        "superficie_kmq": "3615.0313",
+        "codice_sovracomunale": "056"
+    }
+]

@@ -8,9 +8,9 @@ from typing import Optional
 from dataclasses import dataclass, asdict
 
 import streamlit as st
-from supabase import create_client, Client
 
 from .logging_config import get_logger
+from .config import get_supabase_client
 
 # Logger per questo modulo
 logger = get_logger(__name__)
@@ -68,18 +68,9 @@ class Address:
         )
 
 
-def _get_supabase_client() -> Optional[Client]:
-    """Get Supabase client using Streamlit secrets."""
-    try:
-        if "supabase" not in st.secrets:
-            return None
-
-        url = st.secrets["supabase"]["url"]
-        key = st.secrets["supabase"]["key"]
-
-        return create_client(url, key)
-    except Exception:
-        return None
+def _get_supabase_client():
+    """Get Supabase client using centralized config."""
+    return get_supabase_client()
 
 
 def _clear_cache():
@@ -131,11 +122,16 @@ def save_addresses(addresses: list[Address]) -> bool:
         if client is None:
             return False
 
-        # Delete all existing and insert new (for bulk replacement)
-        client.table("addresses").delete().neq("id", "").execute()
-
+        # Upsert all addresses (insert or update, no data loss on failure)
         for addr in addresses:
-            client.table("addresses").insert(addr.to_dict()).execute()
+            client.table("addresses").upsert(addr.to_dict(), on_conflict="id").execute()
+
+        # Remove addresses no longer in the list
+        current_ids = {addr.id for addr in addresses}
+        existing = client.table("addresses").select("id").execute()
+        for row in (existing.data or []):
+            if row["id"] not in current_ids:
+                client.table("addresses").delete().eq("id", row["id"]).execute()
 
         _clear_cache()
         return True

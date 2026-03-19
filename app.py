@@ -30,6 +30,7 @@ from src.security import (
     MAX_VALIDATIONS_PER_DAY_PER_IP, MAX_VALIDATIONS_PER_HOUR_PER_IP,
     get_debug_info, MIN_SECONDS_BETWEEN_REQUESTS
 )
+from src.config import get_secret
 
 
 # Initialize logging (only once per session)
@@ -45,41 +46,6 @@ MAX_FILE_SIZE_MB = 50  # Maximum file size in MB
 MAX_PDF_PAGES = 500    # Maximum pages in PDF
 MAX_EXCEL_ROWS = 1000  # Maximum rows in Excel for ZIP validation
 # Note: API rate limits are now handled by src/security.py with persistent storage
-
-
-def fix_suggested_street(original_street: str, suggested_street: str) -> str:
-    """
-    Ensure the suggested street preserves the original house number.
-
-    This is a final safeguard to prevent showing wrong house numbers in the UI.
-    Example: Original "Via Riserva Nuova 4" with suggestion "Via Riserva Nuova 2"
-             should display "Via Riserva Nuova 4" (preserving original house number).
-    """
-    if not suggested_street or not original_street:
-        return suggested_street or "-"
-
-    # Extract house number from original street
-    # Match house numbers at the end: "21", "11/A", "123bis", etc.
-    orig_match = re.search(r'\s+(\d+[/\-]?\w*(?:\s+\d+[/\-]?\w*)*)\s*$', original_street)
-    if not orig_match:
-        return suggested_street  # No house number in original, return suggestion as-is
-
-    original_house_num = orig_match.group(1)
-
-    # Extract house number from suggested street
-    sugg_match = re.search(r'\s+(\d+[/\-]?\w*(?:\s+\d+[/\-]?\w*)*)\s*$', suggested_street)
-
-    if sugg_match:
-        # Suggestion has a house number - check if it matches original
-        suggested_house_num = sugg_match.group(1)
-        if suggested_house_num != original_house_num:
-            # Replace wrong house number with original
-            suggested_base = suggested_street[:sugg_match.start()].strip()
-            return f"{suggested_base} {original_house_num}"
-        return suggested_street  # House numbers match
-    else:
-        # Suggestion has no house number - append original
-        return f"{suggested_street} {original_house_num}"
 
 
 def check_file_size(file, max_mb: int = MAX_FILE_SIZE_MB) -> bool:
@@ -549,58 +515,36 @@ def label_sorter_page():
 def zip_validator_page():
     """Page for Address Validator feature."""
     st.markdown("# 📍 Address Validator")
-    st.markdown("*Valida e correggi indirizzi, CAP e vie con Google Maps API*")
+    st.markdown("*Valida e correggi indirizzi italiani con AI + Google Address Validation*")
 
-    # User guide
-    with st.expander("📖 Come usare questo strumento", expanded=False):
+    # Quick start — always visible
+    st.info("**Come funziona:** 1. Carica il file Excel → 2. Clicca Avvia Validazione → 3. Scarica il file corretto")
+
+    # Detailed guide — collapsed
+    with st.expander("📖 Guida dettagliata", expanded=False):
         st.markdown("""
-**1. Prepara il file Excel**
-- Scarica il [template](https://docs.google.com/spreadsheets/d/1eKfU6G-wzpNa8HZDcuddpJAZHEzWUKJUFw-y5LFDKOU/edit?usp=sharing) con il formato corretto
-- Colonne richieste: **Street 1**, **City**, **Zip**, **Country**
-- Colonne opzionali: Street 2, State/Province, Phone, Order Number, Cash on Delivery
+**Formato file**
+- [Scarica il template](https://docs.google.com/spreadsheets/d/1eKfU6G-wzpNa8HZDcuddpJAZHEzWUKJUFw-y5LFDKOU/edit?usp=sharing) — Colonne richieste: **Street 1**, **City**, **Zip**
+- Colonne opzionali: Country, State/Province, Phone, Order Number, Cash on Delivery
 
-**2. Cosa viene validato**
-- **CAP**: Verifica correttezza e suggerisce correzioni per errori di battitura
-- **Vie**: Verifica esistenza via tramite Google Maps API
-- **Numeri civici**: Il numero civico originale viene SEMPRE preservato
-- **PO (Order Number)**: Verifica che contenga un numero PO valido (es: 3501494822)
-- **Contrassegno (COD)**: Viene automaticamente impostato a 0
+**Cosa viene corretto automaticamente?**
+- CAP errati o incompleti (es: "187" → "00187")
+- Vie con errori di battitura (es: "Via Roam" → "Via Roma")
+- Tipo di via errato (es: "Via 24 Maggio" → "Piazza 24 Maggio")
+- Centro Commerciale separato in Street 2
+- Contrassegno (COD) impostato a 0
+- Telefono mancante compilato con numero default
 
-**3. Legenda risultati**
-| Simbolo | Significato |
-|---------|-------------|
-| ✓ | Verificato correttamente |
+**Legenda risultati**
+
+| | Significato |
+|---|---|
+| ✓ | Verificato |
 | 🔄 | Corretto automaticamente |
 | ⚠️ | Da verificare manualmente |
-| ❌ | Errore (blocca download) |
-| - | Non validato / non applicabile |
 
-**4. Validazione PO (Order Number)**
-- Il campo "Order Number" deve contenere un **PO valido** (10 cifre, inizia con 350)
-- Il PO può essere embedded: `SBX-Mat-pt.2-3501494822-18` → estrae `3501494822`
-- **Se il PO non è valido, il download viene bloccato**
-- **Con PIN**: inserisci il PIN per scaricare anche senza PO valido
-- Lista PO validi: contatta l'amministratore per aggiungerne di nuovi
-
-**5. Contrassegno (Cash on Delivery)**
-- Il campo COD viene **automaticamente impostato a 0** nel file corretto
-- Nella preview vedrai `50→0` se il valore originale era diverso da 0
-
-**6. Funzionalità avanzate**
-- **Centro Commerciale**: "C.C. Le Grange Via Roma 1" viene separato automaticamente
-- **Abbreviazioni**: "V." → "Via", "C.so" → "Corso" vengono gestite
-- **CAP incompleti**: "187" viene corretto in "00187" (Roma)
-
-**7. Limiti di utilizzo**
-- Max **1.000 righe** per file
-- Max **1.000 validazioni** ogni 12 ore (reset alle 00:00 e 12:00)
-- I limiti sono persistenti e condivisi tra tutti gli utenti
-
-**8. Scarica i risultati**
-- **File Corretto**: Excel pronto per ShippyPro (COD=0, correzioni applicate)
-- **Report Revisione**: Dettaglio di tutti gli indirizzi da verificare
+**Limiti:** Max 1.000 righe per file, 1.000 validazioni ogni 12 ore
         """)
-        st.info("💡 **Suggerimento**: Per file grandi, dividili in batch da 500-1000 righe")
 
     st.markdown("---")
 
@@ -618,76 +562,55 @@ def zip_validator_page():
         on_change=lambda: st.session_state.update({'zip_validation_results': None})
     )
 
-    # Settings
-    st.markdown("### ⚙️ Impostazioni")
-    col1, col2, col3 = st.columns(3)
-
-    with col1:
-        confidence_threshold = st.slider(
-            "Soglia CAP",
-            min_value=50,
-            max_value=100,
-            value=90,
-            step=5,
-            help="CAP corretti automaticamente solo se confidenza ≥ soglia"
-        )
-
-    with col2:
-        street_confidence_threshold = st.slider(
-            "Soglia Via",
-            min_value=50,
-            max_value=100,
-            value=85,
-            step=5,
-            help="Vie corrette automaticamente solo se confidenza ≥ soglia"
-        )
-
-    with col3:
-        country_filter = st.selectbox(
-            "Filtra per paese",
-            options=["Solo IT", "Tutti"],
-            index=0,
-            help="Attualmente la validazione supporta solo indirizzi italiani"
-        )
-
-    # PIN bypass for PO validation
-    pin_input = st.text_input(
-        "🔑 PIN (opzionale)",
-        type="password",
-        max_chars=4,
-        help="Inserisci il PIN per validare senza PO number"
-    )
-    pin_valid = pin_input == "6472"
-    if pin_input and not pin_valid:
-        st.warning("PIN non valido")
-    elif pin_valid:
-        st.success("PIN corretto - validazione PO disabilitata")
-
-    # Show usage limits (now using persistent storage)
-    st.markdown("---")
+    # Usage info — compact bar
     client_ip = get_client_ip()
     usage_stats = get_usage_stats(client_ip)
     current_usage = usage_stats.get('current_usage', 0)
     limit = usage_stats.get('limit', 1000)
     remaining = usage_stats.get('remaining', 1000)
     period_end = usage_stats.get('period_end', '00:00')
+    st.caption(f"📊 Validazioni disponibili: **{remaining}** di {limit} | Reset: {period_end}")
 
-    usage_pct = (current_usage / limit) * 100 if limit > 0 else 0
-    st.caption(f"📊 Utilizzo API: {current_usage}/{limit} ({usage_pct:.0f}%) | Rimanenti: {remaining} | Reset: {period_end} | Max righe: {MAX_EXCEL_ROWS}")
+    # Advanced settings — hidden by default
+    confidence_threshold = 90
+    street_confidence_threshold = 85
+    pin_valid = False
 
-    # Debug expander for rate limiting troubleshooting
-    with st.expander("🔧 Debug Rate Limiting", expanded=False):
+    with st.expander("⚙️ Opzioni avanzate", expanded=False):
+        col1, col2 = st.columns(2)
+        with col1:
+            confidence_threshold = st.slider(
+                "Soglia auto-correzione CAP",
+                min_value=50, max_value=100, value=90, step=5,
+                help="CAP corretti automaticamente solo se confidenza ≥ soglia"
+            )
+        with col2:
+            street_confidence_threshold = st.slider(
+                "Soglia auto-correzione Via",
+                min_value=50, max_value=100, value=85, step=5,
+                help="Vie corrette automaticamente solo se confidenza ≥ soglia"
+            )
+
+        st.markdown("---")
+        pin_input = st.text_input(
+            "🔑 PIN bypass PO",
+            type="password",
+            max_chars=4,
+            help="Inserisci il PIN per scaricare anche senza PO valido"
+        )
+        bypass_pin = get_secret("app", "bypass_pin") or ""
+        pin_valid = bool(bypass_pin) and pin_input == bypass_pin
+        if pin_input and not pin_valid:
+            st.warning("PIN non valido")
+        elif pin_valid:
+            st.success("PIN corretto — validazione PO disabilitata")
+
+        st.markdown("---")
+        st.caption("🔧 Debug")
         debug_info = get_debug_info(client_ip)
-        st.write(f"**Period ID:** `{debug_info.get('period_id', 'N/A')}`")
-        st.write(f"**Period End:** `{debug_info.get('period_end', 'N/A')}`")
-        st.write(f"**Supabase Connected:** `{debug_info.get('supabase_connected', False)}`")
-        st.write(f"**Current Usage:** `{debug_info.get('current_usage', 0)}/{debug_info.get('limit', 1000)}`")
-        if debug_info.get('records'):
-            st.write("**Records:**")
-            for r in debug_info['records']:
-                st.write(f"  `{r.get('ip_hash')}` | hour: `{r.get('hour')}` | count: `{r.get('request_count')}` | last: `{r.get('last_request')}`")
-        if debug_info.get('error'):
-            st.error(f"Error: {debug_info.get('error')}")
+        st.write(f"Period: `{debug_info.get('period_id', 'N/A')}` | "
+                 f"Supabase: `{debug_info.get('supabase_connected', False)}` | "
+                 f"Usage: `{debug_info.get('current_usage', 0)}/{debug_info.get('limit', 1000)}`")
 
     process_button = st.button(
         "🔍 Avvia Validazione",
@@ -760,95 +683,52 @@ def zip_validator_page():
 
                 status.update(label=f"✅ File letto ({len(df)} righe)", state="complete")
 
-            # Filter by country if needed
-            if country_filter == "Solo IT":
-                country_col = None
-                for col in df.columns:
-                    if col.lower().strip() in ['country', 'paese', 'nazione']:
-                        country_col = col
-                        break
+            # Country filtering is now handled by Claude's country detection
+            # inside process_dataframe (non-IT addresses are skipped automatically)
 
-                if country_col:
-                    original_count = len(df)
-                    df_filtered = df[df[country_col].str.upper().isin(['IT', 'ITALY'])]
-                    if len(df_filtered) < len(df):
-                        st.info(f"ℹ️ Filtrati {original_count - len(df_filtered)} indirizzi non italiani")
-                    df = df_filtered
+            # Get API keys via centralized config
+            google_api_key = get_secret("google", "api_key")
+            anthropic_api_key = get_secret("anthropic", "api_key")
 
-            if len(df) == 0:
-                st.warning("⚠️ Nessun indirizzo italiano trovato nel file")
+            if not google_api_key:
+                st.error("❌ Google Address Validation API key non configurata")
                 st.stop()
 
-            # Validate - use Google Maps API if key is configured in secrets
-            google_api_key = None
-            try:
-                # Try multiple access patterns for the Google API key
-                key_found = False
-
-                # Pattern 1: Nested under [google] section
-                if not key_found:
-                    try:
-                        if "google" in st.secrets:
-                            val = st.secrets["google"]["GOOGLE_MAPS_API_KEY"]
-                            if val and str(val).strip():
-                                google_api_key = str(val).strip()
-                                key_found = True
-                    except:
-                        pass
-
-                # Pattern 2: Direct top-level key
-                if not key_found:
-                    try:
-                        val = st.secrets["GOOGLE_MAPS_API_KEY"]
-                        if val and str(val).strip():
-                            google_api_key = str(val).strip()
-                            key_found = True
-                    except:
-                        pass
-
-                # Pattern 3: Search for any key containing "google" and "api"
-                if not key_found:
-                    try:
-                        for section_key in st.secrets:
-                            section = st.secrets[section_key]
-                            if hasattr(section, 'keys'):
-                                for k in section.keys():
-                                    if 'google' in k.lower() and 'api' in k.lower():
-                                        val = section[k]
-                                        if val and str(val).strip():
-                                            google_api_key = str(val).strip()
-                                            key_found = True
-                                            break
-                            if key_found:
-                                break
-                    except:
-                        pass
-
-                if key_found and google_api_key:
-                    st.success("🗺️ Google Maps API attivo")
-                else:
-                    google_api_key = None
-            except:
-                google_api_key = None
+            api_mode = "Google Address Validation"
+            if anthropic_api_key:
+                api_mode += " + Claude AI"
+            else:
+                api_mode += " + regex parsing"
 
             validator = ZipValidator(
                 confidence_threshold=confidence_threshold,
                 street_confidence_threshold=street_confidence_threshold,
-                google_api_key=google_api_key
+                google_api_key=google_api_key,
+                anthropic_api_key=anthropic_api_key
             )
 
-            # Progress container
+            # Progress container with phase feedback
             progress_bar = st.progress(0)
             status_text = st.empty()
+            validation_start = datetime.now()
 
             def update_progress(current, total, message):
-                progress_bar.progress(current / total)
-                status_text.text(f"⏳ {message} ({current}/{total})")
+                pct = min(current / total, 1.0) if total > 0 else 0
+                progress_bar.progress(pct)
+                # Estimate time remaining for validation phase
+                if current > 20 and total > 0:
+                    elapsed = (datetime.now() - validation_start).total_seconds()
+                    progress_frac = (current - 20) / (total - 20) if total > 20 else 1
+                    if progress_frac > 0.05:
+                        eta = int(elapsed / progress_frac * (1 - progress_frac))
+                        status_text.text(f"⏳ {message} (~{eta}s rimanenti)")
+                        return
+                status_text.text(f"⏳ {message}")
 
-            with st.spinner(f"Validazione {len(df)} indirizzi... (circa {len(df) * 1.5:.0f} secondi)"):
+            with st.spinner(f"Validazione {len(df)} indirizzi..."):
                 report, preprocessed_df = validator.process_dataframe(df, progress_callback=update_progress)
 
-            progress_bar.progress(100)
+            progress_bar.progress(1.0)
             status_text.text("✅ Validazione completata!")
 
             # Generate files using preprocessed DataFrame (with C.C. moved to Street 2)
@@ -860,7 +740,8 @@ def zip_validator_page():
                 'report': report,
                 'corrected_excel': corrected_excel,
                 'review_excel': review_excel,
-                'timestamp': timestamp
+                'timestamp': timestamp,
+                'api_mode': api_mode,
             }
 
             # Record API usage for rate limiting
@@ -878,6 +759,7 @@ def zip_validator_page():
 
         st.markdown("---")
         st.markdown("## ✅ Risultato")
+        st.caption(f"Validato con: {results.get('api_mode', 'N/A')}")
 
         # ZIP stats
         st.markdown("#### 📮 CAP")
@@ -922,97 +804,77 @@ def zip_validator_page():
                     "💡 Inserisci il PIN per scaricare senza PO valido."
                 )
 
-        # Preview ALL results (valid, corrected, and needs review)
+        # Preview results — simplified view by default
         st.markdown("### 📋 Dettaglio validazione")
 
-        preview_data = []
+        simple_data = []
+        full_data = []
         for r in report.results:
-            # ZIP status
-            if r.is_valid:
-                zip_stato = "✓"
-            elif r.auto_corrected:
-                zip_stato = "🔄"
+            # Status emoji
+            if r.is_valid and r.street_verified:
+                status = "✓"
+            elif r.auto_corrected or r.street_auto_corrected:
+                status = "🔄"
+            elif not r.is_valid or (r.suggested_street and not r.street_verified):
+                status = "⚠️"
             else:
-                zip_stato = "⚠️"
+                status = "✓"
 
-            # Street status
-            if r.street_verified:
-                street_stato = "✓"
-            elif r.street_auto_corrected:
-                street_stato = "🔄"
-            elif r.suggested_street:
-                street_stato = "⚠️"
-            else:
-                street_stato = "-"
-
-            # Country status
-            if r.country_detected:
-                country_stato = f"{r.country_code}*"  # Asterisk indicates auto-detected
-            else:
-                country_stato = r.country_code
-
-            # Phone status
-            if r.phone_missing:
-                phone_stato = "📱+"  # Will be filled with default
-            else:
-                phone_stato = "✓"
-
-            # COD status
-            if r.cod_changed:
-                cod_stato = f"{r.original_cod}→0"  # Show what will change
-            else:
-                cod_stato = "0"
-
-            # PO status
+            # Simple row — essential info only
+            simple_row = {
+                "Stato": status,
+                "Città": r.city or "-",
+                "Via": r.street or "-",
+                "CAP": r.original_zip,
+            }
+            # Show correction inline if any
+            corrections = []
+            if r.auto_corrected and r.suggested_zip:
+                corrections.append(f"CAP → {r.suggested_zip}")
+            if r.street_auto_corrected and r.suggested_street:
+                corrections.append(f"Via → {r.suggested_street}")
             if r.po_invalid:
-                po_stato = f"❌ {r.po_value[:20]}..." if len(r.po_value) > 20 else f"❌ {r.po_value}"
-            elif r.po_extracted:
-                po_stato = f"✓ {r.po_extracted}"
-            else:
-                po_stato = "-"
+                corrections.append(f"PO ❌")
+            simple_row["Correzioni"] = " | ".join(corrections) if corrections else "-"
+            simple_data.append(simple_row)
 
-            preview_data.append({
-                "Città": r.city if r.city else "-",
-                "Via Orig.": r.street if r.street else "-",
-                "Via Sugg.": fix_suggested_street(r.street, r.suggested_street) if r.suggested_street else "-",
-                "🛣️": street_stato,
-                "ZIP Orig.": r.original_zip,
-                "ZIP Sugg.": r.suggested_zip or "-",
-                "📮": zip_stato,
-                "🌍": country_stato,
-                "📱": phone_stato,
-                "💰": cod_stato,
-                "🛒": po_stato,
-                "Note": r.reason  # Full reason, no truncation
+            # Full row — all details
+            full_data.append({
+                "Stato": status,
+                "Città": r.city or "-",
+                "Via Orig.": r.street or "-",
+                "Via Sugg.": r.suggested_street or "-",
+                "CAP Orig.": r.original_zip,
+                "CAP Sugg.": r.suggested_zip or "-",
+                "Paese": f"{r.country_code}{'*' if r.country_detected else ''}",
+                "Tel.": "+" if r.phone_missing else "✓",
+                "COD": f"{r.original_cod}→0" if r.cod_changed else "0",
+                "PO": f"❌ {r.po_value[:15]}" if r.po_invalid else (f"✓ {r.po_extracted}" if r.po_extracted else "-"),
+                "Note": r.reason,
             })
 
-        if preview_data:
-            PREVIEW_ROWS = 5  # Show first 5 rows, then expander for rest
-            total_rows = len(preview_data)
+        if simple_data:
+            total_rows = len(simple_data)
 
-            if total_rows <= PREVIEW_ROWS:
-                # Show all rows if within limit
-                st.dataframe(preview_data, use_container_width=True, hide_index=True)
-            else:
-                # Show preview with count
-                st.dataframe(preview_data[:PREVIEW_ROWS], use_container_width=True, hide_index=True)
-                st.caption(f"Mostrati {PREVIEW_ROWS} di {total_rows} record")
-
-                # Expandable full view
-                with st.expander(f"📋 Mostra tutti i {total_rows} record"):
-                    st.dataframe(
-                        preview_data,
-                        use_container_width=True,
-                        hide_index=True,
-                        height=400  # Scrollable height
-                    )
-
-            # Legend for symbols
-            st.caption(
-                "**Legenda:** ✓ = OK | 🔄 = Auto-corretto | ⚠️ = Da verificare | "
-                "🌍 IT* = Paese auto-rilevato | 📱+ = Tel. default (393445556667) | "
-                "💰 50→0 = COD impostato a 0 | 🛒 ❌ = PO non valido"
+            # Show simplified table
+            st.dataframe(
+                simple_data[:10],
+                use_container_width=True,
+                hide_index=True
             )
+            if total_rows > 10:
+                st.caption(f"Mostrate 10 di {total_rows} righe")
+
+            st.caption("**Legenda:** ✓ OK | 🔄 Corretto | ⚠️ Da verificare")
+
+            # Full detail in expander
+            with st.expander(f"📋 Vista completa ({total_rows} righe)"):
+                st.dataframe(
+                    full_data,
+                    use_container_width=True,
+                    hide_index=True,
+                    height=400
+                )
 
         # Downloads - now using pre-generated files from session state
         st.markdown("### 📥 Download")
@@ -1165,10 +1027,9 @@ def send_pickup_request(
 
     try:
         # Get Zapier webhook URL from secrets
-        if "zapier" not in st.secrets:
-            return False, "Configurazione Zapier mancante. Aggiungi [zapier] webhook_url in Secrets."
-
-        webhook_url = st.secrets["zapier"]["webhook_url"]
+        webhook_url = get_secret("zapier", "webhook_url")
+        if not webhook_url:
+            return False, "Configurazione Zapier mancante. Aggiungi ZAPIER_WEBHOOK_URL nelle variabili d'ambiente."
 
         # Send POST request to Zapier
         response = requests.post(
