@@ -402,16 +402,12 @@ def get_address_summary(address: Address) -> str:
 def is_sheets_configured() -> bool:
     """
     Check if Supabase is properly configured.
-    (Kept name for backwards compatibility with app.py)
+    Uses centralized config which checks both env vars (Render) and st.secrets (local dev).
 
     Returns:
         True if configured, False otherwise
     """
-    try:
-        return (
-            "supabase" in st.secrets and
-            "url" in st.secrets.get("supabase", {}) and
-            "key" in st.secrets.get("supabase", {})
-        )
-    except Exception:
-        return False
+    from .config import get_secret
+    url = get_secret("supabase", "url")
+    key = get_secret("supabase", "key")
+    return bool(url and key)
