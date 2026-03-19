@@ -407,8 +407,11 @@ def is_sheets_configured() -> bool:
     Returns:
         True if configured, False otherwise
     """
-    return (
-        "supabase" in st.secrets and
-        "url" in st.secrets.get("supabase", {}) and
-        "key" in st.secrets.get("supabase", {})
-    )
+    try:
+        return (
+            "supabase" in st.secrets and
+            "url" in st.secrets.get("supabase", {}) and
+            "key" in st.secrets.get("supabase", {})
+        )
+    except Exception:
+        return False
