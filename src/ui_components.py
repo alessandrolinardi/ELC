@@ -83,8 +83,7 @@ def get_theme_css() -> str:
 # Nav header — brand bar at the top
 # ---------------------------------------------------------------------------
 def render_nav_header(dev_mode: bool = False) -> str:
-    """Return an HTML brand header with a dev-mode toggle link."""
-    toggle_url = "?dev=0" if dev_mode else "?dev=1"
+    """Return an HTML brand header. Dev toggle is handled by a Streamlit button separately."""
     dev_indicator = (
         f' <span style="background:{COLORS["primary"]};color:#fff;'
         f'padding:2px 8px;border-radius:4px;font-size:0.7rem;">DEV</span>'
@@ -94,16 +93,10 @@ def render_nav_header(dev_mode: bool = False) -> str:
     return f"""
     <div style="display:flex;align-items:center;justify-content:space-between;
                 padding:0.75rem 1rem;background:{COLORS["card"]};
-                border-bottom:1px solid {COLORS["border"]};margin-bottom:1rem;">
-        <div style="display:flex;align-items:center;gap:0.5rem;">
-            <span style="font-size:1.4rem;font-weight:700;color:{COLORS["text_primary"]};">
-                📋 ELC Tools
-            </span>
-            {dev_indicator}
-        </div>
-        <a href="{toggle_url}" target="_self"
-           style="text-decoration:none;font-size:1.1rem;color:{COLORS["text_muted"]};"
-           title="{'Disattiva' if dev_mode else 'Attiva'} modalità sviluppatore">⚙️</a>
+                border-bottom:1px solid {COLORS["border"]};margin-bottom:0;">
+        <span style="font-size:1.4rem;font-weight:700;color:{COLORS["text_primary"]};">
+            ELC Tools{dev_indicator}
+        </span>
     </div>
     """
 

@@ -19,14 +19,13 @@ class TestNavHeader:
         assert "ELC" in html
         assert "Tools" in html
 
-    def test_render_nav_header_dev_toggle_link(self):
+    def test_render_nav_header_no_dev_indicator_by_default(self):
         html = render_nav_header(dev_mode=False)
-        assert "⚙️" in html
-        assert "?dev=1" in html
+        assert "DEV" not in html
 
     def test_render_nav_header_dev_active(self):
         html = render_nav_header(dev_mode=True)
-        assert "?dev=0" in html
+        assert "DEV" in html
         assert COLORS["primary"] in html
 
 
