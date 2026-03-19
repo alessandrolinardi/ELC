@@ -31,6 +31,7 @@ from src.security import (
     get_debug_info, MIN_SECONDS_BETWEEN_REQUESTS
 )
 from src.config import get_secret
+from src.ui_components import get_theme_css
 
 
 # Initialize logging (only once per session)
@@ -114,38 +115,13 @@ def record_validation_time():
 
 # Configurazione pagina
 st.set_page_config(
-    page_title="ELC Tools - Estée Lauder",
+    page_title="ELC Tools",
     page_icon="📦",
     layout="centered",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
-# CSS personalizzato
-st.markdown("""
-<style>
-    .main-header {
-        font-size: 2rem;
-        font-weight: bold;
-        margin-bottom: 1rem;
-    }
-    .result-box {
-        padding: 1rem;
-        border-radius: 0.5rem;
-        margin: 1rem 0;
-    }
-    .success-box {
-        background-color: #d4edda;
-        border: 1px solid #c3e6cb;
-    }
-    .warning-box {
-        background-color: #fff3cd;
-        border: 1px solid #ffeeba;
-    }
-    .stDownloadButton > button {
-        width: 100%;
-    }
-</style>
-""", unsafe_allow_html=True)
+st.markdown(get_theme_css(), unsafe_allow_html=True)
 
 
 def generate_csv_report(match_report, sorted_result) -> str:
@@ -1535,78 +1511,59 @@ def pickup_request_page():
 
 
 def main():
-    # Sidebar navigation
-    st.sidebar.markdown("# 🛠️ ELC Tools")
-    st.sidebar.markdown("Strumenti per la logistica Estée Lauder")
-    st.sidebar.markdown("---")
+    from src.ui_components import render_nav_header, get_nav_css, TOOLS
 
-    feature = st.sidebar.radio(
-        "Seleziona funzionalità:",
-        options=[
-            "📦 Label Sorter",
-            "📍 Address Validator",
-            "🚚 Richiesta Ritiro"
-        ],
-        index=0,
-        key="feature_selector"
+    # Dev mode via query params (?dev=1)
+    dev_mode = st.query_params.get("dev", "0") == "1"
+    st.session_state.dev_mode = dev_mode
+
+    # Render the brand header (ELC Tools logo + dev toggle)
+    st.markdown(render_nav_header(dev_mode=dev_mode), unsafe_allow_html=True)
+
+    # Inject CSS to restyle st.radio as a tab bar
+    st.markdown(get_nav_css(), unsafe_allow_html=True)
+
+    # Actual navigation control — st.radio styled as tabs
+    tool_labels = [t["label"] for t in TOOLS]
+    selected_label = st.radio(
+        "nav",
+        options=tool_labels,
+        horizontal=True,
+        label_visibility="collapsed",
+        key="nav_radio"
     )
 
-    st.sidebar.markdown("---")
-
-    # Log viewer in sidebar (collapsible)
-    with st.sidebar.expander("📋 Log Viewer", expanded=False):
-        log_handler = get_streamlit_handler()
-        logs = log_handler.get_logs()
-
-        # Filter options
-        log_level = st.selectbox(
-            "Filtra per livello:",
-            options=["Tutti", "DEBUG", "INFO", "WARNING", "ERROR"],
-            index=0,
-            key="log_level_filter"
-        )
-
-        if log_level != "Tutti":
-            logs = [l for l in logs if l['level'] == log_level]
-
-        # Display logs
-        if logs:
-            st.caption(f"Ultimi {len(logs)} log")
-            for log in reversed(logs[-20:]):  # Show last 20
-                level_color = {
-                    'DEBUG': '🔵',
-                    'INFO': '🟢',
-                    'WARNING': '🟡',
-                    'ERROR': '🔴'
-                }.get(log['level'], '⚪')
-
-                st.markdown(
-                    f"<small>{level_color} <code>{log['timestamp'][-8:]}</code> "
-                    f"<b>{log['module']}</b>: {log['message'][:80]}</small>",
-                    unsafe_allow_html=True
-                )
-
-            if st.button("🗑️ Pulisci log", key="clear_logs"):
-                log_handler.clear()
-                st.rerun()
-        else:
-            st.info("Nessun log disponibile")
-
-    st.sidebar.markdown(
-        "<div style='font-size: 0.8rem; color: #888;'>"
-        "ELC Tools v2.0<br>"
-        "Estée Lauder Logistics"
-        "</div>",
-        unsafe_allow_html=True
-    )
+    # Map selected label back to tool key
+    selected_index = tool_labels.index(selected_label)
+    active_tool = TOOLS[selected_index]["key"]
 
     # Route to selected feature
-    if feature == "📦 Label Sorter":
-        label_sorter_page()
-    elif feature == "📍 Address Validator":
-        zip_validator_page()
-    elif feature == "🚚 Richiesta Ritiro":
+    if active_tool == "ritiro":
         pickup_request_page()
+    elif active_tool == "validator":
+        zip_validator_page()
+    elif active_tool == "label_sorter":
+        label_sorter_page()
+
+    # Dev mode: log viewer at bottom of page
+    if dev_mode:
+        st.markdown("---")
+        with st.expander("📋 Log Viewer", expanded=False):
+            log_handler = get_streamlit_handler()
+            logs = log_handler.get_logs()
+            log_level = st.selectbox("Livello:", ["Tutti", "DEBUG", "INFO", "WARNING", "ERROR"], key="log_filter")
+            if log_level != "Tutti":
+                logs = [l for l in logs if l['level'] == log_level]
+            if logs:
+                for log in reversed(logs[-20:]):
+                    level_color = {'DEBUG': '🔵', 'INFO': '🟢', 'WARNING': '🟡', 'ERROR': '🔴'}.get(log['level'], '⚪')
+                    st.markdown(f"<small>{level_color} <code>{log['timestamp'][-8:]}</code> "
+                                f"<b>{log['module']}</b>: {log['message'][:80]}</small>", unsafe_allow_html=True)
+                if st.button("🗑️ Pulisci log", key="clear_logs"):
+                    log_handler.clear()
+                    st.rerun()
+            else:
+                st.info("Nessun log disponibile")
 
 
 if __name__ == "__main__":
