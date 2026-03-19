@@ -153,203 +153,238 @@ def generate_csv_report(match_report, sorted_result) -> str:
 
 def label_sorter_page():
     """Page for Label Sorter feature."""
-    st.markdown("# 📦 Label Sorter")
-    st.markdown("*Riordina le etichette di spedizione secondo l'ordine degli ordini*")
-
-    # User guide
-    with st.expander("📖 Come usare questo strumento", expanded=False):
-        st.markdown("""
-**1. Scarica le etichette da ordinare**
-- Scarica il PDF con le etichette generate che vuoi riordinare
-
-**2. Esporta l'Excel da ShippyPro**
-- Vai su **Etichette generate**
-- Filtra gli ordini interessati
-- Seleziona gli ordini
-- Clicca sul menu a tendina **Crea documenti**
-- Clicca su **Crea lista ordini XLS**
-
-**3. Carica i file**
-- Carica il PDF delle etichette e il file Excel esportato
-- Scegli la modalità di ordinamento
-
-**4. Scarica il risultato**
-- Scarica il nuovo PDF con le etichette ordinate
-        """)
-
-    st.markdown("---")
 
     # Initialize session state for persisting results
     if 'label_sorter_results' not in st.session_state:
         st.session_state.label_sorter_results = None
 
-    # Sezione Upload
+    # ── Determine current step for indicator ─────────────────────────────
+    has_results = st.session_state.label_sorter_results is not None
+    # Step logic: 1=Carica, 2=Configura, 3=Elabora, 4=Scarica
+    # Check uploader session state keys to detect uploaded files across reruns
+    _pdf_uploaded = bool(st.session_state.get("pdf_uploader"))
+    _excel_uploaded = bool(st.session_state.get("excel_uploader"))
+    if has_results:
+        current_step = 4
+    elif _pdf_uploaded and _excel_uploaded:
+        current_step = 2
+    else:
+        current_step = 1
+
+    # ── Step indicator ───────────────────────────────────────────────────
+    st.markdown(
+        render_step_indicator(["Carica", "Configura", "Elabora", "Scarica"], current_step),
+        unsafe_allow_html=True,
+    )
+
+    # Page title
+    st.markdown(
+        f'<h2 style="color:{COLORS["text_primary"]};margin-bottom:0.25rem;">Label Sorter</h2>'
+        f'<p style="color:{COLORS["text_secondary"]};margin-top:0;margin-bottom:1.5rem;">'
+        f'Riordina le etichette di spedizione secondo l\'ordine degli ordini</p>',
+        unsafe_allow_html=True,
+    )
+
+    # User guide — clean expander
+    with st.expander("Come usare questo strumento", expanded=False):
+        st.markdown("""
+**1. Scarica le etichette da ordinare**
+- Scarica il PDF con le etichette generate che vuoi riordinare
+
+**2. Esporta l'Excel da ShippyPro**
+- Vai su **Etichette generate** — filtra e seleziona gli ordini
+- Menu **Crea documenti** → **Crea lista ordini XLS**
+
+**3. Carica i file e scegli la modalita di ordinamento**
+
+**4. Scarica il PDF riordinato**
+        """)
+
+    # ── Step 1: Upload section ───────────────────────────────────────────
+    _section_header("Carica i file")
+
     col1, col2 = st.columns(2)
 
     with col1:
-        st.markdown("### 📄 PDF Etichette")
+        st.markdown(
+            f'<p style="font-size:0.85rem;font-weight:500;color:{COLORS["text_secondary"]};margin-bottom:0.25rem;">'
+            f'PDF Etichette</p>',
+            unsafe_allow_html=True,
+        )
         pdf_files = st.file_uploader(
             "Carica i PDF con le etichette",
             type=["pdf"],
             key="pdf_uploader",
-            help="Uno o più PDF con etichette (DHL, FedEx, UPS). Verranno uniti automaticamente.",
+            help="Uno o piu PDF con etichette (DHL, FedEx, UPS). Verranno uniti automaticamente.",
             accept_multiple_files=True,
+            label_visibility="collapsed",
             on_change=lambda: st.session_state.update({'label_sorter_results': None})
         )
 
     with col2:
-        st.markdown("### 📊 Excel Ordini")
+        st.markdown(
+            f'<p style="font-size:0.85rem;font-weight:500;color:{COLORS["text_secondary"]};margin-bottom:0.25rem;">'
+            f'Excel Ordini (export ShippyPro)</p>',
+            unsafe_allow_html=True,
+        )
         excel_file = st.file_uploader(
             "Carica il file Excel degli ordini",
             type=["xlsx", "xls"],
             key="excel_uploader",
             help="Export da ShippyPro con ID Ordine, Tracking, Corriere",
+            label_visibility="collapsed",
             on_change=lambda: st.session_state.update({'label_sorter_results': None})
         )
 
-    # Metodo di ordinamento
-    st.markdown("### 🔢 Metodo di ordinamento")
-    sort_method = st.radio(
-        "Seleziona come ordinare le etichette:",
-        options=[
-            ("Segui ordine Excel", SortMethod.EXCEL_ORDER),
-            ("Ordina per Order ID (numerico crescente)", SortMethod.ORDER_ID_NUMERIC)
-        ],
-        format_func=lambda x: x[0],
-        horizontal=True,
-        index=1,  # Default: Order ID numerico
-        key="sort_method"
-    )
+    # ── Step 2: Sort method (visible after files uploaded) ───────────────
+    files_uploaded = bool(pdf_files) and bool(excel_file)
 
-    # Bottone elabora
-    st.markdown("---")
-    process_button = st.button(
-        "🚀 Elabora",
-        type="primary",
-        disabled=not (pdf_files and excel_file),
-        use_container_width=True,
-        key="label_sorter_process"
-    )
+    if files_uploaded and not has_results:
+        st.markdown(f'<div style="height:0.5rem;"></div>', unsafe_allow_html=True)
+        _section_header("Metodo di ordinamento")
 
-    # Elaborazione
+        sort_method = st.radio(
+            "Seleziona come ordinare le etichette:",
+            options=[
+                ("Segui ordine Excel", SortMethod.EXCEL_ORDER),
+                ("Ordina per Order ID (numerico crescente)", SortMethod.ORDER_ID_NUMERIC)
+            ],
+            format_func=lambda x: x[0],
+            horizontal=True,
+            index=1,
+            key="sort_method",
+            label_visibility="collapsed",
+        )
+
+        st.markdown(f'<div style="height:0.5rem;"></div>', unsafe_allow_html=True)
+
+        process_button = st.button(
+            "Avvia Elaborazione",
+            type="primary",
+            use_container_width=True,
+            key="label_sorter_process"
+        )
+    else:
+        # Need a sort_method default even if section is hidden
+        sort_method = ("Ordina per Order ID (numerico crescente)", SortMethod.ORDER_ID_NUMERIC)
+        process_button = False
+
+    # ── Step 3: Processing ───────────────────────────────────────────────
     if process_button and pdf_files and excel_file:
         # Security checks
         total_pdf_size = 0
         for pdf_file in pdf_files:
             if not check_file_size(pdf_file, MAX_FILE_SIZE_MB):
-                st.error(f"❌ File PDF '{pdf_file.name}' troppo grande. Massimo: {MAX_FILE_SIZE_MB}MB")
+                st.error(f"File PDF '{pdf_file.name}' troppo grande. Massimo: {MAX_FILE_SIZE_MB}MB")
                 st.stop()
             total_pdf_size += get_file_size_mb(pdf_file)
-        if total_pdf_size > MAX_FILE_SIZE_MB * 2:  # Allow more for multiple files
-            st.error(f"❌ Dimensione totale PDF troppo grande ({total_pdf_size:.1f}MB). Massimo: {MAX_FILE_SIZE_MB * 2}MB")
+        if total_pdf_size > MAX_FILE_SIZE_MB * 2:
+            st.error(f"Dimensione totale PDF troppo grande ({total_pdf_size:.1f}MB). Massimo: {MAX_FILE_SIZE_MB * 2}MB")
             st.stop()
         if not check_file_size(excel_file, MAX_FILE_SIZE_MB):
-            st.error(f"❌ File Excel troppo grande. Massimo: {MAX_FILE_SIZE_MB}MB")
+            st.error(f"File Excel troppo grande. Massimo: {MAX_FILE_SIZE_MB}MB")
             st.stop()
 
         status_container = st.container()
 
         with status_container:
-            st.markdown("### 🔄 Elaborazione in corso...")
-
             try:
                 pdf_processor = PDFProcessor()
                 excel_parser = ExcelParser()
 
                 # Step 1: Leggi e unisci PDF
-                with st.status(f"📄 Step 1/5: Lettura {len(pdf_files)} PDF...", expanded=True) as status:
+                with st.status(f"Step 1/5: Lettura {len(pdf_files)} PDF...", expanded=True) as status:
                     import fitz  # PyMuPDF for merging
 
                     if len(pdf_files) == 1:
                         st.write("Caricamento file PDF...")
                         pdf_bytes = pdf_files[0].read()
-                        st.write(f"✓ File caricato: {len(pdf_bytes):,} bytes")
+                        st.write(f"File caricato: {len(pdf_bytes):,} bytes")
                     else:
                         st.write(f"Unione di {len(pdf_files)} file PDF...")
                         merged_doc = fitz.open()
                         for i, pdf_file in enumerate(pdf_files):
                             pdf_file.seek(0)
                             file_bytes = pdf_file.read()
-                            st.write(f"  → {pdf_file.name}: {len(file_bytes):,} bytes")
+                            st.write(f"  {pdf_file.name}: {len(file_bytes):,} bytes")
                             temp_doc = fitz.open(stream=file_bytes, filetype="pdf")
                             merged_doc.insert_pdf(temp_doc)
                             temp_doc.close()
-                        # Save merged PDF to bytes
                         pdf_bytes = merged_doc.tobytes()
                         merged_doc.close()
-                        st.write(f"✓ PDF unito: {len(pdf_bytes):,} bytes totali")
+                        st.write(f"PDF unito: {len(pdf_bytes):,} bytes totali")
 
                     st.write("Estrazione pagine e tracking...")
                     pdf_data = pdf_processor.process_pdf(pdf_bytes)
-                    st.write(f"✓ Pagine trovate: {pdf_data.total_pages}")
+                    st.write(f"Pagine trovate: {pdf_data.total_pages}")
 
                     # Security check: page limit
                     if pdf_data.total_pages > MAX_PDF_PAGES:
-                        st.error(f"❌ Troppe pagine nel PDF ({pdf_data.total_pages}). Massimo: {MAX_PDF_PAGES}")
+                        st.error(f"Troppe pagine nel PDF ({pdf_data.total_pages}). Massimo: {MAX_PDF_PAGES}")
                         st.stop()
 
                     extracted = [(p.page_number, p.tracking, p.carrier) for p in pdf_data.pages[:5] if p.tracking]
                     if extracted:
-                        st.write(f"✓ Primi tracking estratti: {extracted}")
+                        st.write(f"Primi tracking estratti: {extracted}")
                     else:
-                        st.warning("⚠️ Nessun tracking estratto dalle prime pagine")
+                        st.warning("Nessun tracking estratto dalle prime pagine")
 
-                    status.update(label=f"✅ Step 1/5: PDF letto ({pdf_data.total_pages} pagine)", state="complete")
+                    status.update(label=f"Step 1/5: PDF letto ({pdf_data.total_pages} pagine)", state="complete")
 
                 # Step 2: Leggi Excel
-                with st.status("📊 Step 2/5: Lettura Excel...", expanded=True) as status:
+                with st.status("Step 2/5: Lettura Excel...", expanded=True) as status:
                     st.write("Caricamento file Excel...")
                     excel_bytes = excel_file.read()
-                    st.write(f"✓ File caricato: {len(excel_bytes):,} bytes")
+                    st.write(f"File caricato: {len(excel_bytes):,} bytes")
 
                     st.write("Parsing dati ordini...")
                     try:
                         excel_data = excel_parser.parse_excel(excel_bytes, excel_file.name)
-                        st.write(f"✓ Ordini trovati: {len(excel_data.orders)}")
-                        st.write(f"✓ Colonne trovate: {excel_data.columns_found}")
-                        st.write(f"✓ Colonna Tracking usata: **{excel_data.tracking_column_used}**")
+                        st.write(f"Ordini trovati: {len(excel_data.orders)}")
+                        st.write(f"Colonne trovate: {excel_data.columns_found}")
+                        st.write(f"Colonna Tracking usata: **{excel_data.tracking_column_used}**")
 
                         if excel_data.orders:
                             first_orders = [(o.order_id, o.tracking) for o in excel_data.orders[:3]]
-                            st.write(f"✓ Primi ordini (ID, Tracking): {first_orders}")
+                            st.write(f"Primi ordini (ID, Tracking): {first_orders}")
 
-                        status.update(label=f"✅ Step 2/5: Excel letto ({len(excel_data.orders)} ordini)", state="complete")
+                        status.update(label=f"Step 2/5: Excel letto ({len(excel_data.orders)} ordini)", state="complete")
                     except ExcelParserError as e:
-                        status.update(label="❌ Step 2/5: Errore lettura Excel", state="error")
+                        status.update(label="Step 2/5: Errore lettura Excel", state="error")
                         st.error(f"Errore: {str(e)}")
                         st.stop()
 
                 if excel_data.warnings:
-                    with st.expander(f"⚠️ {len(excel_data.warnings)} avvisi lettura Excel"):
+                    with st.expander(f"{len(excel_data.warnings)} avvisi lettura Excel"):
                         for warning in excel_data.warnings:
                             st.warning(warning)
 
                 # Step 3: Matching
-                with st.status("🔗 Step 3/5: Matching tracking...", expanded=True) as status:
+                with st.status("Step 3/5: Matching tracking...", expanded=True) as status:
                     st.write("Creazione indice tracking Excel...")
                     matcher = Matcher(pdf_data, excel_data)
-                    st.write(f"✓ Indice creato con {len(excel_data.orders)} tracking")
+                    st.write(f"Indice creato con {len(excel_data.orders)} tracking")
 
                     st.write("Matching pagine PDF con ordini Excel...")
                     match_report = matcher.match_all()
-                    st.write(f"✓ Matchate: {len(match_report.matched)} / {match_report.total_pages}")
-                    st.write(f"✓ Non matchate: {len(match_report.unmatched)}")
-                    st.write(f"✓ Match rate: {match_report.match_rate}%")
+                    st.write(f"Matchate: {len(match_report.matched)} / {match_report.total_pages}")
+                    st.write(f"Non matchate: {len(match_report.unmatched)}")
+                    st.write(f"Match rate: {match_report.match_rate}%")
 
-                    status.update(label=f"✅ Step 3/5: Matching completato ({match_report.match_rate}%)", state="complete")
+                    status.update(label=f"Step 3/5: Matching completato ({match_report.match_rate}%)", state="complete")
 
                 # Step 4: Ordinamento
-                with st.status("🔢 Step 4/5: Ordinamento pagine...", expanded=True) as status:
+                with st.status("Step 4/5: Ordinamento pagine...", expanded=True) as status:
                     st.write(f"Metodo: {sort_method[0]}")
                     sorter = Sorter(match_report, excel_data)
                     sorted_result = sorter.sort(sort_method[1])
-                    st.write(f"✓ Ordine calcolato per {len(sorted_result.page_order)} pagine")
-                    st.write(f"✓ Prime pagine nell'ordine: {sorted_result.page_order[:10]}...")
+                    st.write(f"Ordine calcolato per {len(sorted_result.page_order)} pagine")
+                    st.write(f"Prime pagine nell'ordine: {sorted_result.page_order[:10]}...")
 
-                    status.update(label=f"✅ Step 4/5: Ordinamento completato", state="complete")
+                    status.update(label="Step 4/5: Ordinamento completato", state="complete")
 
                 # Step 5: Genera PDF riordinato
-                with st.status("📝 Step 5/5: Generazione PDF...", expanded=True) as status:
+                with st.status("Step 5/5: Generazione PDF...", expanded=True) as status:
                     st.write(f"Riordinamento {len(sorted_result.page_order)} pagine...")
                     st.write("Questo potrebbe richiedere alcuni secondi per PDF grandi...")
 
@@ -358,10 +393,8 @@ def label_sorter_page():
                         sorted_result.page_order
                     )
 
-                    st.write(f"✓ PDF generato: {len(reordered_pdf):,} bytes")
-                    status.update(label=f"✅ Step 5/5: PDF generato ({len(reordered_pdf):,} bytes)", state="complete")
-
-                st.success("🎉 Elaborazione completata con successo!")
+                    st.write(f"PDF generato: {len(reordered_pdf):,} bytes")
+                    status.update(label=f"Step 5/5: PDF generato ({len(reordered_pdf):,} bytes)", state="complete")
 
                 # Generate CSV report and store results in session state
                 csv_report = generate_csv_report(match_report, sorted_result)
@@ -377,11 +410,11 @@ def label_sorter_page():
                 }
 
             except Exception as e:
-                st.error(f"❌ Errore durante l'elaborazione: {str(e)}")
+                st.error(f"Errore durante l'elaborazione: {str(e)}")
                 st.exception(e)
                 st.stop()
 
-    # Display results from session state (persists across reruns)
+    # ── Step 4: Display results (persists across reruns) ─────────────────
     if st.session_state.label_sorter_results:
         results = st.session_state.label_sorter_results
         match_report = results['match_report']
@@ -389,35 +422,36 @@ def label_sorter_page():
         pdf_data = results['pdf_data']
 
         st.markdown("---")
-        st.markdown("## ✅ Risultato")
 
-        col_stat1, col_stat2, col_stat3 = st.columns(3)
+        # Success banner with stats
+        unmatched_count = sorted_result.unmatched_count
+        matched_count = sorted_result.matched_count
+        total_pages = pdf_data.total_pages
+        rate = match_report.match_rate
+        banner_msg = f"{matched_count} di {total_pages} matchate ({rate}%)"
+        if unmatched_count > 0:
+            banner_msg += f" &middot; {unmatched_count} non matchate in fondo al PDF"
+        st.markdown(render_success_banner(banner_msg), unsafe_allow_html=True)
 
-        with col_stat1:
-            st.metric(label="Etichette elaborate", value=pdf_data.total_pages)
+        # ── Download cards ───────────────────────────────────────────────
+        _section_header("Download")
 
-        with col_stat2:
-            st.metric(label="Matchate", value=f"{sorted_result.matched_count} ({match_report.match_rate}%)")
-
-        with col_stat3:
-            st.metric(label="Non matchate", value=sorted_result.unmatched_count)
-
-        st.markdown("### 📥 Download")
         col_dl1, col_dl2 = st.columns(2)
 
         with col_dl1:
             st.download_button(
-                label="📄 Scarica PDF Riordinato",
+                label="Scarica PDF Riordinato",
                 data=results['reordered_pdf'],
                 file_name=f"etichette_ordinate_{results['timestamp']}.pdf",
                 mime="application/pdf",
+                type="primary",
                 use_container_width=True,
                 key="download_pdf"
             )
 
         with col_dl2:
             st.download_button(
-                label="📋 Scarica Report CSV",
+                label="Scarica Report CSV",
                 data=results['csv_report'],
                 file_name=f"report_non_matchate_{results['timestamp']}.csv",
                 mime="text/csv",
@@ -425,28 +459,42 @@ def label_sorter_page():
                 key="download_csv"
             )
 
+        # ── Unmatched table ──────────────────────────────────────────────
         if match_report.unmatched:
-            st.markdown("### ⚠️ Etichette non matchate")
-            st.markdown("*Queste etichette sono state inserite in fondo al PDF*")
+            st.markdown(f'<div style="height:0.5rem;"></div>', unsafe_allow_html=True)
 
-            unmatched_data = []
-            for result in match_report.unmatched:
-                unmatched_data.append({
-                    "Pag.": result.page_number,
-                    "Tracking estratto": result.tracking if result.tracking else "(non riconosciuto)",
-                    "Corriere": result.carrier if result.carrier else "-",
-                    "Motivo": result.unmatched_reason.value if result.unmatched_reason else "Sconosciuto"
-                })
+            with st.expander(f"Mostra dettagli — {unmatched_count} etichette non matchate", expanded=False):
+                st.caption("Queste etichette sono state inserite in fondo al PDF")
 
-            st.dataframe(unmatched_data, use_container_width=True, hide_index=True)
+                unmatched_data = []
+                for result in match_report.unmatched:
+                    unmatched_data.append({
+                        "Pag.": result.page_number,
+                        "Tracking estratto": result.tracking if result.tracking else "(non riconosciuto)",
+                        "Corriere": result.carrier if result.carrier else "-",
+                        "Motivo": result.unmatched_reason.value if result.unmatched_reason else "Sconosciuto"
+                    })
 
-            # Debug mode - show raw text from pages with unrecognized tracking
-            with st.expander("🔍 Debug: Testo estratto dalle pagine problematiche"):
-                st.markdown("*Questo testo è estratto direttamente dal PDF. Utile per capire perché il tracking non viene riconosciuto.*")
+                st.dataframe(unmatched_data, use_container_width=True, hide_index=True)
+        else:
+            st.markdown(
+                f'<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;'
+                f'padding:0.5rem 1rem;margin-top:0.5rem;font-size:0.9rem;color:#166534;">'
+                f'Tutte le etichette sono state matchate!</div>',
+                unsafe_allow_html=True,
+            )
+
+        # ── Debug sections — dev mode only ───────────────────────────────
+        if st.session_state.get("dev_mode", False):
+            st.markdown(f'<div style="height:0.5rem;"></div>', unsafe_allow_html=True)
+
+            # Debug: Raw text from problematic pages
+            with st.expander("Debug: Testo estratto dalle pagine problematiche"):
+                st.caption("Testo estratto direttamente dal PDF — utile per capire perche il tracking non viene riconosciuto.")
                 unrecognized_pages = [r for r in match_report.unmatched
                                       if r.unmatched_reason and r.unmatched_reason.value == "Pattern tracking non identificato"]
                 if unrecognized_pages:
-                    for result in unrecognized_pages[:5]:  # Show first 5
+                    for result in unrecognized_pages[:5]:
                         page_info = pdf_data.pages[result.page_index]
                         st.markdown(f"**Pagina {result.page_number}:**")
                         st.code(page_info.raw_text[:1000] if page_info.raw_text else "(nessun testo estratto)", language=None)
@@ -456,17 +504,17 @@ def label_sorter_page():
                 else:
                     st.info("Nessuna pagina con tracking non riconosciuto (problema di match con Excel).")
 
-            # Debug: Show fuzzy/partial matches that may need review
-            with st.expander("🔍 Debug: Match con confidenza ridotta"):
-                st.markdown("*Match trovati con metodi fuzzy o parziali (potrebbero richiedere verifica)*")
+            # Debug: Fuzzy/partial matches
+            with st.expander("Debug: Match con confidenza ridotta"):
+                st.caption("Match trovati con metodi fuzzy o parziali (potrebbero richiedere verifica)")
                 fuzzy_matches = [r for r in match_report.matched
                                  if r.match_type in (MatchType.FUZZY, MatchType.PARTIAL)]
                 if fuzzy_matches:
                     fuzzy_data = []
                     for result in fuzzy_matches:
                         match_type_label = {
-                            MatchType.FUZZY: "🔸 Fuzzy (simile)",
-                            MatchType.PARTIAL: "🔹 Parziale"
+                            MatchType.FUZZY: "Fuzzy (simile)",
+                            MatchType.PARTIAL: "Parziale"
                         }.get(result.match_type, "Altro")
 
                         fuzzy_data.append({
@@ -479,11 +527,10 @@ def label_sorter_page():
                     st.dataframe(fuzzy_data, use_container_width=True, hide_index=True)
                 else:
                     st.info("Tutti i match sono esatti (100% confidenza).")
-        else:
-            st.success("🎉 Tutte le etichette sono state matchate!")
 
-        # Button to clear results and start over
-        if st.button("🔄 Nuova elaborazione", use_container_width=True, key="new_label_sort"):
+        # ── New processing button ────────────────────────────────────────
+        st.markdown(f'<div style="height:0.5rem;"></div>', unsafe_allow_html=True)
+        if st.button("Nuova elaborazione", use_container_width=True, key="new_label_sort"):
             st.session_state.label_sorter_results = None
             st.rerun()
 
