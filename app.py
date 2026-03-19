@@ -31,7 +31,7 @@ from src.security import (
     get_debug_info, MIN_SECONDS_BETWEEN_REQUESTS
 )
 from src.config import get_secret
-from src.ui_components import get_theme_css, COLORS, render_success_banner
+from src.ui_components import get_theme_css, COLORS, render_success_banner, render_step_indicator, render_progress_bar
 
 
 # Initialize logging (only once per session)
@@ -490,23 +490,40 @@ def label_sorter_page():
 
 def zip_validator_page():
     """Page for Address Validator feature."""
-    st.markdown("# 📍 Address Validator")
-    st.markdown("*Valida e correggi indirizzi italiani con AI + Google Address Validation*")
 
-    # Quick start — always visible
-    st.info("**Come funziona:** 1. Carica il file Excel → 2. Clicca Avvia Validazione → 3. Scarica il file corretto")
+    # Initialize session state for persisting results
+    if 'zip_validation_results' not in st.session_state:
+        st.session_state.zip_validation_results = None
+
+    # ── Step indicator ────────────────────────────────────────────────────
+    has_results = st.session_state.zip_validation_results is not None
+    # We'll update current_step after determining process_button state
+    # For now, determine based on existing results
+    if has_results:
+        current_step = 3  # Risultato
+    else:
+        current_step = 1  # Carica
+    st.markdown(render_step_indicator(["Carica", "Valida", "Risultato"], current_step), unsafe_allow_html=True)
+
+    # Page title
+    st.markdown(
+        f'<h2 style="color:{COLORS["text_primary"]};margin-bottom:0.25rem;">Address Validator</h2>'
+        f'<p style="color:{COLORS["text_secondary"]};margin-top:0;margin-bottom:1.5rem;">'
+        f'Valida e correggi indirizzi italiani con AI + Google Address Validation</p>',
+        unsafe_allow_html=True,
+    )
 
     # Detailed guide — collapsed
-    with st.expander("📖 Guida dettagliata", expanded=False):
+    with st.expander("Come usare questo strumento", expanded=False):
         st.markdown("""
 **Formato file**
 - [Scarica il template](https://docs.google.com/spreadsheets/d/1eKfU6G-wzpNa8HZDcuddpJAZHEzWUKJUFw-y5LFDKOU/edit?usp=sharing) — Colonne richieste: **Street 1**, **City**, **Zip**
 - Colonne opzionali: Country, State/Province, Phone, Order Number, Cash on Delivery
 
 **Cosa viene corretto automaticamente?**
-- CAP errati o incompleti (es: "187" → "00187")
-- Vie con errori di battitura (es: "Via Roam" → "Via Roma")
-- Tipo di via errato (es: "Via 24 Maggio" → "Piazza 24 Maggio")
+- CAP errati o incompleti (es: "187" -> "00187")
+- Vie con errori di battitura (es: "Via Roam" -> "Via Roma")
+- Tipo di via errato (es: "Via 24 Maggio" -> "Piazza 24 Maggio")
 - Centro Commerciale separato in Street 2
 - Contrassegno (COD) impostato a 0
 - Telefono mancante compilato con numero default
@@ -522,54 +539,58 @@ def zip_validator_page():
 **Limiti:** Max 1.000 righe per file, 1.000 validazioni ogni 12 ore
         """)
 
-    st.markdown("---")
-
-    # Initialize session state for persisting results
-    if 'zip_validation_results' not in st.session_state:
-        st.session_state.zip_validation_results = None
-
-    # Upload
-    st.markdown("### 📊 File Indirizzi")
+    # ── Upload section ────────────────────────────────────────────────────
     excel_file = st.file_uploader(
-        "Carica il file Excel con gli indirizzi",
+        "Carica il file Excel con gli indirizzi da validare",
         type=["xlsx", "xls"],
         key="zip_excel_uploader",
         help="File con colonne: Street 1, City, Zip, Country",
         on_change=lambda: st.session_state.update({'zip_validation_results': None})
     )
 
-    # Usage info — compact bar
+    # Usage bar — remaining validations
     client_ip = get_client_ip()
     usage_stats = get_usage_stats(client_ip)
     current_usage = usage_stats.get('current_usage', 0)
     limit = usage_stats.get('limit', 1000)
     remaining = usage_stats.get('remaining', 1000)
     period_end = usage_stats.get('period_end', '00:00')
-    st.caption(f"📊 Validazioni disponibili: **{remaining}** di {limit} | Reset: {period_end}")
+    usage_pct = min(current_usage / limit * 100, 100) if limit > 0 else 0
+    usage_color = COLORS["success"] if usage_pct < 70 else (COLORS["warning"] if usage_pct < 90 else COLORS["error"])
+    st.markdown(
+        f'<div style="margin:0.5rem 0 1rem 0;">'
+        f'<div style="display:flex;justify-content:space-between;font-size:0.8rem;color:{COLORS["text_secondary"]};margin-bottom:4px;">'
+        f'<span>Validazioni disponibili: <strong>{remaining}</strong> di {limit}</span>'
+        f'<span>Reset: {period_end}</span></div>'
+        f'<div style="height:6px;background:{COLORS["border"]};border-radius:3px;overflow:hidden;">'
+        f'<div style="width:{usage_pct}%;height:100%;background:{usage_color};border-radius:3px;"></div>'
+        f'</div></div>',
+        unsafe_allow_html=True,
+    )
 
     # Advanced settings — hidden by default
     confidence_threshold = 90
     street_confidence_threshold = 85
     pin_valid = False
 
-    with st.expander("⚙️ Opzioni avanzate", expanded=False):
+    with st.expander("Opzioni avanzate", expanded=False):
         col1, col2 = st.columns(2)
         with col1:
             confidence_threshold = st.slider(
                 "Soglia auto-correzione CAP",
                 min_value=50, max_value=100, value=90, step=5,
-                help="CAP corretti automaticamente solo se confidenza ≥ soglia"
+                help="CAP corretti automaticamente solo se confidenza >= soglia"
             )
         with col2:
             street_confidence_threshold = st.slider(
                 "Soglia auto-correzione Via",
                 min_value=50, max_value=100, value=85, step=5,
-                help="Vie corrette automaticamente solo se confidenza ≥ soglia"
+                help="Vie corrette automaticamente solo se confidenza >= soglia"
             )
 
         st.markdown("---")
         pin_input = st.text_input(
-            "🔑 PIN bypass PO",
+            "PIN bypass PO",
             type="password",
             max_chars=4,
             help="Inserisci il PIN per scaricare anche senza PO valido"
@@ -581,15 +602,17 @@ def zip_validator_page():
         elif pin_valid:
             st.success("PIN corretto — validazione PO disabilitata")
 
-        st.markdown("---")
-        st.caption("🔧 Debug")
-        debug_info = get_debug_info(client_ip)
-        st.write(f"Period: `{debug_info.get('period_id', 'N/A')}` | "
-                 f"Supabase: `{debug_info.get('supabase_connected', False)}` | "
-                 f"Usage: `{debug_info.get('current_usage', 0)}/{debug_info.get('limit', 1000)}`")
+        # Debug info — only in dev mode
+        if st.session_state.get("dev_mode", False):
+            st.markdown("---")
+            st.caption("Debug")
+            debug_info = get_debug_info(client_ip)
+            st.write(f"Period: `{debug_info.get('period_id', 'N/A')}` | "
+                     f"Supabase: `{debug_info.get('supabase_connected', False)}` | "
+                     f"Usage: `{debug_info.get('current_usage', 0)}/{debug_info.get('limit', 1000)}`")
 
     process_button = st.button(
-        "🔍 Avvia Validazione",
+        "Avvia Validazione",
         type="primary",
         disabled=not excel_file,
         use_container_width=True,
@@ -599,21 +622,21 @@ def zip_validator_page():
     if process_button and excel_file:
         # Security check: file size
         if not check_file_size(excel_file, MAX_FILE_SIZE_MB):
-            st.error(f"❌ File troppo grande. Massimo: {MAX_FILE_SIZE_MB}MB")
+            st.error(f"File troppo grande. Massimo: {MAX_FILE_SIZE_MB}MB")
             st.stop()
 
         # Security check: cooldown between validations (skipped with PIN)
         if not pin_valid:
             cooldown_ok, seconds_remaining = check_cooldown()
             if not cooldown_ok:
-                st.warning(f"⏳ Attendi {seconds_remaining} secondi prima della prossima validazione.")
+                st.warning(f"Attendi {seconds_remaining} secondi prima della prossima validazione.")
                 st.stop()
 
         try:
             # Read Excel
-            with st.status("📊 Lettura file...", expanded=True) as status:
+            with st.status("Lettura file...", expanded=True) as status:
                 excel_bytes = excel_file.read()
-                st.write(f"✓ File caricato: {len(excel_bytes):,} bytes")
+                st.write(f"File caricato: {len(excel_bytes):,} bytes")
 
                 # Try to read with pandas - store working engine for consistency
                 excel_engine = None
@@ -633,31 +656,31 @@ def zip_validator_page():
                 # Security check: validate Excel content for malicious formulas
                 content_valid, content_error = validate_excel_content(df)
                 if not content_valid:
-                    st.error(f"❌ Contenuto non valido: {content_error}")
+                    st.error(f"Contenuto non valido: {content_error}")
                     record_failed_attempt(get_client_ip())
                     st.stop()
 
-                st.write(f"✓ Righe trovate: {len(df)}")
-                st.write(f"✓ Colonne: {', '.join(df.columns[:8].tolist())}...")
+                st.write(f"Righe trovate: {len(df)}")
+                st.write(f"Colonne: {', '.join(df.columns[:8].tolist())}...")
 
                 # Security check: row limit for API calls
                 if len(df) > MAX_EXCEL_ROWS:
-                    st.error(f"❌ Troppe righe ({len(df)}). Massimo: {MAX_EXCEL_ROWS} per limitare chiamate API.")
-                    st.info("💡 Suggerimento: dividi il file in batch più piccoli.")
+                    st.error(f"Troppe righe ({len(df)}). Massimo: {MAX_EXCEL_ROWS} per limitare chiamate API.")
+                    st.info("Suggerimento: dividi il file in batch piu piccoli.")
                     st.stop()
 
                 # Security check: daily API limit (skipped with PIN)
                 if pin_valid:
-                    st.write("✓ Limite API bypassato con PIN")
+                    st.write("Limite API bypassato con PIN")
                 else:
                     daily_ok, daily_msg = check_daily_api_limit(len(df))
                     if not daily_ok:
-                        st.error(f"❌ {daily_msg}")
-                        st.info("💡 Il limite si resetta a mezzanotte.")
+                        st.error(f"{daily_msg}")
+                        st.info("Il limite si resetta a mezzanotte.")
                         st.stop()
-                    st.write(f"✓ {daily_msg}")
+                    st.write(f"{daily_msg}")
 
-                status.update(label=f"✅ File letto ({len(df)} righe)", state="complete")
+                status.update(label=f"File letto ({len(df)} righe)", state="complete")
 
             # Country filtering is now handled by Claude's country detection
             # inside process_dataframe (non-IT addresses are skipped automatically)
@@ -667,7 +690,7 @@ def zip_validator_page():
             anthropic_api_key = get_secret("anthropic", "api_key")
 
             if not google_api_key:
-                st.error("❌ Google Address Validation API key non configurata")
+                st.error("Google Address Validation API key non configurata")
                 st.stop()
 
             api_mode = "Google Address Validation"
@@ -697,15 +720,15 @@ def zip_validator_page():
                     progress_frac = (current - 20) / (total - 20) if total > 20 else 1
                     if progress_frac > 0.05:
                         eta = int(elapsed / progress_frac * (1 - progress_frac))
-                        status_text.text(f"⏳ {message} (~{eta}s rimanenti)")
+                        status_text.text(f"{message} (~{eta}s rimanenti)")
                         return
-                status_text.text(f"⏳ {message}")
+                status_text.text(f"{message}")
 
             with st.spinner(f"Validazione {len(df)} indirizzi..."):
                 report, preprocessed_df = validator.process_dataframe(df, progress_callback=update_progress)
 
             progress_bar.progress(1.0)
-            status_text.text("✅ Validazione completata!")
+            status_text.text("Validazione completata!")
 
             # Generate files using preprocessed DataFrame (with C.C. moved to Street 2)
             corrected_excel = validator.generate_corrected_excel(preprocessed_df, report)
@@ -725,80 +748,94 @@ def zip_validator_page():
             record_validation_time()
 
         except Exception as e:
-            st.error(f"❌ Errore: {str(e)}")
+            st.error(f"Errore: {str(e)}")
             st.exception(e)
 
-    # Display results from session state (persists across reruns)
+    # ── Display results from session state (persists across reruns) ────────
     if st.session_state.zip_validation_results:
         results = st.session_state.zip_validation_results
         report = results['report']
 
         st.markdown("---")
-        st.markdown("## ✅ Risultato")
+
+        # Success banner
+        st.markdown(render_success_banner(
+            f"Validazione completata — {report.total_rows} indirizzi analizzati"
+        ), unsafe_allow_html=True)
         st.caption(f"Validato con: {results.get('api_mode', 'N/A')}")
 
-        # ZIP stats
-        st.markdown("#### 📮 CAP")
-        col1, col2, col3, col4 = st.columns(4)
-
-        with col1:
-            st.metric("✓ Validi", report.valid_count)
-
-        with col2:
-            st.metric("🔄 Corretti", report.corrected_count)
-
-        with col3:
-            st.metric("⚠️ Da rivedere", report.review_count)
-
-        with col4:
-            st.metric("⏭️ Saltati", report.skipped_count)
-
-        # Street stats
-        st.markdown("#### 🛣️ Vie")
-        col_s1, col_s2, col_s3 = st.columns(3)
-
-        with col_s1:
-            st.metric("✓ Verificate", report.street_verified_count)
-
-        with col_s2:
-            st.metric("🔄 Corrette", report.street_corrected_count)
-
-        with col_s3:
-            not_verified = report.total_rows - report.street_verified_count - report.street_corrected_count - report.skipped_count
-            st.metric("⚠️ Da verificare", max(0, not_verified))
-
-        # PO validation warning
-        if report.po_invalid_count > 0:
-            st.markdown("#### 🚨 Numeri Ordine (PO)")
-            if pin_valid:
-                st.warning(f"⚠️ {report.po_invalid_count} righe hanno un PO non valido o mancante (bypass attivo con PIN)")
+        # ── Progress bar replacing 7 metric boxes ─────────────────────────
+        total = report.total_rows - report.skipped_count
+        if total > 0:
+            verified = report.valid_count + report.street_verified_count
+            corrected = report.corrected_count + report.street_corrected_count
+            review_raw = max(0, total * 2 - verified - corrected)  # approximate (each row has CAP + street)
+            denominator = verified + corrected + review_raw
+            if denominator > 0:
+                verified_pct = round(verified / denominator * 100)
+                corrected_pct = round(corrected / denominator * 100)
+                review_pct = max(0, 100 - verified_pct - corrected_pct)
             else:
-                st.error(f"**ATTENZIONE:** {report.po_invalid_count} righe hanno un PO non valido o mancante!")
-                st.warning(
-                    "I PO devono essere numeri a 10 cifre che iniziano con '350' (es: 3501494822).\n\n"
-                    "Il download sarà disabilitato finché tutti i PO non saranno corretti.\n\n"
-                    "💡 Inserisci il PIN per scaricare senza PO valido."
-                )
+                verified_pct, corrected_pct, review_pct = 100, 0, 0
+        else:
+            verified_pct, corrected_pct, review_pct = 100, 0, 0
 
-        # Preview results — simplified view by default
-        st.markdown("### 📋 Dettaglio validazione")
+        st.markdown(render_progress_bar(verified=verified_pct, corrected=corrected_pct, review=review_pct), unsafe_allow_html=True)
+
+        # Breakdown chips
+        st.markdown(f"""
+<div style="display:flex;gap:8px;flex-wrap:wrap;font-size:0.8rem;margin-bottom:1rem;">
+    <span style="background:#f0fdf4;color:#15803d;padding:3px 10px;border-radius:6px;">CAP: {report.valid_count} ✓ &middot; {report.corrected_count} corretti &middot; {report.review_count} ⚠️</span>
+    <span style="background:#eef2ff;color:#4338ca;padding:3px 10px;border-radius:6px;">Vie: {report.street_verified_count} ✓ &middot; {report.street_corrected_count} corrette</span>
+    <span style="background:#f1f5f9;color:#64748b;padding:3px 10px;border-radius:6px;">{report.skipped_count} saltati</span>
+</div>
+""", unsafe_allow_html=True)
+
+        # ── PO validation warning — single red banner ─────────────────────
+        if report.po_invalid_count > 0:
+            if pin_valid:
+                st.markdown(f"""
+<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;
+            padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;gap:10px;">
+    <div style="font-size:18px;">⚠️</div>
+    <div>
+        <div style="font-weight:700;color:#d97706;">{report.po_invalid_count} PO non validi — bypass attivo con PIN</div>
+        <div style="font-size:12px;color:#92400e;">Il download è abilitato grazie al PIN inserito</div>
+    </div>
+</div>""", unsafe_allow_html=True)
+            else:
+                st.markdown(f"""
+<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:8px;
+            padding:12px 16px;margin-bottom:16px;display:flex;align-items:center;gap:10px;">
+    <div style="font-size:18px;">🚨</div>
+    <div>
+        <div style="font-weight:700;color:#dc2626;">{report.po_invalid_count} PO non validi — download bloccato</div>
+        <div style="font-size:12px;color:#991b1b;">Correggi i PO nel file originale oppure inserisci il PIN nelle opzioni avanzate</div>
+    </div>
+</div>""", unsafe_allow_html=True)
+
+        # ── Preview results with filter tabs ──────────────────────────────
+        st.markdown(
+            f'<p style="font-weight:600;color:{COLORS["text_primary"]};margin-bottom:0.5rem;">Dettaglio validazione</p>',
+            unsafe_allow_html=True,
+        )
 
         simple_data = []
         full_data = []
         for r in report.results:
             # Status emoji
             if r.is_valid and r.street_verified:
-                status = "✓"
+                row_status = "✓"
             elif r.auto_corrected or r.street_auto_corrected:
-                status = "🔄"
+                row_status = "🔄"
             elif not r.is_valid or (r.suggested_street and not r.street_verified):
-                status = "⚠️"
+                row_status = "⚠️"
             else:
-                status = "✓"
+                row_status = "✓"
 
             # Simple row — essential info only
             simple_row = {
-                "Stato": status,
+                "Stato": row_status,
                 "Città": r.city or "-",
                 "Via": r.street or "-",
                 "CAP": r.original_zip,
@@ -806,17 +843,17 @@ def zip_validator_page():
             # Show correction inline if any
             corrections = []
             if r.auto_corrected and r.suggested_zip:
-                corrections.append(f"CAP → {r.suggested_zip}")
+                corrections.append(f"CAP -> {r.suggested_zip}")
             if r.street_auto_corrected and r.suggested_street:
-                corrections.append(f"Via → {r.suggested_street}")
+                corrections.append(f"Via -> {r.suggested_street}")
             if r.po_invalid:
-                corrections.append(f"PO ❌")
+                corrections.append("PO !")
             simple_row["Correzioni"] = " | ".join(corrections) if corrections else "-"
             simple_data.append(simple_row)
 
             # Full row — all details
             full_data.append({
-                "Stato": status,
+                "Stato": row_status,
                 "Città": r.city or "-",
                 "Via Orig.": r.street or "-",
                 "Via Sugg.": r.suggested_street or "-",
@@ -824,68 +861,97 @@ def zip_validator_page():
                 "CAP Sugg.": r.suggested_zip or "-",
                 "Paese": f"{r.country_code}{'*' if r.country_detected else ''}",
                 "Tel.": "+" if r.phone_missing else "✓",
-                "COD": f"{r.original_cod}→0" if r.cod_changed else "0",
-                "PO": f"❌ {r.po_value[:15]}" if r.po_invalid else (f"✓ {r.po_extracted}" if r.po_extracted else "-"),
+                "COD": f"{r.original_cod}->0" if r.cod_changed else "0",
+                "PO": f"! {r.po_value[:15]}" if r.po_invalid else (f"✓ {r.po_extracted}" if r.po_extracted else "-"),
                 "Note": r.reason,
             })
 
         if simple_data:
             total_rows = len(simple_data)
 
+            # Filter tabs
+            filter_mode = st.radio(
+                "Filtra",
+                ["Tutti", "⚠️ Solo problemi"],
+                horizontal=True,
+                label_visibility="collapsed",
+                key="result_filter",
+            )
+
+            display_data = simple_data
+            display_full = full_data
+            if filter_mode == "⚠️ Solo problemi":
+                indices = [i for i, r in enumerate(simple_data) if r["Stato"] != "✓"]
+                display_data = [simple_data[i] for i in indices]
+                display_full = [full_data[i] for i in indices]
+
             # Show simplified table
             st.dataframe(
-                simple_data[:10],
+                display_data[:10],
                 use_container_width=True,
-                hide_index=True
+                hide_index=True,
             )
-            if total_rows > 10:
-                st.caption(f"Mostrate 10 di {total_rows} righe")
+            shown = min(10, len(display_data))
+            if len(display_data) > 10:
+                st.caption(f"Mostrate {shown} di {len(display_data)} righe"
+                           + (f" (filtrate da {total_rows})" if filter_mode != "Tutti" else ""))
+            elif filter_mode != "Tutti":
+                st.caption(f"{len(display_data)} righe con problemi su {total_rows} totali")
 
             st.caption("**Legenda:** ✓ OK | 🔄 Corretto | ⚠️ Da verificare")
 
             # Full detail in expander
-            with st.expander(f"📋 Vista completa ({total_rows} righe)"):
+            with st.expander(f"Vista completa ({len(display_data)} righe)"):
                 st.dataframe(
-                    full_data,
+                    display_full,
                     use_container_width=True,
                     hide_index=True,
-                    height=400
+                    height=400,
                 )
 
-        # Downloads - now using pre-generated files from session state
-        st.markdown("### 📥 Download")
-
-        # Disable downloads if there are invalid POs (unless PIN bypass is active)
+        # ── Downloads ─────────────────────────────────────────────────────
         download_disabled = report.po_invalid_count > 0 and not pin_valid
-        if download_disabled:
-            st.error("⛔ Download disabilitato: correggi prima i PO non validi nel file originale")
 
         col_dl1, col_dl2 = st.columns(2)
 
         with col_dl1:
             st.download_button(
-                label="📄 Scarica File Corretto",
+                label="Scarica File Corretto (.xlsx)",
                 data=results['corrected_excel'],
                 file_name=f"indirizzi_corretti_{results['timestamp']}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
                 key="download_corrected",
-                disabled=download_disabled
+                disabled=download_disabled,
             )
 
         with col_dl2:
             st.download_button(
-                label="📋 Scarica Report Revisione",
+                label="Scarica Report Revisione (.xlsx)",
                 data=results['review_excel'],
                 file_name=f"report_revisione_{results['timestamp']}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 use_container_width=True,
                 key="download_review",
-                disabled=download_disabled
+                disabled=download_disabled,
             )
 
+        # ── Debug sections — dev mode only ────────────────────────────────
+        if st.session_state.get("dev_mode", False):
+            with st.expander("Debug: Dettagli report"):
+                st.json({
+                    "total_rows": report.total_rows,
+                    "valid_count": report.valid_count,
+                    "corrected_count": report.corrected_count,
+                    "review_count": report.review_count,
+                    "skipped_count": report.skipped_count,
+                    "street_verified_count": report.street_verified_count,
+                    "street_corrected_count": report.street_corrected_count,
+                    "po_invalid_count": report.po_invalid_count,
+                })
+
         # Button to clear results and start over
-        if st.button("🔄 Nuova validazione", use_container_width=True):
+        if st.button("Nuova validazione", use_container_width=True):
             st.session_state.zip_validation_results = None
             st.rerun()
 
