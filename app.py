@@ -31,7 +31,7 @@ from src.security import (
     get_debug_info, MIN_SECONDS_BETWEEN_REQUESTS
 )
 from src.config import get_secret
-from src.ui_components import get_theme_css
+from src.ui_components import get_theme_css, COLORS, render_success_banner
 
 
 # Initialize logging (only once per session)
@@ -1030,17 +1030,17 @@ def send_pickup_request(
 
 
 def address_book_management():
-    """Address book management UI (expander)."""
-    with st.expander("📒 Gestione Rubrica Indirizzi", expanded=False):
+    """Address book management UI — compact popover-style within a popover."""
+    with st.popover("📒 Gestisci rubrica", use_container_width=True):
         addresses = load_addresses()
 
         # Add new address form
         if st.session_state.get('show_add_address_form', False):
-            st.markdown("#### ➕ Nuovo Indirizzo")
+            st.markdown(f'<p style="font-weight:600;color:{COLORS["text_primary"]};margin-bottom:0.5rem;">Nuovo indirizzo</p>', unsafe_allow_html=True)
             with st.form("add_address_form"):
                 new_name = st.text_input("Nome indirizzo *", placeholder="Es: Magazzino Bologna")
                 new_company = st.text_input("Azienda *", value="Estée Lauder")
-                new_contact_name = st.text_input("Nome e Cognome referente", placeholder="Mario Rossi")
+                new_contact_name = st.text_input("Referente", placeholder="Mario Rossi")
                 new_street = st.text_input("Indirizzo *", placeholder="Via Emilia 50")
 
                 col1, col2, col3 = st.columns([1, 2, 1])
@@ -1049,18 +1049,18 @@ def address_book_management():
                 with col2:
                     new_city = st.text_input("Città *", placeholder="Bologna")
                 with col3:
-                    new_province = st.text_input("Provincia", placeholder="BO", max_chars=2)
+                    new_province = st.text_input("Prov.", placeholder="BO", max_chars=2)
 
                 new_reference = st.text_input("Telefono", placeholder="051 123456")
                 new_is_default = st.checkbox("Imposta come predefinito")
 
                 col_save, col_cancel = st.columns(2)
                 with col_save:
-                    if st.form_submit_button("💾 Salva", use_container_width=True):
+                    if st.form_submit_button("Salva", use_container_width=True):
                         if not new_name or not new_company or not new_street or not new_zip or not new_city:
-                            st.error("❌ Compila tutti i campi obbligatori")
+                            st.error("Compila tutti i campi obbligatori")
                         elif not new_zip.isdigit() or len(new_zip) != 5:
-                            st.error("❌ CAP deve essere di 5 cifre")
+                            st.error("CAP deve essere di 5 cifre")
                         else:
                             result = add_address(
                                 name=new_name,
@@ -1075,70 +1075,94 @@ def address_book_management():
                             )
                             if result:
                                 st.session_state.show_add_address_form = False
-                                st.success("✅ Indirizzo aggiunto!")
+                                st.success("Indirizzo aggiunto!")
                                 st.rerun()
                             else:
-                                st.error("❌ Nome indirizzo già esistente")
+                                st.error("Nome indirizzo già esistente")
                 with col_cancel:
                     if st.form_submit_button("Annulla", use_container_width=True):
                         st.session_state.show_add_address_form = False
                         st.rerun()
         else:
-            if st.button("➕ Aggiungi indirizzo", use_container_width=True):
+            if st.button("+ Aggiungi indirizzo", use_container_width=True):
                 st.session_state.show_add_address_form = True
                 st.rerun()
 
-        # List existing addresses
+        # List existing addresses — compact
         if addresses:
-            st.markdown("---")
             for addr in addresses:
-                with st.container():
-                    col_info, col_actions = st.columns([3, 1])
-
-                    with col_info:
-                        prefix = "⭐" if addr.is_default else "📍"
-                        default_label = " **(PREDEFINITO)**" if addr.is_default else ""
-                        st.markdown(f"**{prefix} {addr.name}**{default_label}")
-                        st.caption(f"{addr.company}")
-                        if addr.contact_name:
-                            st.caption(f"Referente: {addr.contact_name}")
-                        st.caption(f"{addr.street}, {addr.zip} {addr.city} ({addr.province})")
-                        if addr.reference:
-                            st.caption(f"Tel: {addr.reference}")
-
-                    with col_actions:
+                col_info, col_actions = st.columns([4, 1])
+                with col_info:
+                    prefix = "⭐" if addr.is_default else "📍"
+                    sec_color = COLORS["text_secondary"]
+                    prov_str = f" ({addr.province})" if addr.province else ""
+                    st.markdown(
+                        f"**{prefix} {addr.name}** — {addr.company}  \n"
+                        f"<small style='color:{sec_color}'>"
+                        f"{addr.street}, {addr.zip} {addr.city}{prov_str}"
+                        f"</small>",
+                        unsafe_allow_html=True
+                    )
+                with col_actions:
+                    btn_cols = st.columns(2)
+                    with btn_cols[0]:
                         if not addr.is_default:
                             if st.button("⭐", key=f"default_{addr.id}", help="Imposta predefinito"):
                                 set_default_address(addr.id)
                                 st.rerun()
+                    with btn_cols[1]:
                         if len(addresses) > 1:
                             if st.button("🗑️", key=f"delete_{addr.id}", help="Elimina"):
                                 delete_address(addr.id)
                                 st.rerun()
 
-                    st.markdown("---")
+
+def _section_header(title: str) -> None:
+    """Render a styled card-section header."""
+    st.markdown(
+        f'<div style="font-size:0.95rem;font-weight:600;color:{COLORS["text_primary"]};'
+        f'padding-bottom:0.5rem;margin-bottom:0.5rem;border-bottom:1px solid {COLORS["border"]};">'
+        f'{title}</div>',
+        unsafe_allow_html=True,
+    )
+
+
+def _carrier_tile_css() -> str:
+    """Return CSS for carrier selection tiles."""
+    return f"""<style>
+    div[data-testid="stHorizontalBlock"] .carrier-tile {{
+        border: 2px solid {COLORS["border"]};
+        border-radius: 10px;
+        padding: 0.75rem 0.5rem;
+        text-align: center;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        background: {COLORS["card"]};
+    }}
+    div[data-testid="stHorizontalBlock"] .carrier-tile.selected {{
+        border-color: {COLORS["primary"]};
+        background: {COLORS["primary_light"]};
+    }}
+    </style>"""
 
 
 def pickup_request_page():
-    """Page for Courier Pickup Request feature."""
-    st.markdown("# 🚚 Richiesta Ritiro Corriere")
-    st.markdown("*Richiedi un ritiro merce ai corrieri*")
+    """Page for Courier Pickup Request feature — card-based layout."""
 
-    # User guide
-    st.info(
-        "**Come usare questo strumento:**\n"
-        "- Seleziona un indirizzo dalla rubrica o inseriscine uno nuovo\n"
-        "- Compila i dettagli del ritiro e invia la richiesta"
+    # Page title
+    st.markdown(
+        f'<h2 style="color:{COLORS["text_primary"]};margin-bottom:0.25rem;">Richiesta Ritiro Corriere</h2>'
+        f'<p style="color:{COLORS["text_secondary"]};margin-top:0;margin-bottom:1.5rem;">'
+        f'Compila i campi e invia la richiesta di ritiro</p>',
+        unsafe_allow_html=True,
     )
 
     # Check if Supabase is configured
     if not is_sheets_configured():
         st.warning(
-            "⚠️ **Rubrica non configurata**: La rubrica indirizzi richiede Supabase. "
+            "Rubrica non configurata: La rubrica indirizzi richiede Supabase. "
             "Configura le credenziali in Streamlit Secrets per salvare gli indirizzi."
         )
-
-    st.markdown("---")
 
     # Initialize session state
     if 'pickup_request_sent' not in st.session_state:
@@ -1146,25 +1170,66 @@ def pickup_request_page():
     if 'selected_address_id' not in st.session_state:
         default_addr = get_default_address()
         st.session_state.selected_address_id = default_addr.id if default_addr else None
+    if 'selected_carrier' not in st.session_state:
+        st.session_state.selected_carrier = "FedEx"
+    if 'show_notes' not in st.session_state:
+        st.session_state.show_notes = False
 
     # Show success message and reset button if request was sent
     if st.session_state.pickup_request_sent:
-        st.success("✅ Richiesta inviata con successo!")
-        st.info("📧 Richiesta inviata tramite Zapier")
-        if st.button("🔄 Nuova richiesta", use_container_width=True):
+        st.markdown(render_success_banner("Richiesta di ritiro inviata con successo!"), unsafe_allow_html=True)
+        st.info("La richiesta è stata inoltrata tramite Zapier.")
+        if st.button("Nuova richiesta", use_container_width=True):
             st.session_state.pickup_request_sent = False
             st.rerun()
         return
 
-    # Address book management (expander)
-    address_book_management()
+    # ── CARD 1: Carrier + Date/Time ──────────────────────────────────────
+    _section_header("Corriere e Data")
 
-    # Load addresses for selection
+    col_carrier, col_datetime = st.columns([3, 2], gap="large")
+
+    with col_carrier:
+        st.markdown(
+            f'<p style="font-size:0.85rem;color:{COLORS["text_secondary"]};margin-bottom:0.5rem;">Seleziona corriere</p>',
+            unsafe_allow_html=True,
+        )
+        carrier_options = ["FedEx", "DHL", "UPS"]
+        carrier_cols = st.columns(3)
+        for i, c_name in enumerate(carrier_options):
+            with carrier_cols[i]:
+                is_selected = st.session_state.selected_carrier == c_name
+                btn_type = "primary" if is_selected else "secondary"
+                if st.button(c_name, key=f"carrier_{c_name}", use_container_width=True, type=btn_type):
+                    st.session_state.selected_carrier = c_name
+                    st.rerun()
+
+    carrier = st.session_state.selected_carrier
+
+    with col_datetime:
+        pickup_date = st.date_input(
+            "Data ritiro",
+            value=date.today() + timedelta(days=1),
+            min_value=date.today(),
+            key="pickup_date",
+        )
+        tc1, tc2 = st.columns(2)
+        with tc1:
+            time_start = st.time_input("Dalle", value=time(9, 0), key="time_start")
+        with tc2:
+            time_end = st.time_input("Alle", value=time(18, 0), key="time_end")
+
+    st.markdown(f'<div style="height:1rem;"></div>', unsafe_allow_html=True)
+
+    # ── CARD 2: Address ──────────────────────────────────────────────────
+    _section_header("Indirizzo ritiro")
+
+    # Address book popover + address selection
     addresses = load_addresses()
 
     # Build address options for dropdown
     address_options = {get_address_display_name(addr): addr.id for addr in addresses}
-    address_options["➕ Nuovo indirizzo (inserimento manuale)"] = "new"
+    address_options["Nuovo indirizzo (inserimento manuale)"] = "new"
 
     # Get current selection
     current_selection = None
@@ -1173,16 +1238,20 @@ def pickup_request_page():
             current_selection = display_name
             break
     if current_selection is None:
-        current_selection = list(address_options.keys())[0] if addresses else "➕ Nuovo indirizzo (inserimento manuale)"
+        current_selection = list(address_options.keys())[0] if addresses else "Nuovo indirizzo (inserimento manuale)"
 
-    # Address selection (outside form for reactivity)
-    st.markdown("### 📍 Indirizzo Ritiro")
-    selected_display = st.selectbox(
-        "Seleziona indirizzo:",
-        options=list(address_options.keys()),
-        index=list(address_options.keys()).index(current_selection) if current_selection in address_options else 0,
-        key="address_selector"
-    )
+    addr_header_col, addr_book_col = st.columns([3, 1])
+    with addr_header_col:
+        selected_display = st.selectbox(
+            "Seleziona indirizzo",
+            options=list(address_options.keys()),
+            index=list(address_options.keys()).index(current_selection) if current_selection in address_options else 0,
+            key="address_selector",
+            label_visibility="collapsed",
+        )
+    with addr_book_col:
+        address_book_management()
+
     selected_address_id = address_options[selected_display]
     st.session_state.selected_address_id = selected_address_id
 
@@ -1190,50 +1259,8 @@ def pickup_request_page():
     selected_address = get_address_by_id(selected_address_id) if selected_address_id != "new" else None
     is_from_book = selected_address is not None
 
-    # Show address preview if from book
     if is_from_book:
-        st.info(f"📍 **{selected_address.company}** - {get_address_summary(selected_address)}")
-
-    # Carrier selection (outside form for reactivity)
-    st.markdown("### 🚛 Corriere")
-    carrier = st.radio(
-        "Seleziona il corriere:",
-        options=["FedEx", "DHL", "UPS"],
-        horizontal=True,
-        key="carrier"
-    )
-
-    # Date and time section
-    st.markdown("### 📅 Data e Orario")
-    col_date, col_time_start, col_time_end = st.columns(3)
-
-    with col_date:
-        pickup_date = st.date_input(
-            "Data ritiro *",
-            value=date.today() + timedelta(days=1),
-            min_value=date.today(),
-            key="pickup_date"
-        )
-
-    with col_time_start:
-        time_start = st.time_input(
-            "Orario inizio *",
-            value=time(9, 0),
-            key="time_start"
-        )
-
-    with col_time_end:
-        time_end = st.time_input(
-            "Orario fine *",
-            value=time(18, 0),
-            key="time_end"
-        )
-
-    # Address fields - pre-filled if from book, editable if new
-    st.markdown("### 📍 Dettagli Indirizzo")
-
-    if is_from_book:
-        st.caption("🔒 Indirizzo selezionato dalla rubrica")
+        # Compact address summary card
         company = selected_address.company
         contact_name = selected_address.contact_name
         address = selected_address.street
@@ -1242,125 +1269,83 @@ def pickup_request_page():
         province = selected_address.province
         reference = selected_address.reference
 
-        # Show read-only display using markdown (avoids caching issues with disabled inputs)
-        col1, col2 = st.columns(2)
-        with col1:
-            st.markdown(f"**Azienda:** {company}")
-            st.markdown(f"**Referente:** {contact_name if contact_name else '-'}")
-            st.markdown(f"**Indirizzo:** {address}")
-        with col2:
-            st.markdown(f"**CAP / Città:** {zip_code} {city} ({province})")
-            st.markdown(f"**Telefono:** {reference if reference else '-'}")
+        addr_lines = [f"**{company}**"]
+        if contact_name:
+            addr_lines.append(f"Ref: {contact_name}")
+        addr_lines.append(f"{address}, {zip_code} {city}" + (f" ({province})" if province else ""))
+        if reference:
+            addr_lines.append(f"Tel: {reference}")
+
+        st.markdown(
+            f'<div style="background:{COLORS["primary_light"]};border:1px solid {COLORS["primary_border"]};'
+            f'border-radius:8px;padding:0.75rem 1rem;margin-top:0.25rem;">'
+            f'<span style="font-size:0.9rem;color:{COLORS["text_primary"]};">'
+            + "<br>".join(addr_lines)
+            + f'</span></div>',
+            unsafe_allow_html=True,
+        )
     else:
-        company = st.text_input(
-            "Azienda *",
-            value="Estée Lauder",
-            key="company"
-        )
-
-        contact_name = st.text_input(
-            "Nome e Cognome referente",
-            placeholder="Mario Rossi",
-            key="contact_name"
-        )
-
-        address = st.text_input(
-            "Indirizzo *",
-            placeholder="Via Turati 3",
-            key="address"
-        )
+        # New address — inline form fields
+        company = st.text_input("Azienda *", value="Estée Lauder", key="company")
+        contact_name = st.text_input("Referente", placeholder="Mario Rossi", key="contact_name")
+        address = st.text_input("Indirizzo *", placeholder="Via Turati 3", key="address")
 
         col_zip, col_city, col_province = st.columns([1, 2, 1])
-
         with col_zip:
-            zip_code = st.text_input(
-                "CAP *",
-                placeholder="20121",
-                max_chars=5,
-                key="zip_code"
-            )
-
+            zip_code = st.text_input("CAP *", placeholder="20121", max_chars=5, key="zip_code")
         with col_city:
-            city = st.text_input(
-                "Città *",
-                placeholder="Milano",
-                key="city"
-            )
-
+            city = st.text_input("Città *", placeholder="Milano", key="city")
         with col_province:
-            province = st.text_input(
-                "Provincia",
-                placeholder="MI",
-                max_chars=2,
-                key="province"
-            )
+            province = st.text_input("Prov.", placeholder="MI", max_chars=2, key="province")
 
-        reference = st.text_input(
-            "Telefono",
-            placeholder="02 1234567",
-            key="reference"
-        )
+        reference = st.text_input("Telefono", placeholder="02 1234567", key="reference")
 
-    # Package details section
-    st.markdown("### 📦 Dettagli Colli")
+    st.markdown(f'<div style="height:1rem;"></div>', unsafe_allow_html=True)
+
+    # ── CARD 3: Package Details ──────────────────────────────────────────
+    _section_header("Dettagli colli")
 
     col_packages, col_weight = st.columns(2)
-
     with col_packages:
         num_packages = st.number_input(
-            "Numero colli *",
-            min_value=1,
-            value=1,
-            step=1,
-            key="num_packages"
+            "Numero colli",
+            min_value=1, value=1, step=1,
+            key="num_packages",
         )
-
     with col_weight:
         weight_per_package = st.number_input(
-            "Peso singolo collo (kg) *",
-            min_value=0.1,
-            value=1.0,
-            step=0.5,
-            key="weight_per_package"
+            "Peso per collo (kg)",
+            min_value=0.1, value=1.0, step=0.5,
+            key="weight_per_package",
         )
 
-    st.markdown("**Dimensioni singolo collo (cm):** *")
-    col_l, col_w, col_h = st.columns(3)
-
-    with col_l:
-        length = st.number_input(
-            "Lunghezza *",
-            min_value=0.0,
-            value=0.0,
-            step=1.0,
-            key="length"
-        )
-
-    with col_w:
-        width = st.number_input(
-            "Larghezza *",
-            min_value=0.0,
-            value=0.0,
-            step=1.0,
-            key="width"
-        )
-
-    with col_h:
-        height = st.number_input(
-            "Altezza *",
-            min_value=0.0,
-            value=0.0,
-            step=1.0,
-            key="height"
-        )
-
-    # Pallet section
-    st.markdown("### 🎨 Pallet")
-
-    use_pallet = st.checkbox(
-        "Raggruppamento su pallet",
-        key="use_pallet"
+    st.markdown(
+        f'<p style="font-size:0.85rem;color:{COLORS["text_secondary"]};margin-bottom:0.25rem;">Dimensioni collo (cm)</p>',
+        unsafe_allow_html=True,
     )
+    dim_cols = st.columns([2, 0.3, 2, 0.3, 2])
+    with dim_cols[0]:
+        length = st.number_input("L", min_value=0.0, value=0.0, step=1.0, key="length", label_visibility="collapsed")
+    with dim_cols[1]:
+        st.markdown(f'<p style="text-align:center;padding-top:0.5rem;color:{COLORS["text_muted"]};">x</p>', unsafe_allow_html=True)
+    with dim_cols[2]:
+        width = st.number_input("W", min_value=0.0, value=0.0, step=1.0, key="width", label_visibility="collapsed")
+    with dim_cols[3]:
+        st.markdown(f'<p style="text-align:center;padding-top:0.5rem;color:{COLORS["text_muted"]};">x</p>', unsafe_allow_html=True)
+    with dim_cols[4]:
+        height = st.number_input("H", min_value=0.0, value=0.0, step=1.0, key="height", label_visibility="collapsed")
+
+    # Dimension labels below inputs
+    lbl_cols = st.columns([2, 0.3, 2, 0.3, 2])
+    with lbl_cols[0]:
+        st.caption("Lunghezza")
+    with lbl_cols[2]:
+        st.caption("Larghezza")
+    with lbl_cols[4]:
+        st.caption("Altezza")
+
+    # Pallet toggle
+    use_pallet = st.toggle("Raggruppamento su pallet", key="use_pallet")
 
     num_pallets = 0
     pallet_length = 0.0
@@ -1369,72 +1354,76 @@ def pickup_request_page():
 
     if use_pallet:
         num_pallets = st.number_input(
-            "Numero pallet *",
-            min_value=1,
-            value=1,
-            step=1,
-            key="num_pallets"
+            "Numero pallet", min_value=1, value=1, step=1, key="num_pallets"
         )
 
-        st.markdown("**Dimensioni pallet (cm):** *")
-        col_pl, col_pw, col_ph = st.columns(3)
+        st.markdown(
+            f'<p style="font-size:0.85rem;color:{COLORS["text_secondary"]};margin-bottom:0.25rem;">Dimensioni pallet (cm)</p>',
+            unsafe_allow_html=True,
+        )
+        pal_cols = st.columns([2, 0.3, 2, 0.3, 2])
+        with pal_cols[0]:
+            pallet_length = st.number_input("PL", min_value=0.0, value=120.0, step=1.0, key="pallet_length", label_visibility="collapsed")
+        with pal_cols[1]:
+            st.markdown(f'<p style="text-align:center;padding-top:0.5rem;color:{COLORS["text_muted"]};">x</p>', unsafe_allow_html=True)
+        with pal_cols[2]:
+            pallet_width = st.number_input("PW", min_value=0.0, value=80.0, step=1.0, key="pallet_width", label_visibility="collapsed")
+        with pal_cols[3]:
+            st.markdown(f'<p style="text-align:center;padding-top:0.5rem;color:{COLORS["text_muted"]};">x</p>', unsafe_allow_html=True)
+        with pal_cols[4]:
+            pallet_height = st.number_input("PH", min_value=0.0, value=0.0, step=1.0, key="pallet_height", label_visibility="collapsed")
 
-        with col_pl:
-            pallet_length = st.number_input(
-                "Lunghezza pallet *",
-                min_value=0.0,
-                value=120.0,  # Standard EUR pallet
-                step=1.0,
-                key="pallet_length"
-            )
+        plbl_cols = st.columns([2, 0.3, 2, 0.3, 2])
+        with plbl_cols[0]:
+            st.caption("Lunghezza")
+        with plbl_cols[2]:
+            st.caption("Larghezza")
+        with plbl_cols[4]:
+            st.caption("Altezza")
 
-        with col_pw:
-            pallet_width = st.number_input(
-                "Larghezza pallet *",
-                min_value=0.0,
-                value=80.0,  # Standard EUR pallet
-                step=1.0,
-                key="pallet_width"
-            )
+    st.markdown(f'<div style="height:1rem;"></div>', unsafe_allow_html=True)
 
-        with col_ph:
-            pallet_height = st.number_input(
-                "Altezza pallet *",
-                min_value=0.0,
-                value=0.0,
-                step=1.0,
-                key="pallet_height"
-            )
+    # ── CARD 4 (optional): Notes ─────────────────────────────────────────
+    show_notes = st.toggle("+ Aggiungi note", key="show_notes")
+    notes = ""
+    if show_notes:
+        notes = st.text_area(
+            "Note per il corriere",
+            placeholder="Eventuali note aggiuntive...",
+            key="notes",
+        )
 
-    # Notes section
-    st.markdown("### 📝 Note")
-    notes = st.text_area(
-        "Note aggiuntive",
-        placeholder="Eventuali note per il corriere...",
-        key="notes"
-    )
+    st.markdown(f'<div style="height:1rem;"></div>', unsafe_allow_html=True)
 
-    # Dynamic Summary section (outside form - updates in real-time)
-    st.markdown("### 📊 Riepilogo")
+    # ── Summary + Submit Bar ─────────────────────────────────────────────
     total_weight = num_packages * weight_per_package
     shipment_type = "FREIGHT" if total_weight > 70 else "NORMAL"
 
-    col_summary1, col_summary2 = st.columns(2)
-    with col_summary1:
-        st.metric("Peso totale", f"{total_weight:.1f} kg")
-    with col_summary2:
-        st.metric("Tipo spedizione", f"{shipment_type}")
+    summary_col, submit_col = st.columns([3, 1])
+
+    with summary_col:
+        weight_color = COLORS["error"] if total_weight > 70 else COLORS["text_primary"]
+        type_badge_bg = COLORS["error"] if shipment_type == "FREIGHT" else COLORS["primary"]
+        st.markdown(
+            f'<div style="display:flex;align-items:center;gap:1.5rem;padding:0.75rem 0;">'
+            f'<span style="font-size:0.9rem;color:{COLORS["text_secondary"]};">Peso totale: '
+            f'<strong style="color:{weight_color};">{total_weight:.1f} kg</strong></span>'
+            f'<span style="background:{type_badge_bg};color:#fff;padding:2px 10px;border-radius:12px;'
+            f'font-size:0.8rem;font-weight:600;">{shipment_type}</span>'
+            + (f'<span style="font-size:0.9rem;color:{COLORS["text_secondary"]};">Pallet: {num_pallets}</span>' if use_pallet else "")
+            + f'</div>',
+            unsafe_allow_html=True,
+        )
 
     if total_weight > 70:
-        st.warning("⚠️ Peso superiore a 70 kg - Spedizione FREIGHT")
+        st.warning("Peso superiore a 70 kg — spedizione classificata FREIGHT")
 
     # Submit button in a form for proper submission handling
-    st.markdown("---")
     with st.form("pickup_request_form"):
         submitted = st.form_submit_button(
-            "📧 Invia Richiesta",
+            "Invia Richiesta",
             type="primary",
-            use_container_width=True
+            use_container_width=True,
         )
 
         if submitted:
@@ -1500,7 +1489,7 @@ def pickup_request_page():
                         pallet_length=pallet_length,
                         pallet_width=pallet_width,
                         pallet_height=pallet_height,
-                        notes=notes or ""
+                        notes=notes or "",
                     )
 
                 if success:
