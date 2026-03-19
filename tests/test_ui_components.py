@@ -98,7 +98,9 @@ class TestProgressBar:
     def test_render_progress_bar_percentages(self):
         html = render_progress_bar(verified=82, corrected=15, review=3)
         assert "82%" in html
-        assert "#22c55e" in html
+        assert "#22c55e" in html  # green for verified
+        assert "#6366f1" in html  # indigo for corrected
+        assert "#f59e0b" in html  # amber for review
 
     def test_render_progress_bar_empty(self):
         html = render_progress_bar(verified=0, corrected=0, review=0)

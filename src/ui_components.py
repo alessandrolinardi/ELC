@@ -14,13 +14,13 @@ COLORS = {
     "primary_border": "#c7d2fe",
     "success": "#22c55e",
     "warning": "#f59e0b",
-    "error": "#ef4444",
+    "error": "#dc2626",
     "background": "#f8f9fc",
     "card": "#ffffff",
     "border": "#e5e7eb",
-    "text_primary": "#1e293b",
-    "text_secondary": "#475569",
-    "text_muted": "#94a3b8",
+    "text_primary": "#0f172a",
+    "text_secondary": "#64748b",
+    "text_muted": "#9ca3af",
 }
 
 # ---------------------------------------------------------------------------
@@ -303,9 +303,9 @@ def render_progress_bar(verified: int, corrected: int, review: int) -> str:
     verified : int
         Percentage of verified items (green).
     corrected : int
-        Percentage of auto-corrected items (amber).
+        Percentage of auto-corrected items (indigo).
     review : int
-        Percentage of items needing review (red).
+        Percentage of items needing review (amber).
 
     Returns an empty string when all values are zero.
     """
@@ -322,13 +322,13 @@ def render_progress_bar(verified: int, corrected: int, review: int) -> str:
         )
     if corrected > 0:
         segments.append(
-            f'<div style="width:{corrected}%;background:{COLORS["warning"]};height:100%;'
+            f'<div style="width:{corrected}%;background:{COLORS["primary"]};height:100%;'
             f'display:flex;align-items:center;justify-content:center;'
             f'color:#fff;font-size:0.7rem;font-weight:600;">{corrected}%</div>'
         )
     if review > 0:
         segments.append(
-            f'<div style="width:{review}%;background:{COLORS["error"]};height:100%;'
+            f'<div style="width:{review}%;background:{COLORS["warning"]};height:100%;'
             f'border-radius:0 4px 4px 0;display:flex;align-items:center;justify-content:center;'
             f'color:#fff;font-size:0.7rem;font-weight:600;">{review}%</div>'
         )
@@ -341,7 +341,7 @@ def render_progress_bar(verified: int, corrected: int, review: int) -> str:
         f'background:{COLORS["border"]};">{bar}</div>'
         f'<div style="display:flex;justify-content:space-between;margin-top:0.35rem;font-size:0.75rem;">'
         f'<span style="color:{COLORS["success"]};">✅ Verificati {verified}%</span>'
-        f'<span style="color:{COLORS["warning"]};">🔧 Corretti {corrected}%</span>'
-        f'<span style="color:{COLORS["error"]};">⚠️ Da rivedere {review}%</span>'
+        f'<span style="color:{COLORS["primary"]};">🔧 Corretti {corrected}%</span>'
+        f'<span style="color:{COLORS["warning"]};">⚠️ Da rivedere {review}%</span>'
         f'</div></div>'
     )
