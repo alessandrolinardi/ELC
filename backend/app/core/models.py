@@ -11,6 +11,7 @@ class ParsedAddress:
     location_info: str       # "C.C. Le Grange", ""
     country_code: str        # "IT", "DE", "FR"
     confidence: str          # "high", "medium", "low"
+    parse_method: str = "ai"  # "ai" or "regex"
 
     @property
     def street_with_number(self) -> str:
@@ -71,4 +72,5 @@ class ParsingMetrics:
     claude_failed_verify: int = 0
     regex_fallback: int = 0
     batch_failures: int = 0
+    batch_retries_succeeded: int = 0
     prompt_version: str = ""
