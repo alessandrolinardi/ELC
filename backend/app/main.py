@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
-from .routers import health, jobs, addresses, pickup
+from .routers import health, jobs, addresses, pickup, labels
 
 
 @asynccontextmanager
@@ -48,3 +48,4 @@ app.include_router(health.router, prefix="/api/v1")
 app.include_router(jobs.router, prefix="/api/v1")
 app.include_router(addresses.router, prefix="/api/v1")
 app.include_router(pickup.router, prefix="/api/v1")
+app.include_router(labels.router, prefix="/api/v1")
