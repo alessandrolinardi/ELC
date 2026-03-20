@@ -320,15 +320,6 @@ class ZipValidator:
         """
         logger.info(f"Starting address validation for {len(df)} rows")
 
-        results = []
-        valid_count = 0
-        corrected_count = 0
-        review_count = 0
-        skipped_count = 0
-        street_verified_count = 0
-        street_corrected_count = 0
-        po_invalid_count = 0
-
         col_map = self._map_columns(df)
         logger.debug(f"Column mapping: {col_map}")
 
@@ -337,10 +328,6 @@ class ZipValidator:
                 f"Missing required columns. Found: {list(df.columns)}\n"
                 f"Need: City, Zip"
             )
-
-        has_country_col = col_map.get('country') is not None
-        has_state_col = col_map.get('state') is not None
-        total = len(df)
 
         # --- Step 1: Claude batch parse all addresses ---
         if progress_callback:
@@ -361,7 +348,39 @@ class ZipValidator:
         logger.info(f"Parsing complete: {self.address_parser.metrics.claude_parsed} by Claude, "
                      f"{self.address_parser.metrics.regex_fallback} by regex")
 
-        # --- Step 2: Validate each address ---
+        # Step 2: Validate (delegated)
+        return self._validate_addresses(df, parsed_addresses, progress_callback)
+
+    def _validate_addresses(
+        self,
+        df: pd.DataFrame,
+        parsed_addresses: list,
+        progress_callback: Optional[Callable[[int, int, str], None]] = None
+    ) -> tuple:
+        """Run Google validation on pre-parsed addresses. Skips parsing step.
+
+        Args:
+            df: Original DataFrame with address data
+            parsed_addresses: List of ParsedAddress objects (one per row)
+            progress_callback: Optional callback(current, total, message)
+
+        Returns:
+            tuple[ValidationReport, pd.DataFrame] — same as process_dataframe()
+        """
+        results = []
+        valid_count = 0
+        corrected_count = 0
+        review_count = 0
+        skipped_count = 0
+        street_verified_count = 0
+        street_corrected_count = 0
+        po_invalid_count = 0
+
+        col_map = self._map_columns(df)
+        has_country_col = col_map.get('country') is not None
+        has_state_col = col_map.get('state') is not None
+        total = len(df)
+
         for i, (idx, row) in enumerate(df.iterrows()):
             if progress_callback:
                 pct = 20 + int((i + 1) / total * 80)
