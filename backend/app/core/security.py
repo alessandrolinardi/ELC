@@ -103,6 +103,9 @@ def check_rate_limit(ip: str, rows_to_validate: int) -> Tuple[bool, str, dict]:
     """
     Check if request is within rate limits.
 
+    Note: TOCTOU race exists under concurrent load. Acceptable for internal tool
+    with low concurrency. For strict enforcement, use Supabase atomic increment.
+
     Returns:
         (is_allowed, message, usage_info)
     """

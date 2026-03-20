@@ -84,8 +84,8 @@ def setup_logging(
         enable_console: Abilita output su console (default: True)
         enable_streamlit: Abilita buffer per Streamlit UI (default: True)
     """
-    # Configura il root logger per il package src
-    root_logger = logging.getLogger('src')
+    # Configura il root logger per il package app.core
+    root_logger = logging.getLogger('app.core')
     root_logger.setLevel(level)
 
     # Rimuovi handler esistenti per evitare duplicati

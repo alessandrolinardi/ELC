@@ -21,7 +21,7 @@ def _process_validation(
     excel_bytes: bytes,
     confidence: int,
     street_confidence: int,
-    bypass_pin: str,
+    pin_valid: bool,
     client_ip: str,
 ):
     """Run address validation in background thread."""
@@ -43,7 +43,6 @@ def _process_validation(
             return
 
         # Rate limit check
-        pin_valid = bool(settings.bypass_pin) and bypass_pin == settings.bypass_pin
         if not pin_valid:
             allowed, message, _ = check_rate_limit(client_ip, len(df))
             if not allowed:
@@ -138,12 +137,15 @@ async def create_validator_job(
 
     client_ip = request.client.host if request.client else "unknown"
 
+    # Validate bypass_pin in request handler (not in background thread)
+    pin_valid = bool(settings.bypass_pin) and bypass_pin == settings.bypass_pin
+
     # Create job and run in background
     job_id = job_store.create_job("validator")
     loop = asyncio.get_running_loop()
     loop.run_in_executor(
         None, _process_validation, job_id, content,
-        confidence_threshold, street_confidence_threshold, bypass_pin, client_ip,
+        confidence_threshold, street_confidence_threshold, pin_valid, client_ip,
     )
 
     return {"ok": True, "data": {"job_id": job_id}}

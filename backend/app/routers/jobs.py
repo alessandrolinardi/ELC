@@ -38,4 +38,11 @@ async def download_file(job_id: str, filename: str):
     suffix = path.suffix.lower()
     media_type = media_types.get(suffix, "application/octet-stream")
 
-    return FileResponse(path, media_type=media_type, filename=filename)
+    try:
+        return FileResponse(path, media_type=media_type, filename=filename)
+    except (FileNotFoundError, OSError):
+        raise HTTPException(
+            status_code=404,
+            detail={"ok": False, "error": {"code": "FILE_NOT_FOUND",
+                    "message": "File expired during download."}}
+        )

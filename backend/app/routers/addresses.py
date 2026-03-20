@@ -24,7 +24,7 @@ async def list_addresses(request: Request):
     ).model_dump() for a in addresses]}
 
 
-@router.post("/addresses")
+@router.post("/addresses", status_code=201)
 @limiter.limit("100/hour")
 async def create_address(request: Request, body: AddressCreate):
     result = add_address(
@@ -58,10 +58,20 @@ async def update_address_endpoint(request: Request, address_id: str, body: Addre
 @router.delete("/addresses/{address_id}")
 @limiter.limit("100/hour")
 async def delete_address_endpoint(request: Request, address_id: str):
+    addr = get_address_by_id(address_id)
+    if addr is None:
+        raise HTTPException(status_code=404, detail={
+            "ok": False, "error": {"code": "NOT_FOUND", "message": "Address not found"}
+        })
+    addresses = load_addresses()
+    if len(addresses) <= 1:
+        raise HTTPException(status_code=409, detail={
+            "ok": False, "error": {"code": "LAST_ADDRESS", "message": "Cannot delete the last address"}
+        })
     success = delete_address(address_id)
     if not success:
-        raise HTTPException(status_code=400, detail={
-            "ok": False, "error": {"code": "DELETE_FAILED", "message": "Cannot delete (last address or not found)"}
+        raise HTTPException(status_code=500, detail={
+            "ok": False, "error": {"code": "DELETE_FAILED", "message": "Failed to delete address"}
         })
     return {"ok": True, "data": {"deleted": True}}
 
@@ -69,9 +79,14 @@ async def delete_address_endpoint(request: Request, address_id: str):
 @router.put("/addresses/{address_id}/default")
 @limiter.limit("100/hour")
 async def set_default(request: Request, address_id: str):
-    success = set_default_address(address_id)
-    if not success:
+    addr = get_address_by_id(address_id)
+    if addr is None:
         raise HTTPException(status_code=404, detail={
             "ok": False, "error": {"code": "NOT_FOUND", "message": "Address not found"}
+        })
+    success = set_default_address(address_id)
+    if not success:
+        raise HTTPException(status_code=500, detail={
+            "ok": False, "error": {"code": "UPDATE_FAILED", "message": "Failed to set default"}
         })
     return {"ok": True, "data": {"default": True}}

@@ -17,10 +17,23 @@ limiter = Limiter(key_func=get_remote_address)
 router = APIRouter()
 
 
-def _process_labels(job_id: str, pdf_bytes: bytes, excel_bytes: bytes, excel_filename: str, sort_method: str):
+def _process_labels(job_id: str, pdf_file_bytes_list: list[bytes], excel_bytes: bytes, excel_filename: str, sort_method: str):
     """Run label processing in background thread."""
     settings = get_settings()
     try:
+        # Merge PDFs if multiple (done here to avoid blocking event loop)
+        import fitz
+        if len(pdf_file_bytes_list) == 1:
+            pdf_bytes = pdf_file_bytes_list[0]
+        else:
+            merged = fitz.open()
+            for content in pdf_file_bytes_list:
+                doc = fitz.open(stream=content, filetype="pdf")
+                merged.insert_pdf(doc)
+                doc.close()
+            pdf_bytes = merged.tobytes()
+            merged.close()
+
         pdf_processor = PDFProcessor()
         excel_parser = ExcelParser()
 
@@ -32,6 +45,14 @@ def _process_labels(job_id: str, pdf_bytes: bytes, excel_bytes: bytes, excel_fil
 
         # Parse Excel
         excel_data = excel_parser.parse_excel(excel_bytes, excel_filename)
+
+        # Validate raw Excel content
+        import pandas as pd, io
+        df = pd.read_excel(io.BytesIO(excel_bytes))
+        content_valid, content_error = validate_excel_content(df)
+        if not content_valid:
+            job_store.update_status(job_id, "failed", error=f"Invalid content: {content_error}")
+            return
 
         # Match
         matcher = Matcher(pdf_data, excel_data)
@@ -111,28 +132,25 @@ async def create_label_job(
             "ok": False, "error": {"code": "FILE_TOO_LARGE", "message": f"Excel file exceeds {settings.max_file_size_mb}MB"}
         })
 
-    # Merge PDFs if multiple
-    import fitz
-    if len(pdf_files) == 1:
-        await pdf_files[0].seek(0)
-        pdf_bytes = await pdf_files[0].read()
-    else:
-        merged = fitz.open()
-        for f in pdf_files:
-            await f.seek(0)
-            content = await f.read()
-            doc = fitz.open(stream=content, filetype="pdf")
-            merged.insert_pdf(doc)
-            doc.close()
-        pdf_bytes = merged.tobytes()
-        merged.close()
+    # Validate sort_method
+    if sort_method not in ("excel_order", "order_id_numeric"):
+        raise HTTPException(status_code=422, detail={
+            "ok": False, "error": {"code": "INVALID_SORT_METHOD",
+            "message": f"sort_method must be 'excel_order' or 'order_id_numeric', got '{sort_method}'"}
+        })
 
-    # Create job and run in background
+    # Read all PDF file bytes (async reads are fine here)
+    pdf_file_bytes_list = []
+    for f in pdf_files:
+        await f.seek(0)
+        pdf_file_bytes_list.append(await f.read())
+
+    # Create job and run in background (PDF merge happens in background thread)
     job_id = job_store.create_job("labels")
     excel_filename = sanitize_filename(excel_file.filename or "upload.xlsx")
     loop = asyncio.get_running_loop()
     loop.run_in_executor(
-        None, _process_labels, job_id, pdf_bytes, excel_content, excel_filename, sort_method
+        None, _process_labels, job_id, pdf_file_bytes_list, excel_content, excel_filename, sort_method
     )
 
     return {"ok": True, "data": {"job_id": job_id}}
