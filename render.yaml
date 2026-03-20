@@ -1,21 +1,13 @@
 services:
   - type: web
-    name: elc-tools
+    name: elc-api
     runtime: python
     plan: starter
-    buildCommand: pip install -r requirements.txt
-    startCommand: >-
-      streamlit run app.py
-      --server.port $PORT
-      --server.address 0.0.0.0
-      --server.headless true
-      --server.enableCORS false
-      --server.enableXsrfProtection true
-    healthCheckPath: /_stcore/health
-    autoDeploy: true
+    region: frankfurt
+    buildCommand: cd backend && pip install -r requirements.txt
+    startCommand: cd backend && uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/v1/health
     envVars:
-      - key: PYTHON_VERSION
-        value: "3.11.11"
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: GOOGLE_ADDRESS_VALIDATION_API_KEY
@@ -27,4 +19,23 @@ services:
       - key: ZAPIER_WEBHOOK_URL
         sync: false
       - key: BYPASS_PIN
+        sync: false
+      - key: FRONTEND_URL
+        sync: false
+
+  - type: web
+    name: elc-frontend
+    runtime: static
+    buildCommand: cd frontend && npm ci && npm run build
+    staticPublishPath: frontend/dist
+    headers:
+      - path: /*
+        name: Cache-Control
+        value: public, max-age=3600
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: VITE_API_URL
         sync: false
