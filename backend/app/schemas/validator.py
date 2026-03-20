@@ -31,3 +31,48 @@ class ValidatorJobStatus(BaseModel):
     progress: Optional[dict] = None
     result: Optional[ValidatorJobResult] = None
     error: Optional[str] = None
+
+
+# --- Two-phase flow schemas ---
+
+class ParsedRowOriginal(BaseModel):
+    street: str
+    city: str
+    zip: str
+
+
+class ParsedRowComponents(BaseModel):
+    street_prefix: str = ""
+    street_name: str = ""
+    house_number: str = ""
+    location_info: str = ""
+    country_code: str = "IT"
+
+
+class ParsedRow(BaseModel):
+    index: int
+    original: ParsedRowOriginal
+    parsed: ParsedRowOriginal  # reassembled for display
+    parsed_components: ParsedRowComponents
+    method: str  # "ai" or "regex"
+    changed: bool
+    changes: list[str] = []
+    edited: bool = False
+
+
+class ParsingSummary(BaseModel):
+    total: int
+    ai_parsed: int
+    regex_fallback: int
+    ai_modified: int
+    unchanged: int
+
+
+class ParsedJobResult(BaseModel):
+    parsing_summary: ParsingSummary
+    rows: list[ParsedRow]
+
+
+class ConfirmRequest(BaseModel):
+    edits: dict[str, dict[str, str]] = {}
+    retry_regex_rows: bool = False
