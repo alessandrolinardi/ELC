@@ -7,6 +7,7 @@ import { DimensionsInput } from "@/components/DimensionsInput"
 import { SuccessBanner } from "@/components/SuccessBanner"
 import { AddressCombobox } from "@/components/AddressCombobox"
 import { AddressDrawer } from "@/components/AddressDrawer"
+import { TimeSelect } from "@/components/TimeSelect"
 import { useAddresses } from "@/hooks/useAddresses"
 import { useDevMode } from "@/hooks/useDevMode"
 import { Button } from "@/components/ui/button"
@@ -220,27 +221,17 @@ export default function PickupRequest() {
                   className="mt-1.5"
                 />
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label htmlFor="time_start" className="text-sm text-muted-foreground">Dalle</Label>
-                  <Input
-                    id="time_start"
-                    type="time"
-                    value={form.time_start.slice(0, 5)}
-                    onChange={(e) => update("time_start", e.target.value + ":00")}
-                    className="mt-1"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="time_end" className="text-sm text-muted-foreground">Alle</Label>
-                  <Input
-                    id="time_end"
-                    type="time"
-                    value={form.time_end.slice(0, 5)}
-                    onChange={(e) => update("time_end", e.target.value + ":00")}
-                    className="mt-1"
-                  />
-                </div>
+              <div className="flex gap-3">
+                <TimeSelect
+                  value={form.time_start.slice(0, 5)}
+                  onChange={(t) => update("time_start", t + ":00")}
+                  label="Dalle"
+                />
+                <TimeSelect
+                  value={form.time_end.slice(0, 5)}
+                  onChange={(t) => update("time_end", t + ":00")}
+                  label="Alle"
+                />
               </div>
             </div>
           </div>
