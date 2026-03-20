@@ -218,7 +218,14 @@ def validate_excel_content(df) -> Tuple[bool, Optional[str]]:
     Validate Excel content for security issues.
     """
     MAX_CELL_LENGTH = 1000
-    SUSPICIOUS_PATTERNS = ['=CMD(', '=SYSTEM(', '=EXEC(', '=HYPERLINK(', '=IMPORTXML(']
+    SUSPICIOUS_PATTERNS = [
+        "=CMD(", "=SYSTEM(", "=EXEC(", "=CALL(",
+        "=IMPORTDATA(", "=IMPORTXML(", "=IMPORTRANGE(",
+        "=IMPORTFEED(", "=IMAGE(", "=WEBSERVICE(",
+        "+CMD", "-CMD", "@CMD",
+        "+SYSTEM", "-SYSTEM", "@SYSTEM",
+        "|'/C", "CMD|", "POWERSHELL|",
+    ]
 
     try:
         for col in df.columns:

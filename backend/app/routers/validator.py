@@ -140,7 +140,8 @@ async def create_validator_job(
 
     # Create job and run in background
     job_id = job_store.create_job("validator")
-    asyncio.get_event_loop().run_in_executor(
+    loop = asyncio.get_running_loop()
+    loop.run_in_executor(
         None, _process_validation, job_id, content,
         confidence_threshold, street_confidence_threshold, bypass_pin, client_ip,
     )

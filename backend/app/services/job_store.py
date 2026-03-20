@@ -22,10 +22,9 @@ class JobStore:
 
     def create_job(self, job_type: str) -> str:
         with self._lock:
-            # Check capacity
-            active = sum(1 for j in self._jobs.values() if j["status"] == "processing")
-            if active >= self._max_jobs:
-                raise RuntimeError(f"Max concurrent jobs ({self._max_jobs}) reached")
+            # Check capacity (count ALL jobs, not just processing)
+            if len(self._jobs) >= self._max_jobs:
+                raise RuntimeError(f"Max jobs ({self._max_jobs}) reached")
 
             job_id = str(uuid.uuid4())
             job_dir = self._base_dir / job_id
@@ -77,12 +76,21 @@ class JobStore:
             return {**job}
 
     def save_file(self, job_id: str, filename: str, data: bytes):
-        job_dir = self._base_dir / job_id
-        job_dir.mkdir(parents=True, exist_ok=True)
-        (job_dir / filename).write_bytes(data)
+        with self._lock:
+            if job_id not in self._jobs:
+                return  # job was cleaned up, don't write
+            job_dir = self._base_dir / job_id
+            job_dir.mkdir(parents=True, exist_ok=True)
+            (job_dir / filename).write_bytes(data)
 
     def get_file_path(self, job_id: str, filename: str) -> Optional[Path]:
-        path = self._base_dir / job_id / filename
+        safe_name = Path(filename).name  # strips directory components
+        if not safe_name:
+            return None
+        path = (self._base_dir / job_id / safe_name).resolve()
+        expected_root = (self._base_dir / job_id).resolve()
+        if not str(path).startswith(str(expected_root)):
+            return None
         if path.exists():
             return path
         return None

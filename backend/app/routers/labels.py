@@ -130,7 +130,8 @@ async def create_label_job(
     # Create job and run in background
     job_id = job_store.create_job("labels")
     excel_filename = sanitize_filename(excel_file.filename or "upload.xlsx")
-    asyncio.get_event_loop().run_in_executor(
+    loop = asyncio.get_running_loop()
+    loop.run_in_executor(
         None, _process_labels, job_id, pdf_bytes, excel_content, excel_filename, sort_method
     )
 
