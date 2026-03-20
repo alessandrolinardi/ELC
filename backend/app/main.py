@@ -1,5 +1,6 @@
 """FastAPI application entry point."""
 import asyncio
+import logging
 import os
 from contextlib import asynccontextmanager
 
@@ -12,6 +13,13 @@ from slowapi.middleware import SlowAPIMiddleware
 from .config import get_settings, APP_VERSION
 from .limiter import limiter
 from .routers import health, jobs, addresses, pickup, labels, validator
+
+# Suppress noisy health check logs from uvicorn
+class _HealthCheckFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        return "/api/v1/health" not in record.getMessage()
+
+logging.getLogger("uvicorn.access").addFilter(_HealthCheckFilter())
 
 
 @asynccontextmanager
