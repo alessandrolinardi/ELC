@@ -1,15 +1,9 @@
 import { Routes, Route, Navigate } from "react-router-dom"
 import { NavBar } from "@/components/layout/NavBar"
 import PickupRequest from "@/pages/PickupRequest"
+import AddressValidator from "@/pages/AddressValidator"
 
-// Placeholder pages -- replaced in Tasks 7-8
-function AddressValidatorPage() {
-  return (
-    <div className="max-w-[var(--max-width-content)] mx-auto px-4 py-8">
-      <h1 className="text-xl font-bold">Validator (coming soon)</h1>
-    </div>
-  )
-}
+// Placeholder page -- replaced in Task 8
 function LabelSorterPage() {
   return (
     <div className="max-w-[var(--max-width-content)] mx-auto px-4 py-8">
@@ -25,7 +19,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Navigate to="/pickup" replace />} />
         <Route path="/pickup" element={<PickupRequest />} />
-        <Route path="/validator" element={<AddressValidatorPage />} />
+        <Route path="/validator" element={<AddressValidator />} />
         <Route path="/labels" element={<LabelSorterPage />} />
       </Routes>
     </div>
