@@ -5,6 +5,8 @@ import { PageShell } from "@/components/layout/PageShell"
 import { CarrierTile } from "@/components/CarrierTile"
 import { DimensionsInput } from "@/components/DimensionsInput"
 import { SuccessBanner } from "@/components/SuccessBanner"
+import { AddressCombobox } from "@/components/AddressCombobox"
+import { AddressDrawer } from "@/components/AddressDrawer"
 import { useAddresses } from "@/hooks/useAddresses"
 import { useDevMode } from "@/hooks/useDevMode"
 import { Button } from "@/components/ui/button"
@@ -13,11 +15,12 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Badge } from "@/components/ui/badge"
 import type { PickupRequestData, PickupResponse, Address } from "@/lib/types"
+import type { ManualAddressData } from "@/components/AddressCombobox"
 
 const CARRIERS = [
-  { name: "FedEx", icon: "\uD83D\uDCE6" },
-  { name: "DHL", icon: "\u2708\uFE0F" },
-  { name: "UPS", icon: "\uD83D\uDE9A" },
+  { name: "FedEx" },
+  { name: "DHL" },
+  { name: "UPS" },
 ] as const
 
 const DEFAULT_FORM: PickupRequestData = {
@@ -49,14 +52,22 @@ export default function PickupRequest() {
   const [isDevMode] = useDevMode()
   const [form, setForm] = useState<PickupRequestData>(DEFAULT_FORM)
   const [showNotes, setShowNotes] = useState(false)
-  const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null)
+  const [selectedAddress, setSelectedAddress] = useState<Address | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
+  const [drawerOpen, setDrawerOpen] = useState(false)
 
-  const { addresses, isLoading: addressesLoading } = useAddresses()
+  const {
+    addresses,
+    isLoading: addressesLoading,
+    createAddress,
+    updateAddress,
+    deleteAddress,
+    setDefault,
+  } = useAddresses()
 
   // Auto-populate from selected address
   const selectAddress = (addr: Address) => {
-    setSelectedAddressId(addr.id)
+    setSelectedAddress(addr)
     setForm((prev) => ({
       ...prev,
       company: addr.company,
@@ -69,10 +80,59 @@ export default function PickupRequest() {
     }))
   }
 
+  // Handle manual address entry (use without saving)
+  const handleManualEntry = (data: ManualAddressData) => {
+    setSelectedAddress(null)
+    setForm((prev) => ({
+      ...prev,
+      company: data.company,
+      contact_name: data.contact_name,
+      address: data.address,
+      zip_code: data.zip_code,
+      city: data.city,
+      province: data.province,
+      reference: data.reference,
+    }))
+  }
+
+  // Handle save to address book and use
+  const handleSaveAndUse = async (data: Parameters<typeof createAddress>[0]) => {
+    const result = await createAddress(data)
+    // After saving, the addresses list will refresh; find and select the new one
+    // We use the returned id to find it once the query refreshes
+    // For now, populate the form directly from the data
+    setForm((prev) => ({
+      ...prev,
+      company: data.company,
+      contact_name: data.contact_name ?? "",
+      address: data.street,
+      zip_code: data.zip_code,
+      city: data.city,
+      province: data.province ?? "",
+      reference: data.reference ?? "",
+    }))
+    // The new address will appear after the query refetch; try to select it
+    if (result && "id" in result) {
+      const newAddr: Address = {
+        id: result.id,
+        name: data.name,
+        company: data.company,
+        contact_name: data.contact_name ?? "",
+        street: data.street,
+        zip: data.zip_code,
+        city: data.city,
+        province: data.province ?? "",
+        reference: data.reference ?? "",
+        is_default: data.is_default ?? false,
+      }
+      setSelectedAddress(newAddr)
+    }
+  }
+
   // Auto-select default address on load
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useMemo(() => {
-    if (addresses.length > 0 && !selectedAddressId) {
+    if (addresses.length > 0 && !selectedAddress) {
       const defaultAddr = addresses.find((a) => a.is_default) || addresses[0]
       selectAddress(defaultAddr)
     }
@@ -113,7 +173,7 @@ export default function PickupRequest() {
             onClick={() => {
               setSuccessMessage(null)
               setForm(DEFAULT_FORM)
-              setSelectedAddressId(null)
+              setSelectedAddress(null)
             }}
           >
             Nuova richiesta
@@ -139,7 +199,6 @@ export default function PickupRequest() {
                   <CarrierTile
                     key={c.name}
                     carrier={c.name}
-                    icon={c.icon}
                     selected={form.carrier === c.name}
                     onClick={() => update("carrier", c.name as PickupRequestData["carrier"])}
                   />
@@ -193,62 +252,17 @@ export default function PickupRequest() {
             <Label className="text-sm font-semibold text-foreground">
               Indirizzo ritiro
             </Label>
-            {/* TODO: Address book manager dialog */}
           </div>
 
-          {/* Address selector */}
-          {addressesLoading ? (
-            <p className="text-sm text-muted-foreground">Caricamento indirizzi...</p>
-          ) : addresses.length > 0 ? (
-            <div className="space-y-3">
-              <select
-                value={selectedAddressId || ""}
-                onChange={(e) => {
-                  const addr = addresses.find((a) => a.id === e.target.value)
-                  if (addr) selectAddress(addr)
-                }}
-                className="w-full rounded-md border border-border px-3 py-2 text-sm bg-card"
-              >
-                {addresses.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.name} — {a.company}, {a.street}, {a.zip} {a.city}
-                  </option>
-                ))}
-              </select>
-            </div>
-          ) : (
-            /* Manual entry fallback */
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label className="text-xs text-muted-foreground">Azienda</Label>
-                <Input value={form.company} onChange={(e) => update("company", e.target.value)} className="mt-1" />
-              </div>
-              <div>
-                <Label className="text-xs text-muted-foreground">Contatto</Label>
-                <Input value={form.contact_name} onChange={(e) => update("contact_name", e.target.value)} className="mt-1" />
-              </div>
-              <div className="col-span-2">
-                <Label className="text-xs text-muted-foreground">Indirizzo</Label>
-                <Input value={form.address} onChange={(e) => update("address", e.target.value)} className="mt-1" />
-              </div>
-              <div>
-                <Label className="text-xs text-muted-foreground">CAP</Label>
-                <Input value={form.zip_code} onChange={(e) => update("zip_code", e.target.value)} className="mt-1" />
-              </div>
-              <div>
-                <Label className="text-xs text-muted-foreground">Citta</Label>
-                <Input value={form.city} onChange={(e) => update("city", e.target.value)} className="mt-1" />
-              </div>
-              <div>
-                <Label className="text-xs text-muted-foreground">Provincia</Label>
-                <Input value={form.province} onChange={(e) => update("province", e.target.value)} className="mt-1" />
-              </div>
-              <div>
-                <Label className="text-xs text-muted-foreground">Riferimento</Label>
-                <Input value={form.reference} onChange={(e) => update("reference", e.target.value)} className="mt-1" />
-              </div>
-            </div>
-          )}
+          <AddressCombobox
+            addresses={addresses}
+            selectedAddress={selectedAddress}
+            onSelect={selectAddress}
+            onManualEntry={handleManualEntry}
+            onOpenDrawer={() => setDrawerOpen(true)}
+            onSaveAndUse={handleSaveAndUse}
+            isLoading={addressesLoading}
+          />
         </div>
 
         {/* Card 3: Packages */}
@@ -409,6 +423,29 @@ export default function PickupRequest() {
           </details>
         )}
       </div>
+
+      {/* Address Book Drawer */}
+      <AddressDrawer
+        open={drawerOpen}
+        onClose={() => setDrawerOpen(false)}
+        addresses={addresses}
+        onAdd={async (data) => {
+          await createAddress(data)
+        }}
+        onUpdate={async (id, data) => {
+          await updateAddress({ id, data })
+        }}
+        onDelete={async (id) => {
+          await deleteAddress(id)
+          // If the deleted address was selected, clear selection
+          if (selectedAddress?.id === id) {
+            setSelectedAddress(null)
+          }
+        }}
+        onSetDefault={async (id) => {
+          await setDefault(id)
+        }}
+      />
     </PageShell>
   )
 }

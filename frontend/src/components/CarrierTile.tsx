@@ -1,19 +1,24 @@
 import { cn } from "@/lib/utils"
+import fedexLogo from "@/assets/carriers/fedex.svg"
+import dhlLogo from "@/assets/carriers/dhl.svg"
+import upsLogo from "@/assets/carriers/ups.svg"
 
 interface CarrierTileProps {
   carrier: string
-  icon: string
+  icon?: string
   selected: boolean
   onClick: () => void
 }
 
-const carrierIcons: Record<string, string> = {
-  FedEx: "\uD83D\uDCE6",
-  DHL: "\u2708\uFE0F",
-  UPS: "\uD83D\uDE9A",
+const carrierLogos: Record<string, string> = {
+  FedEx: fedexLogo,
+  DHL: dhlLogo,
+  UPS: upsLogo,
 }
 
-export function CarrierTile({ carrier, icon, selected, onClick }: CarrierTileProps) {
+export function CarrierTile({ carrier, selected, onClick }: CarrierTileProps) {
+  const logo = carrierLogos[carrier]
+
   return (
     <button
       type="button"
@@ -25,7 +30,15 @@ export function CarrierTile({ carrier, icon, selected, onClick }: CarrierTilePro
           : "border-border bg-card hover:border-indigo-border hover:shadow-[var(--shadow-card)]"
       )}
     >
-      <span className="text-3xl mb-2">{icon || carrierIcons[carrier] || "\uD83D\uDCE6"}</span>
+      {logo ? (
+        <img
+          src={logo}
+          alt={`${carrier} logo`}
+          className="h-8 mb-2 object-contain"
+        />
+      ) : (
+        <span className="text-3xl mb-2">&#128230;</span>
+      )}
       <span
         className={cn(
           "text-sm font-semibold",
