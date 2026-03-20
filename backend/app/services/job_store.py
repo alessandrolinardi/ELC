@@ -1,11 +1,111 @@
-"""Job storage — stub for Task 1, full implementation in Task 2."""
+"""Job storage — in-memory index + disk for result files."""
+import shutil
+import time
+import uuid
+from pathlib import Path
+from threading import Lock
+from typing import Optional
 
 
-class _JobStoreStub:
-    """Minimal stub so the app can start. Full implementation in Task 2."""
+class JobStore:
+    def __init__(
+        self,
+        base_dir: str = "/tmp/elc-jobs",
+        ttl_seconds: int = 3600,
+        max_jobs: int = 50,
+    ):
+        self._base_dir = Path(base_dir)
+        self._ttl = ttl_seconds
+        self._max_jobs = max_jobs
+        self._jobs: dict[str, dict] = {}
+        self._lock = Lock()
+
+    def create_job(self, job_type: str) -> str:
+        with self._lock:
+            # Check capacity
+            active = sum(1 for j in self._jobs.values() if j["status"] == "processing")
+            if active >= self._max_jobs:
+                raise RuntimeError(f"Max concurrent jobs ({self._max_jobs}) reached")
+
+            job_id = str(uuid.uuid4())
+            job_dir = self._base_dir / job_id
+            job_dir.mkdir(parents=True, exist_ok=True)
+
+            self._jobs[job_id] = {
+                "job_type": job_type,
+                "status": "processing",
+                "result": None,
+                "error": None,
+                "progress": None,
+                "created_at": time.time(),
+            }
+            return job_id
+
+    def update_status(
+        self,
+        job_id: str,
+        status: str,
+        result: Optional[dict] = None,
+        error: Optional[str] = None,
+    ):
+        with self._lock:
+            if job_id not in self._jobs:
+                return
+            self._jobs[job_id]["status"] = status
+            if result is not None:
+                self._jobs[job_id]["result"] = result
+            if error is not None:
+                self._jobs[job_id]["error"] = error
+
+    def update_progress(
+        self, job_id: str, current: int, total: int, message: str = ""
+    ):
+        with self._lock:
+            if job_id not in self._jobs:
+                return
+            self._jobs[job_id]["progress"] = {
+                "current": current,
+                "total": total,
+                "message": message,
+            }
+
+    def get_status(self, job_id: str) -> Optional[dict]:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                return None
+            return {**job}
+
+    def save_file(self, job_id: str, filename: str, data: bytes):
+        job_dir = self._base_dir / job_id
+        job_dir.mkdir(parents=True, exist_ok=True)
+        (job_dir / filename).write_bytes(data)
+
+    def get_file_path(self, job_id: str, filename: str) -> Optional[Path]:
+        path = self._base_dir / job_id / filename
+        if path.exists():
+            return path
+        return None
 
     def cleanup_expired(self):
-        pass
+        now = time.time()
+        with self._lock:
+            expired = [
+                jid for jid, j in self._jobs.items()
+                if now - j["created_at"] > self._ttl
+            ]
+            for jid in expired:
+                del self._jobs[jid]
+                job_dir = self._base_dir / jid
+                if job_dir.exists():
+                    shutil.rmtree(job_dir, ignore_errors=True)
+
+    def cleanup_all(self):
+        with self._lock:
+            self._jobs.clear()
+        if self._base_dir.exists():
+            shutil.rmtree(self._base_dir, ignore_errors=True)
 
 
-job_store = _JobStoreStub()
+# Singleton instance
+job_store = JobStore()
