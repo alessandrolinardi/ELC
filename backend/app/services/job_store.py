@@ -111,9 +111,13 @@ class JobStore:
     def cleanup_all(self):
         with self._lock:
             self._jobs.clear()
-        if self._base_dir.exists():
-            shutil.rmtree(self._base_dir, ignore_errors=True)
+            if self._base_dir.exists():
+                shutil.rmtree(self._base_dir, ignore_errors=True)
 
 
-# Singleton instance
-job_store = JobStore()
+def _make_job_store() -> "JobStore":
+    from ..config import get_settings
+    s = get_settings()
+    return JobStore(ttl_seconds=s.job_ttl_seconds, max_jobs=s.max_concurrent_jobs)
+
+job_store = _make_job_store()

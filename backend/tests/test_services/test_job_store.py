@@ -1,3 +1,4 @@
+import threading
 import time
 from pathlib import Path
 from app.services.job_store import JobStore
@@ -79,4 +80,44 @@ class TestJobStore:
         time.sleep(1.5)
         store.cleanup_expired()
         assert store.get_status(job_id) is None
+        store.cleanup_all()
+
+    def test_concurrent_create_jobs(self):
+        """Verify thread safety of create_job under concurrent access."""
+        store = JobStore(base_dir="/tmp/elc-test-concurrent", ttl_seconds=60, max_jobs=10)
+        results = []
+        errors = []
+
+        def create():
+            try:
+                job_id = store.create_job("test")
+                results.append(job_id)
+            except RuntimeError:
+                errors.append(True)
+
+        threads = [threading.Thread(target=create) for _ in range(15)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        # Should have exactly 10 successes and 5 failures
+        assert len(results) == 10
+        assert len(errors) == 5
+        # All job IDs should be unique
+        assert len(set(results)) == 10
+        store.cleanup_all()
+
+    def test_cleanup_removes_files_from_disk(self):
+        store = JobStore(base_dir="/tmp/elc-test-cleanup-files", ttl_seconds=1)
+        job_id = store.create_job("test")
+        store.save_file(job_id, "test.pdf", b"data")
+        path = store.get_file_path(job_id, "test.pdf")
+        assert path is not None and path.exists()
+
+        time.sleep(1.5)
+        store.cleanup_expired()
+
+        assert store.get_status(job_id) is None
+        assert not path.exists()
         store.cleanup_all()

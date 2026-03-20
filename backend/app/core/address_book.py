@@ -394,7 +394,7 @@ def get_address_summary(address: Address) -> str:
 def is_sheets_configured() -> bool:
     """
     Check if Supabase is properly configured.
-    Uses centralized config which checks both env vars (Render) and st.secrets (local dev).
+    Uses centralized config to check if Supabase credentials are available via environment variables.
 
     Returns:
         True if configured, False otherwise

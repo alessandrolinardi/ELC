@@ -1,10 +1,9 @@
 """Label Sorter endpoints."""
 import asyncio
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request
-from slowapi import Limiter
-from slowapi.util import get_remote_address
 
 from ..config import get_settings
+from ..limiter import limiter
 from ..services.job_store import job_store
 from ..core.pdf_processor import PDFProcessor
 from ..core.excel_parser import ExcelParser, ExcelParserError
@@ -13,7 +12,6 @@ from ..core.sorter import Sorter, SortMethod
 from ..core.label_report import generate_csv_report
 from ..core.security import validate_excel_content, sanitize_filename
 
-limiter = Limiter(key_func=get_remote_address)
 router = APIRouter()
 
 

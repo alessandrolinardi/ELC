@@ -6,12 +6,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
-from slowapi.util import get_remote_address
 
-from .config import get_settings
+from .config import get_settings, APP_VERSION
+from .limiter import limiter
 from .routers import health, jobs, addresses, pickup, labels, validator
 
 
@@ -35,7 +34,7 @@ async def _periodic_cleanup():
 
 app = FastAPI(
     title="ELC Tools API",
-    version="3.0.0",
+    version=APP_VERSION,
     lifespan=lifespan,
 )
 
@@ -49,7 +48,6 @@ app.add_middleware(
 )
 
 # Rate limiting
-limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 app.add_middleware(SlowAPIMiddleware)
 

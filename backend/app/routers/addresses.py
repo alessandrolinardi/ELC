@@ -1,15 +1,13 @@
 """Address Book CRUD endpoints."""
 from fastapi import APIRouter, HTTPException, Request
-from slowapi import Limiter
-from slowapi.util import get_remote_address
 
+from ..limiter import limiter
 from ..core.address_book import (
     load_addresses, add_address, update_address, delete_address,
     get_address_by_id, set_default_address
 )
 from ..schemas.addresses import AddressCreate, AddressUpdate, AddressResponse
 
-limiter = Limiter(key_func=get_remote_address)
 router = APIRouter()
 
 

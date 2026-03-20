@@ -4,6 +4,8 @@ from functools import lru_cache
 from pydantic import ConfigDict
 from pydantic_settings import BaseSettings
 
+APP_VERSION = "3.0.0"
+
 
 class Settings(BaseSettings):
     model_config = ConfigDict(env_file=".env")
