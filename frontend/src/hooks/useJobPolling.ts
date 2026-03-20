@@ -43,9 +43,9 @@ export function useJobPolling<T = unknown>(
     },
     enabled: !!jobId,
     refetchInterval: (query) => {
-      // Stop polling once terminal
+      // Stop polling once terminal or at review step
       const data = query.state.data
-      if (data?.status === "complete" || data?.status === "failed") {
+      if (data?.status === "complete" || data?.status === "failed" || data?.status === "parsed") {
         return false
       }
       return interval
@@ -78,6 +78,7 @@ export function useJobPolling<T = unknown>(
       !!jobId &&
       query.data?.status !== "complete" &&
       query.data?.status !== "failed" &&
+      query.data?.status !== "parsed" &&
       !isExpired,
     isExpired,
   }

@@ -11,11 +11,57 @@ export interface JobProgress {
 }
 
 export interface JobStatus<T = unknown> {
-  status: "processing" | "complete" | "failed"
+  status: "processing" | "processing_parse" | "parsed" | "processing_validate" | "complete" | "failed"
   job_type: string
   progress: JobProgress | null
   result: T | null
   error: string | null
+  config?: Record<string, unknown>
+}
+
+// --- Parsed Address Types (Validator Phase 1) ---
+
+export interface ParsedRowData {
+  street: string
+  city: string
+  zip: string
+}
+
+export interface ParsedRowComponents {
+  street_prefix: string
+  street_name: string
+  house_number: string
+  location_info: string
+  country_code: string
+}
+
+export interface ParsedRow {
+  index: number
+  original: ParsedRowData
+  parsed: ParsedRowData
+  parsed_components: ParsedRowComponents
+  method: "ai" | "regex"
+  changed: boolean
+  changes: string[]
+  edited?: boolean
+}
+
+export interface ParsingSummary {
+  total: number
+  ai_parsed: number
+  regex_fallback: number
+  ai_modified: number
+  unchanged: number
+}
+
+export interface ParsedJobResult {
+  parsing_summary: ParsingSummary
+  rows: ParsedRow[]
+}
+
+export interface ConfirmRequest {
+  edits: Record<string, Record<string, string>>
+  retry_regex_rows: boolean
 }
 
 // --- Label Sorter ---

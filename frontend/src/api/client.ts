@@ -118,3 +118,15 @@ export const api = {
     return `${BASE_URL}/api/v1/jobs/${jobId}/files/${filename}`
   },
 }
+
+// --- Convenience wrappers ---
+
+import type { ConfirmRequest } from "@/lib/types"
+
+/** Confirm validation: send edits and trigger Phase 2 (Google validation) */
+export async function confirmValidation(
+  jobId: string,
+  body: ConfirmRequest
+): Promise<{ status: string }> {
+  return api.post<{ status: string }>(`/api/v1/jobs/${jobId}/confirm`, body)
+}
