@@ -158,6 +158,35 @@ Primary button: "Conferma e avvia validazione Google"
 
 ## 4. Backend Implementation
 
+### Parsed row display format
+
+`AddressParser.parse_all()` returns `ParsedAddress` objects with decomposed fields (`street_prefix`, `street_name`, `house_number`, `location_info`). For the review UI, we need reassembled strings.
+
+**Stored per-row format in job result:**
+```python
+{
+    "index": 0,
+    "original": {"street": "Via Roam 15", "city": "Milano", "zip": "20100"},
+    "parsed": {"street": parsed_addr.full_street, "city": "Milano", "zip": "20100"},
+    "parsed_components": {
+        "street_prefix": parsed_addr.street_prefix,
+        "street_name": parsed_addr.street_name,
+        "house_number": parsed_addr.house_number,
+        "location_info": parsed_addr.location_info,
+        "country_code": parsed_addr.country_code,
+    },
+    "method": "ai",
+    "changed": True,
+    "changes": ["street: Via Roam 15 → Via Roma 15"]
+}
+```
+
+- `parsed.street` uses `ParsedAddress.full_street` (the reassembled string) for display
+- `parsed_components` stores the raw components for Phase 2
+- User edits target the reassembled `street` string (not individual components)
+
+**When user edits a row:** The edited `street` string replaces `parsed.street`. Since Phase 2 needs a `ParsedAddress`, the edited street is re-parsed with regex (`parse_single_regex`) to decompose it back into components. This is fast and local — no API call needed.
+
 ### Phase 1: AI Parsing (in validator router)
 
 The existing `_process_validation` function is split into two parts:
@@ -165,16 +194,33 @@ The existing `_process_validation` function is split into two parts:
 **`_process_parse(job_id, excel_bytes, confidence, street_confidence, pin_valid, client_ip)`**
 - Reads Excel, validates content, checks rate limits
 - Runs `AddressParser.parse_all()` (Claude + regex fallback)
-- Builds per-row parsing results with original/parsed/method/changes
+- For each row, builds the per-row format above using `ParsedAddress.full_street` for display and storing raw components
+- Stores the original `excel_bytes` on disk: `job_store.save_file(job_id, "original.xlsx", excel_bytes)`
 - Stores parsing results on the job: `job_store.update_status(job_id, "parsed", result={...})`
 - Does NOT call Google API
 
-**`_process_validate(job_id, excel_bytes, parsed_rows, edits, confidence, street_confidence, pin_valid, client_ip)`**
-- Applies user edits to parsed rows
-- Creates ZipValidator and runs `process_dataframe()` using the confirmed parsed addresses
+**`_process_validate(job_id, confirmed_rows, confidence, street_confidence, pin_valid, client_ip)`**
+- Receives the confirmed parsed rows (with user edits applied)
+- Loads original Excel from disk: `job_store.get_file_path(job_id, "original.xlsx")`
+- **Bypasses `ZipValidator.process_dataframe()` parsing step.** Instead:
+  1. Creates `ZipValidator` instance
+  2. Builds a list of `ParsedAddress` objects from `confirmed_rows[i].parsed_components` (or re-parses edited rows with `parse_single_regex`)
+  3. Calls `ZipValidator._validate_addresses(df, parsed_addresses, progress_callback)` — a new internal method extracted from `process_dataframe()` that takes pre-parsed addresses and runs only the Google validation + correction logic
 - Generates corrected Excel + review report
 - Records API usage
 - Updates job to "complete" with final results
+
+### ZipValidator change: extract `_validate_addresses`
+
+`ZipValidator.process_dataframe()` currently does parsing + validation in one pass. Extract the validation-only logic into a new method:
+
+```python
+def _validate_addresses(self, df, parsed_addresses, progress_callback=None):
+    """Run Google validation on pre-parsed addresses. Skips parsing step."""
+    # ... existing validation logic from process_dataframe, starting after parse_all()
+```
+
+`process_dataframe()` is refactored to call `parse_all()` then `_validate_addresses()`. This is a safe refactor — no behavior change for existing callers.
 
 ### Phase 2 trigger: confirm endpoint
 
@@ -187,12 +233,45 @@ async def confirm_validation(job_id: str, body: ConfirmRequest):
     if status["status"] != "parsed":
         raise HTTPException(409, detail="Job is not in parsed state")
 
+    # Apply user edits to parsed rows
+    parsed_rows = status["result"]["rows"]
+    for idx_str, edits in body.edits.items():
+        idx = int(idx_str)
+        row = next((r for r in parsed_rows if r["index"] == idx), None)
+        if row:
+            row["parsed"].update(edits)
+            # Re-decompose edited street into components via regex
+            if "street" in edits:
+                from ..core.address_parser import AddressParser
+                re_parsed = AddressParser().parse_single_regex(
+                    edits["street"], row["parsed"].get("city", ""), row["parsed"].get("zip", "")
+                )
+                row["parsed_components"] = {
+                    "street_prefix": re_parsed.street_prefix,
+                    "street_name": re_parsed.street_name,
+                    "house_number": re_parsed.house_number,
+                    "location_info": re_parsed.location_info,
+                    "country_code": re_parsed.country_code,
+                }
+            row["edited"] = True
+
+    # Handle retry_regex_rows
+    if body.retry_regex_rows:
+        job_store.update_status(job_id, "processing_parse")  # Brief re-parse status
+        # Retry is done inside _process_validate before Google validation starts
+
     job_store.update_status(job_id, "processing_validate")
 
-    # If retry_regex_rows, re-run Claude on those rows first
-    # Then start Google validation in background
+    # Get stored config from job
+    job_data = status.get("config", {})
+
     loop = asyncio.get_running_loop()
-    loop.run_in_executor(None, _process_validate, job_id, ...)
+    loop.run_in_executor(
+        None, _process_validate, job_id, parsed_rows,
+        job_data.get("confidence", 90), job_data.get("street_confidence", 85),
+        job_data.get("pin_valid", False), job_data.get("client_ip", "unknown"),
+        body.retry_regex_rows,
+    )
 
     return {"ok": True, "data": {"status": "processing_validate"}}
 ```
@@ -207,13 +286,70 @@ class ConfirmRequest(BaseModel):
 
 ### Retry logic for regex rows
 
-When `retry_regex_rows=True`:
-1. Filter rows where `method == "regex"`
-2. Call `AddressParser._parse_batch_claude()` with those rows
-3. If Claude succeeds: update those rows with AI results
-4. If Claude fails again: keep regex results, proceed
+Happens inside `_process_validate` (in background thread), before Google validation:
 
-## 5. Address Parser Retry Improvement
+```python
+def _process_validate(job_id, parsed_rows, confidence, street_confidence, pin_valid, client_ip, retry_regex):
+    if retry_regex:
+        regex_rows = [r for r in parsed_rows if r["method"] == "regex" and not r.get("edited")]
+        if regex_rows:
+            job_store.update_progress(job_id, 0, len(regex_rows), "Nuovo tentativo AI...")
+            parser = AddressParser(api_key=settings.anthropic_api_key)
+            addresses = [{"street": r["original"]["street"], "city": r["original"]["city"], "zip": r["original"]["zip"]} for r in regex_rows]
+            try:
+                re_parsed = parser.parse_all(addresses)
+                for row, new_parsed in zip(regex_rows, re_parsed):
+                    row["parsed"]["street"] = new_parsed.full_street
+                    row["parsed_components"] = { ... }
+                    row["method"] = "ai"  # upgraded
+            except Exception:
+                pass  # Keep regex results, proceed
+
+    # Now run Google validation with confirmed parsed addresses
+    ...
+```
+
+This runs in a thread, so the 2s retry sleep in `parse_all` is acceptable. Progress updates during retry use `job_store.update_progress`.
+
+## 5. Frontend Type Changes
+
+`JobStatus` in `types.ts` needs new status values:
+```typescript
+type JobStatusValue = "processing_parse" | "parsed" | "processing_validate" | "complete" | "failed"
+```
+
+`useJobPolling` hook needs to:
+- Stop polling on `"parsed"` (not just `"complete"` / `"failed"`) — the review step needs the data
+- Resume polling after confirm is called (status changes to `"processing_validate"`)
+
+New types for the parsed result and confirm request:
+```typescript
+interface ParsedRow {
+  index: number
+  original: { street: string; city: string; zip: string }
+  parsed: { street: string; city: string; zip: string }
+  parsed_components: { street_prefix: string; street_name: string; house_number: string; location_info: string; country_code: string }
+  method: "ai" | "regex"
+  changed: boolean
+  changes: string[]
+  edited?: boolean
+}
+
+interface ParsingSummary {
+  total: number
+  ai_parsed: number
+  regex_fallback: number
+  ai_modified: number
+  unchanged: number
+}
+
+interface ConfirmRequest {
+  edits: Record<string, Record<string, string>>
+  retry_regex_rows: boolean
+}
+```
+
+## 6. Address Parser Retry Improvement
 
 In `address_parser.py`, add application-level retry before regex fallback:
 
