@@ -80,3 +80,7 @@ Thumbs.db
 !tests/sample_files/*.pdf
 !tests/sample_files/*.xls
 !tests/sample_files/*.xlsx
+
+# Frontend overrides (un-ignore paths needed by React/TypeScript frontend)
+!frontend/src/lib/
+!frontend/src/lib/**
