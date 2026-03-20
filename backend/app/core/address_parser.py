@@ -3,6 +3,7 @@ Address parser using Claude AI with regex fallback.
 Parses raw address strings into structured ParsedAddress fields.
 """
 import re
+import time
 import logging
 from typing import Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -96,7 +97,7 @@ class AddressParser:
         if api_key:
             try:
                 import anthropic
-                self.client = anthropic.Anthropic(api_key=api_key)
+                self.client = anthropic.Anthropic(api_key=api_key, max_retries=3)
             except Exception as e:
                 logger.warning(f"Could not init Anthropic client: {e}")
         self.metrics = ParsingMetrics(prompt_version=PROMPT_VERSION)
@@ -137,13 +138,21 @@ class AddressParser:
                     for i, parsed in enumerate(batch_results):
                         results[start_idx + i] = parsed
                 except Exception as e:
-                    logger.error(f"Batch starting at {start_idx} failed: {e}")
-                    self.metrics.batch_failures += 1
-                    for i, addr in enumerate(batch):
-                        results[start_idx + i] = self.parse_single_regex(
-                            addr["street"], addr["city"], addr["zip"]
-                        )
-                        self.metrics.regex_fallback += 1
+                    logger.warning(f"Batch at {start_idx} failed: {e}, retrying in 2s...")
+                    time.sleep(2)
+                    try:
+                        batch_results = self._parse_batch_claude(batch, start_idx)
+                        for i, parsed in enumerate(batch_results):
+                            results[start_idx + i] = parsed
+                        self.metrics.batch_retries_succeeded += 1
+                    except Exception as e2:
+                        logger.error(f"Batch at {start_idx} retry also failed: {e2}, falling back to regex")
+                        self.metrics.batch_failures += 1
+                        for i, addr in enumerate(batch):
+                            results[start_idx + i] = self.parse_single_regex(
+                                addr["street"], addr["city"], addr["zip"]
+                            )
+                            self.metrics.regex_fallback += 1
 
         # Fill any remaining None slots with regex
         for i, result in enumerate(results):
@@ -200,6 +209,7 @@ class AddressParser:
                 )
 
                 if self.verify_parsing(addr["street"], parsed):
+                    parsed.parse_method = "ai"
                     results[i] = parsed
                     self.metrics.claude_parsed += 1
                 else:
@@ -290,7 +300,7 @@ class AddressParser:
         elif re.match(r'^\d{4}[A-Z]{2}$', zip_clean):
             country_code = "NL"
 
-        return ParsedAddress(
+        result = ParsedAddress(
             street_prefix=street_prefix,
             street_name=street_name,
             house_number=house_number,
@@ -298,6 +308,8 @@ class AddressParser:
             country_code=country_code,
             confidence="medium",
         )
+        result.parse_method = "regex"
+        return result
 
     def verify_parsing(self, original: str, parsed: ParsedAddress) -> bool:
         """Verify that parsed components reconstruct to the original."""
