@@ -1,27 +1,36 @@
-import { useState } from "react"
-import { useMutation } from "@tanstack/react-query"
+import { useState, useEffect, useCallback } from "react"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { api } from "@/api/client"
+import { confirmValidation } from "@/api/client"
 import { PageShell } from "@/components/layout/PageShell"
 import { StepIndicator } from "@/components/StepIndicator"
 import { FileDropZone } from "@/components/FileDropZone"
 import { SegmentedProgressBar, buildValidatorSegments } from "@/components/SegmentedProgressBar"
 import { DownloadCard } from "@/components/DownloadCard"
 import { ResultsTable } from "@/components/ResultsTable"
+import { ParseReviewTable } from "@/components/ParseReviewTable"
 import { useJobPolling } from "@/hooks/useJobPolling"
 import { useDevMode } from "@/hooks/useDevMode"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
-import type { ValidatorJobResult, JobCreatedResponse } from "@/lib/types"
+import type {
+  ValidatorJobResult,
+  JobCreatedResponse,
+  ParsedJobResult,
+  ConfirmRequest,
+} from "@/lib/types"
 
 const STEPS = [
   { label: "Carica" },
+  { label: "Revisione AI" },
   { label: "Valida" },
   { label: "Risultato" },
 ]
 
 export default function AddressValidator() {
+  const queryClient = useQueryClient()
   const [isDevMode] = useDevMode()
   const [currentStep, setCurrentStep] = useState(0)
   const [excelFile, setExcelFile] = useState<File | null>(null)
@@ -31,21 +40,38 @@ export default function AddressValidator() {
   const [streetConfidence, setStreetConfidence] = useState(85)
   const [bypassPin, setBypassPin] = useState("")
 
-  // Job polling
+  // Edit state for the review step
+  const [edits, setEdits] = useState<Record<string, Record<string, string>>>({})
+
+  // Job polling — result type varies by phase
+  // During Phase 1 (parsing): result is ParsedJobResult
+  // During Phase 2 (validation): result is ValidatorJobResult
   const {
     status: jobStatus,
     progress,
-    result,
+    result: rawResult,
     error: jobError,
     isExpired,
-  } = useJobPolling<ValidatorJobResult>(jobId)
+  } = useJobPolling<ParsedJobResult | ValidatorJobResult>(jobId)
 
-  // Move to results when job completes
-  if (jobStatus === "complete" && currentStep === 1) {
-    setCurrentStep(2)
-  }
+  // Step transitions based on job status
+  useEffect(() => {
+    if (jobStatus === "parsed" && currentStep === 0) {
+      setCurrentStep(1)
+    }
+  }, [jobStatus, currentStep])
 
-  // Submit mutation
+  useEffect(() => {
+    if (jobStatus === "complete" && currentStep === 2) {
+      setCurrentStep(3)
+    }
+  }, [jobStatus, currentStep])
+
+  // Typed result accessors
+  const parsedResult = jobStatus === "parsed" ? (rawResult as ParsedJobResult | null) : null
+  const validatorResult = jobStatus === "complete" ? (rawResult as ValidatorJobResult | null) : null
+
+  // Submit mutation (Phase 1: upload + parse)
   const submitMutation = useMutation({
     mutationFn: async () => {
       const formData = new FormData()
@@ -57,9 +83,43 @@ export default function AddressValidator() {
     },
     onSuccess: (data) => {
       setJobId(data.job_id)
-      setCurrentStep(1)
+      // Stay on step 0 — the useEffect will advance to step 1 when status="parsed"
     },
   })
+
+  // Confirm mutation (Phase 2: send edits, start Google validation)
+  const confirmMutation = useMutation({
+    mutationFn: async (body: ConfirmRequest) => {
+      return confirmValidation(jobId!, body)
+    },
+    onSuccess: () => {
+      // Move to step 2 (validation spinner)
+      setCurrentStep(2)
+      // Invalidate the polling query so it refetches and sees "processing_validate"
+      queryClient.invalidateQueries({ queryKey: ["job-status", jobId] })
+    },
+  })
+
+  // Edit handler for ParseReviewTable
+  const handleEditRow = useCallback((index: number, field: string, value: string) => {
+    setEdits((prev) => ({
+      ...prev,
+      [String(index)]: {
+        ...(prev[String(index)] || {}),
+        [field]: value,
+      },
+    }))
+  }, [])
+
+  // Confirm handler
+  const handleConfirm = useCallback(() => {
+    confirmMutation.mutate({ edits, retry_regex_rows: false })
+  }, [confirmMutation, edits])
+
+  // Retry regex handler
+  const handleRetryRegex = useCallback(() => {
+    confirmMutation.mutate({ edits, retry_regex_rows: true })
+  }, [confirmMutation, edits])
 
   // Reset to start
   const handleReset = () => {
@@ -68,6 +128,7 @@ export default function AddressValidator() {
     setJobId(null)
     setShowAdvanced(false)
     setBypassPin("")
+    setEdits({})
   }
 
   return (
@@ -162,11 +223,107 @@ export default function AddressValidator() {
                   : "Errore durante l'invio"}
               </p>
             )}
+
+            {/* Parsing in progress (between upload and "parsed" status) */}
+            {jobId && jobStatus !== "parsed" && jobStatus !== "failed" && !isExpired && (
+              <div className="elc-card text-center py-8">
+                <div className="inline-block w-8 h-8 border-4 border-primary/20 border-t-primary rounded-full animate-spin mb-3" />
+                <p className="text-sm font-semibold text-foreground">
+                  Parsing AI in corso...
+                </p>
+                {progress && (
+                  <div className="mt-3 max-w-xs mx-auto">
+                    <div className="w-full bg-muted rounded-full h-2">
+                      <div
+                        className="bg-primary h-2 rounded-full transition-all duration-300"
+                        style={{
+                          width: `${progress.total > 0 ? (progress.current / progress.total) * 100 : 0}%`,
+                        }}
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-2">
+                      {progress.message || `${progress.current} / ${progress.total}`}
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
           </>
         )}
 
-        {/* === STEP 1: Processing === */}
+        {/* === STEP 1: AI Review === */}
         {currentStep === 1 && (
+          <>
+            {isExpired ? (
+              <div className="elc-card text-center py-12">
+                <p className="text-lg font-semibold text-foreground mb-2">
+                  Job scaduto
+                </p>
+                <p className="text-sm text-muted-foreground mb-6">
+                  Il server e stato riavviato. Riprova.
+                </p>
+                <Button variant="outline" onClick={handleReset}>
+                  Ricomincia
+                </Button>
+              </div>
+            ) : jobStatus === "failed" ? (
+              <div className="elc-card text-center py-12">
+                <p className="text-lg font-semibold text-destructive mb-2">
+                  Errore
+                </p>
+                <p className="text-sm text-muted-foreground mb-6">
+                  {jobError}
+                </p>
+                <Button variant="outline" onClick={handleReset}>
+                  Ricomincia
+                </Button>
+              </div>
+            ) : parsedResult ? (
+              <>
+                <ParseReviewTable
+                  rows={parsedResult.rows}
+                  summary={parsedResult.parsing_summary}
+                  edits={edits}
+                  onEditRow={handleEditRow}
+                  onRetryRegex={handleRetryRegex}
+                  onConfirm={handleConfirm}
+                  isConfirming={confirmMutation.isPending}
+                />
+
+                {confirmMutation.error && (
+                  <p className="text-sm text-destructive text-center">
+                    {confirmMutation.error instanceof Error
+                      ? confirmMutation.error.message
+                      : "Errore durante la conferma"}
+                  </p>
+                )}
+
+                {/* Dev mode debug */}
+                {isDevMode && (
+                  <details className="elc-card">
+                    <summary className="text-sm font-medium text-muted-foreground cursor-pointer">
+                      Debug: Parsed Result
+                    </summary>
+                    <pre className="mt-3 text-xs overflow-auto p-3 bg-[var(--color-surface)] rounded-md">
+                      {JSON.stringify(parsedResult, null, 2)}
+                    </pre>
+                  </details>
+                )}
+              </>
+            ) : (
+              /* Still loading parsed data */
+              <div className="elc-card text-center py-12">
+                <div className="inline-block w-10 h-10 border-4 border-primary/20 border-t-primary rounded-full animate-spin mb-4" />
+                <p className="text-lg font-semibold text-foreground">
+                  Parsing AI in corso...
+                </p>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* === STEP 2: Google Validation (processing) === */}
+        {currentStep === 2 && (
           <div className="elc-card text-center py-12">
             {isExpired ? (
               <>
@@ -197,7 +354,7 @@ export default function AddressValidator() {
                 {/* Spinner */}
                 <div className="inline-block w-10 h-10 border-4 border-primary/20 border-t-primary rounded-full animate-spin mb-4" />
                 <p className="text-lg font-semibold text-foreground">
-                  Validazione in corso...
+                  Validazione Google in corso...
                 </p>
                 {progress && (
                   <div className="mt-4 max-w-xs mx-auto">
@@ -205,7 +362,7 @@ export default function AddressValidator() {
                       <div
                         className="bg-primary h-2 rounded-full transition-all duration-300"
                         style={{
-                          width: `${(progress.current / progress.total) * 100}%`,
+                          width: `${progress.total > 0 ? (progress.current / progress.total) * 100 : 0}%`,
                         }}
                       />
                     </div>
@@ -219,42 +376,42 @@ export default function AddressValidator() {
           </div>
         )}
 
-        {/* === STEP 2: Results === */}
-        {currentStep === 2 && result && (
+        {/* === STEP 3: Results === */}
+        {currentStep === 3 && validatorResult && (
           <>
             {/* Progress bar */}
             <div className="elc-card">
               <SegmentedProgressBar
-                segments={buildValidatorSegments(result)}
-                total={result.total_rows}
+                segments={buildValidatorSegments(validatorResult)}
+                total={validatorResult.total_rows}
               />
 
               {/* Breakdown chips */}
               <div className="flex flex-wrap gap-3 mt-4">
                 <Badge variant="outline" className="text-xs px-3 py-1">
-                  CAP: {result.valid_count} \u2713 \u00B7 {result.corrected_count} corretti \u00B7 {result.review_count} \u26A0
+                  CAP: {validatorResult.valid_count} {"\u2713"} {"\u00B7"} {validatorResult.corrected_count} corretti {"\u00B7"} {validatorResult.review_count} {"\u26A0"}
                 </Badge>
                 <Badge variant="outline" className="text-xs px-3 py-1">
-                  Vie: {result.street_verified_count} \u2713 \u00B7 {result.street_corrected_count} corrette
+                  Vie: {validatorResult.street_verified_count} {"\u2713"} {"\u00B7"} {validatorResult.street_corrected_count} corrette
                 </Badge>
-                {result.skipped_count > 0 && (
+                {validatorResult.skipped_count > 0 && (
                   <Badge variant="outline" className="text-xs px-3 py-1">
-                    {result.skipped_count} non-IT saltati
+                    {validatorResult.skipped_count} non-IT saltati
                   </Badge>
                 )}
-                {result.po_invalid_count > 0 && (
+                {validatorResult.po_invalid_count > 0 && (
                   <Badge variant="destructive" className="text-xs px-3 py-1">
-                    {result.po_invalid_count} PO non validi
+                    {validatorResult.po_invalid_count} PO non validi
                   </Badge>
                 )}
               </div>
             </div>
 
             {/* PO warning */}
-            {result.po_invalid_count > 0 && (
+            {validatorResult.po_invalid_count > 0 && (
               <div className="rounded-lg bg-[#fef2f2] border border-destructive/20 px-5 py-4">
                 <p className="text-sm font-semibold text-red-800">
-                  Attenzione: {result.po_invalid_count} PO non validi trovati
+                  Attenzione: {validatorResult.po_invalid_count} PO non validi trovati
                 </p>
                 <p className="text-sm text-red-700 mt-1">
                   Correggi i PO nel file originale oppure inserisci il PIN per scaricare comunque.
@@ -275,13 +432,13 @@ export default function AddressValidator() {
                 label="Report revisione"
                 subtitle="Dettaglio righe da verificare"
                 href={api.fileUrl(jobId!, "review.xlsx")}
-                variant={result.review_count > 0 ? "secondary" : "disabled"}
+                variant={validatorResult.review_count > 0 ? "secondary" : "disabled"}
                 icon={"\uD83D\uDCCB"}
               />
             </div>
 
             {/* Results table */}
-            <ResultsTable rows={result.results} devMode={isDevMode} />
+            <ResultsTable rows={validatorResult.results} devMode={isDevMode} />
 
             {/* Reset button */}
             <div className="text-center">
@@ -297,7 +454,7 @@ export default function AddressValidator() {
                   Debug: Raw Result
                 </summary>
                 <pre className="mt-3 text-xs overflow-auto p-3 bg-[var(--color-surface)] rounded-md">
-                  {JSON.stringify(result, null, 2)}
+                  {JSON.stringify(validatorResult, null, 2)}
                 </pre>
               </details>
             )}

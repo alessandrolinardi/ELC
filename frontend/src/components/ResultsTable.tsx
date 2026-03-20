@@ -62,6 +62,7 @@ export function ResultsTable({ rows, devMode = false }: ResultsTableProps) {
           <thead>
             <tr className="text-left text-xs text-muted-foreground border-b border-border">
               <th className="px-5 py-3 font-medium">Stato</th>
+              <th className="px-5 py-3 font-medium w-10">Tipo</th>
               <th className="px-5 py-3 font-medium">Citta</th>
               <th className="px-5 py-3 font-medium">Indirizzo</th>
               <th className="px-5 py-3 font-medium">CAP</th>
@@ -86,6 +87,11 @@ export function ResultsTable({ rows, devMode = false }: ResultsTableProps) {
                       {statusLabels[row.status]}
                     </span>
                   </div>
+                </td>
+
+                {/* Parse method indicator */}
+                <td className="px-5 py-3 text-center" title={row.parse_method === "regex" ? "Regex" : "AI"}>
+                  {row.parse_method === "regex" ? "\u2699\uFE0F" : "\uD83E\uDD16"}
                 </td>
 
                 {/* City */}

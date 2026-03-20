@@ -238,7 +238,7 @@ def _process_validate(
 
         # Build per-row results
         row_results = []
-        for r in report.results:
+        for i, r in enumerate(report.results):
             if r.is_valid and r.street_verified:
                 status = "verified"
             elif r.auto_corrected or r.street_auto_corrected:
@@ -251,6 +251,11 @@ def _process_validate(
             if r.street_auto_corrected and r.suggested_street:
                 corrections.append(f"Via \u2192 {r.suggested_street}")
 
+            # Carry forward parse method from Phase 1
+            parse_method = "ai"
+            if i < len(parsed_rows):
+                parse_method = parsed_rows[i].get("method", "ai")
+
             row_results.append({
                 "status": status,
                 "city": r.city or "",
@@ -259,6 +264,7 @@ def _process_validate(
                 "suggested_zip": r.suggested_zip,
                 "suggested_street": r.suggested_street,
                 "corrections": corrections,
+                "parse_method": parse_method,
             })
 
         # Complete

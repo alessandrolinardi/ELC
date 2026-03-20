@@ -97,6 +97,7 @@ export interface ValidatorResultRow {
   suggested_zip: string | null
   suggested_street: string | null
   corrections: string[]
+  parse_method?: "ai" | "regex"
 }
 
 export interface ValidatorJobResult {
