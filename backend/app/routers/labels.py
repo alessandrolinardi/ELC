@@ -1,6 +1,8 @@
 """Label Sorter endpoints."""
 import asyncio
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from ..config import get_settings
 from ..services.job_store import job_store
@@ -11,6 +13,7 @@ from ..core.sorter import Sorter, SortMethod
 from ..core.label_report import generate_csv_report
 from ..core.security import validate_excel_content, sanitize_filename
 
+limiter = Limiter(key_func=get_remote_address)
 router = APIRouter()
 
 
@@ -76,7 +79,9 @@ def _process_labels(job_id: str, pdf_bytes: bytes, excel_bytes: bytes, excel_fil
 
 
 @router.post("/jobs/labels")
+@limiter.limit("20/hour")
 async def create_label_job(
+    request: Request,
     pdf_files: list[UploadFile] = File(...),
     excel_file: UploadFile = File(...),
     sort_method: str = Form("order_id_numeric"),

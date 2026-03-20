@@ -1,5 +1,7 @@
 """Address Book CRUD endpoints."""
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from ..core.address_book import (
     load_addresses, add_address, update_address, delete_address,
@@ -7,11 +9,13 @@ from ..core.address_book import (
 )
 from ..schemas.addresses import AddressCreate, AddressUpdate, AddressResponse
 
+limiter = Limiter(key_func=get_remote_address)
 router = APIRouter()
 
 
 @router.get("/addresses")
-async def list_addresses():
+@limiter.limit("100/hour")
+async def list_addresses(request: Request):
     addresses = load_addresses()
     return {"ok": True, "data": [AddressResponse(
         id=a.id, name=a.name, company=a.company, contact_name=a.contact_name,
@@ -21,7 +25,8 @@ async def list_addresses():
 
 
 @router.post("/addresses")
-async def create_address(body: AddressCreate):
+@limiter.limit("100/hour")
+async def create_address(request: Request, body: AddressCreate):
     result = add_address(
         name=body.name, company=body.company, contact_name=body.contact_name,
         street=body.street, zip_code=body.zip_code, city=body.city,
@@ -35,7 +40,8 @@ async def create_address(body: AddressCreate):
 
 
 @router.put("/addresses/{address_id}")
-async def update_address_endpoint(address_id: str, body: AddressUpdate):
+@limiter.limit("100/hour")
+async def update_address_endpoint(request: Request, address_id: str, body: AddressUpdate):
     updates = body.model_dump(exclude_unset=True)
     if not updates:
         raise HTTPException(status_code=400, detail={
@@ -50,7 +56,8 @@ async def update_address_endpoint(address_id: str, body: AddressUpdate):
 
 
 @router.delete("/addresses/{address_id}")
-async def delete_address_endpoint(address_id: str):
+@limiter.limit("100/hour")
+async def delete_address_endpoint(request: Request, address_id: str):
     success = delete_address(address_id)
     if not success:
         raise HTTPException(status_code=400, detail={
@@ -60,7 +67,8 @@ async def delete_address_endpoint(address_id: str):
 
 
 @router.put("/addresses/{address_id}/default")
-async def set_default(address_id: str):
+@limiter.limit("100/hour")
+async def set_default(request: Request, address_id: str):
     success = set_default_address(address_id)
     if not success:
         raise HTTPException(status_code=404, detail={

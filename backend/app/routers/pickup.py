@@ -1,14 +1,18 @@
 """Pickup Request endpoint."""
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from ..schemas.pickup import PickupRequest
 from ..core.pickup import send_pickup_request
 
+limiter = Limiter(key_func=get_remote_address)
 router = APIRouter()
 
 
 @router.post("/pickup/request")
-async def create_pickup_request(body: PickupRequest):
+@limiter.limit("30/hour")
+async def create_pickup_request(request: Request, body: PickupRequest):
     success, message = send_pickup_request(
         carrier=body.carrier,
         pickup_date=body.pickup_date,
