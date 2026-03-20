@@ -1,0 +1,414 @@
+import { useState, useMemo } from "react"
+import { useMutation } from "@tanstack/react-query"
+import { api } from "@/api/client"
+import { PageShell } from "@/components/layout/PageShell"
+import { CarrierTile } from "@/components/CarrierTile"
+import { DimensionsInput } from "@/components/DimensionsInput"
+import { SuccessBanner } from "@/components/SuccessBanner"
+import { useAddresses } from "@/hooks/useAddresses"
+import { useDevMode } from "@/hooks/useDevMode"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
+import { Badge } from "@/components/ui/badge"
+import type { PickupRequestData, PickupResponse, Address } from "@/lib/types"
+
+const CARRIERS = [
+  { name: "FedEx", icon: "\uD83D\uDCE6" },
+  { name: "DHL", icon: "\u2708\uFE0F" },
+  { name: "UPS", icon: "\uD83D\uDE9A" },
+] as const
+
+const DEFAULT_FORM: PickupRequestData = {
+  carrier: "FedEx",
+  pickup_date: new Date().toISOString().split("T")[0],
+  time_start: "09:00:00",
+  time_end: "17:00:00",
+  company: "",
+  contact_name: "",
+  address: "",
+  zip_code: "",
+  city: "",
+  province: "",
+  reference: "",
+  num_packages: 1,
+  weight_per_package: 5,
+  length: 40,
+  width: 30,
+  height: 20,
+  use_pallet: false,
+  num_pallets: 0,
+  pallet_length: 120,
+  pallet_width: 80,
+  pallet_height: 100,
+  notes: "",
+}
+
+export default function PickupRequest() {
+  const [isDevMode] = useDevMode()
+  const [form, setForm] = useState<PickupRequestData>(DEFAULT_FORM)
+  const [showNotes, setShowNotes] = useState(false)
+  const [selectedAddressId, setSelectedAddressId] = useState<string | null>(null)
+  const [successMessage, setSuccessMessage] = useState<string | null>(null)
+
+  const { addresses, isLoading: addressesLoading } = useAddresses()
+
+  // Auto-populate from selected address
+  const selectAddress = (addr: Address) => {
+    setSelectedAddressId(addr.id)
+    setForm((prev) => ({
+      ...prev,
+      company: addr.company,
+      contact_name: addr.contact_name,
+      address: addr.street,
+      zip_code: addr.zip,
+      city: addr.city,
+      province: addr.province,
+      reference: addr.reference,
+    }))
+  }
+
+  // Auto-select default address on load
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useMemo(() => {
+    if (addresses.length > 0 && !selectedAddressId) {
+      const defaultAddr = addresses.find((a) => a.is_default) || addresses[0]
+      selectAddress(defaultAddr)
+    }
+  }, [addresses]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Computed summary
+  const totalWeight = form.num_packages * form.weight_per_package
+  const shipmentType = totalWeight > 70 ? "FREIGHT" : "NORMAL"
+
+  // Submit mutation
+  const submitMutation = useMutation({
+    mutationFn: (data: PickupRequestData) =>
+      api.post<PickupResponse>("/api/v1/pickup/request", data),
+    onSuccess: (result) => {
+      setSuccessMessage(result.message)
+    },
+  })
+
+  const handleSubmit = () => {
+    setSuccessMessage(null)
+    submitMutation.mutate(form)
+  }
+
+  const update = <K extends keyof PickupRequestData>(
+    key: K,
+    value: PickupRequestData[K]
+  ) => {
+    setForm((prev) => ({ ...prev, [key]: value }))
+  }
+
+  if (successMessage) {
+    return (
+      <PageShell title="Richiesta Ritiro">
+        <SuccessBanner message={successMessage} />
+        <div className="mt-6 text-center">
+          <Button
+            variant="outline"
+            onClick={() => {
+              setSuccessMessage(null)
+              setForm(DEFAULT_FORM)
+              setSelectedAddressId(null)
+            }}
+          >
+            Nuova richiesta
+          </Button>
+        </div>
+      </PageShell>
+    )
+  }
+
+  return (
+    <PageShell title="Richiesta Ritiro" subtitle="Compila il modulo e invia la richiesta di ritiro.">
+      <div className="space-y-6">
+        {/* Card 1: Carrier + Date/Time */}
+        <div className="elc-card">
+          <div className="grid grid-cols-2 gap-6">
+            {/* Carrier tiles */}
+            <div>
+              <Label className="text-sm font-semibold text-foreground mb-3 block">
+                Corriere
+              </Label>
+              <div className="grid grid-cols-3 gap-3">
+                {CARRIERS.map((c) => (
+                  <CarrierTile
+                    key={c.name}
+                    carrier={c.name}
+                    icon={c.icon}
+                    selected={form.carrier === c.name}
+                    onClick={() => update("carrier", c.name as PickupRequestData["carrier"])}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* Date + Time */}
+            <div className="space-y-4">
+              <div>
+                <Label htmlFor="pickup_date" className="text-sm font-semibold text-foreground">
+                  Data ritiro
+                </Label>
+                <Input
+                  id="pickup_date"
+                  type="date"
+                  value={form.pickup_date}
+                  onChange={(e) => update("pickup_date", e.target.value)}
+                  className="mt-1.5"
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label htmlFor="time_start" className="text-sm text-muted-foreground">Dalle</Label>
+                  <Input
+                    id="time_start"
+                    type="time"
+                    value={form.time_start.slice(0, 5)}
+                    onChange={(e) => update("time_start", e.target.value + ":00")}
+                    className="mt-1"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="time_end" className="text-sm text-muted-foreground">Alle</Label>
+                  <Input
+                    id="time_end"
+                    type="time"
+                    value={form.time_end.slice(0, 5)}
+                    onChange={(e) => update("time_end", e.target.value + ":00")}
+                    className="mt-1"
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Card 2: Address */}
+        <div className="elc-card">
+          <div className="flex items-center justify-between mb-4">
+            <Label className="text-sm font-semibold text-foreground">
+              Indirizzo ritiro
+            </Label>
+            {/* TODO: Address book manager dialog */}
+          </div>
+
+          {/* Address selector */}
+          {addressesLoading ? (
+            <p className="text-sm text-muted-foreground">Caricamento indirizzi...</p>
+          ) : addresses.length > 0 ? (
+            <div className="space-y-3">
+              <select
+                value={selectedAddressId || ""}
+                onChange={(e) => {
+                  const addr = addresses.find((a) => a.id === e.target.value)
+                  if (addr) selectAddress(addr)
+                }}
+                className="w-full rounded-md border border-border px-3 py-2 text-sm bg-card"
+              >
+                {addresses.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.name} — {a.company}, {a.street}, {a.zip} {a.city}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : (
+            /* Manual entry fallback */
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label className="text-xs text-muted-foreground">Azienda</Label>
+                <Input value={form.company} onChange={(e) => update("company", e.target.value)} className="mt-1" />
+              </div>
+              <div>
+                <Label className="text-xs text-muted-foreground">Contatto</Label>
+                <Input value={form.contact_name} onChange={(e) => update("contact_name", e.target.value)} className="mt-1" />
+              </div>
+              <div className="col-span-2">
+                <Label className="text-xs text-muted-foreground">Indirizzo</Label>
+                <Input value={form.address} onChange={(e) => update("address", e.target.value)} className="mt-1" />
+              </div>
+              <div>
+                <Label className="text-xs text-muted-foreground">CAP</Label>
+                <Input value={form.zip_code} onChange={(e) => update("zip_code", e.target.value)} className="mt-1" />
+              </div>
+              <div>
+                <Label className="text-xs text-muted-foreground">Citta</Label>
+                <Input value={form.city} onChange={(e) => update("city", e.target.value)} className="mt-1" />
+              </div>
+              <div>
+                <Label className="text-xs text-muted-foreground">Provincia</Label>
+                <Input value={form.province} onChange={(e) => update("province", e.target.value)} className="mt-1" />
+              </div>
+              <div>
+                <Label className="text-xs text-muted-foreground">Riferimento</Label>
+                <Input value={form.reference} onChange={(e) => update("reference", e.target.value)} className="mt-1" />
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Card 3: Packages */}
+        <div className="elc-card">
+          <Label className="text-sm font-semibold text-foreground mb-4 block">
+            Dettagli colli
+          </Label>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label className="text-xs text-muted-foreground">Numero colli</Label>
+                <Input
+                  type="number"
+                  min={1}
+                  value={form.num_packages}
+                  onChange={(e) => update("num_packages", Number(e.target.value))}
+                  className="mt-1"
+                />
+              </div>
+              <div>
+                <Label className="text-xs text-muted-foreground">Peso per collo (kg)</Label>
+                <Input
+                  type="number"
+                  min={0.1}
+                  step={0.1}
+                  value={form.weight_per_package}
+                  onChange={(e) => update("weight_per_package", Number(e.target.value))}
+                  className="mt-1"
+                />
+              </div>
+            </div>
+
+            <div>
+              <Label className="text-xs text-muted-foreground mb-1 block">Dimensioni collo</Label>
+              <DimensionsInput
+                length={form.length}
+                width={form.width}
+                height={form.height}
+                onChange={(dims) =>
+                  setForm((prev) => ({ ...prev, ...dims }))
+                }
+              />
+            </div>
+
+            {/* Pallet toggle */}
+            <div className="flex items-center gap-3 pt-2">
+              <Switch
+                checked={form.use_pallet}
+                onCheckedChange={(checked) => update("use_pallet", checked)}
+              />
+              <Label className="text-sm text-foreground">Bancale / Pallet</Label>
+            </div>
+
+            {form.use_pallet && (
+              <div className="space-y-4 border-l-2 border-indigo-border ml-4 pl-4">
+                <div>
+                  <Label className="text-xs text-muted-foreground">Numero pallet</Label>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={form.num_pallets}
+                    onChange={(e) => update("num_pallets", Number(e.target.value))}
+                    className="mt-1 max-w-[120px]"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs text-muted-foreground mb-1 block">Dimensioni pallet</Label>
+                  <DimensionsInput
+                    length={form.pallet_length}
+                    width={form.pallet_width}
+                    height={form.pallet_height}
+                    onChange={(dims) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        pallet_length: dims.length,
+                        pallet_width: dims.width,
+                        pallet_height: dims.height,
+                      }))
+                    }
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Card 4: Notes (optional, hidden by default) */}
+        {!showNotes ? (
+          <button
+            onClick={() => setShowNotes(true)}
+            className="text-sm text-primary font-medium hover:underline"
+          >
+            + Aggiungi note
+          </button>
+        ) : (
+          <div className="elc-card">
+            <Label className="text-sm font-semibold text-foreground mb-2 block">
+              Note
+            </Label>
+            <textarea
+              value={form.notes}
+              onChange={(e) => update("notes", e.target.value)}
+              rows={3}
+              className="w-full rounded-md border border-border px-3 py-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+              placeholder="Note aggiuntive per il corriere..."
+            />
+          </div>
+        )}
+
+        {/* Sticky Summary Bar */}
+        <div className="sticky bottom-0 bg-card border-t border-border px-6 py-4 -mx-4 rounded-t-lg shadow-[var(--shadow-card)]">
+          <div className="flex items-center justify-between max-w-[var(--max-width-content)] mx-auto">
+            <div className="flex items-center gap-3 text-sm text-muted-foreground">
+              <span>{form.num_packages} colli</span>
+              <span className="text-border">|</span>
+              <span>{totalWeight.toFixed(1)} kg</span>
+              <span className="text-border">|</span>
+              <Badge
+                variant={shipmentType === "FREIGHT" ? "destructive" : "secondary"}
+                className="text-xs"
+              >
+                {shipmentType}
+              </Badge>
+              {shipmentType === "FREIGHT" && (
+                <span className="text-xs text-destructive">Peso &gt; 70 kg</span>
+              )}
+            </div>
+            <Button
+              onClick={handleSubmit}
+              disabled={submitMutation.isPending}
+              className="bg-primary hover:bg-primary/90 text-white px-6"
+            >
+              {submitMutation.isPending ? "Invio..." : "Invia Richiesta"}
+            </Button>
+          </div>
+        </div>
+
+        {/* Error */}
+        {submitMutation.error && (
+          <div className="rounded-lg bg-[#fef2f2] border border-destructive/20 px-5 py-4">
+            <p className="text-sm text-red-800">
+              {submitMutation.error instanceof Error
+                ? submitMutation.error.message
+                : "Errore durante l'invio"}
+            </p>
+          </div>
+        )}
+
+        {/* Dev mode debug */}
+        {isDevMode && (
+          <details className="elc-card">
+            <summary className="text-sm font-medium text-muted-foreground cursor-pointer">
+              Debug: Form State
+            </summary>
+            <pre className="mt-3 text-xs overflow-auto p-3 bg-[var(--color-surface)] rounded-md">
+              {JSON.stringify(form, null, 2)}
+            </pre>
+          </details>
+        )}
+      </div>
+    </PageShell>
+  )
+}
