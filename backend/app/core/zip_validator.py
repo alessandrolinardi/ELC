@@ -550,17 +550,19 @@ class ZipValidator:
             check_zip = outcome.output_zip or zip_padded
             if check_zip:
                 # Check 1: Is this CAP even valid in Italy?
-                if not self.address_validator.is_valid_italian_cap(check_zip):
+                # Only flag if Google also didn't confirm it — our local DB may be incomplete
+                if not self.address_validator.is_valid_italian_cap(check_zip) and not outcome.zip_confirmed:
                     outcome.status = "review"
-                    outcome.reasons.append(f"CAP {check_zip} does not exist in Italy")
+                    outcome.reasons.append(f"CAP {check_zip} not in local database")
                 else:
                     # Check 2: Does this CAP match the comune (city)?
                     comune_valid, comune_msg = self.address_validator.validate_zip_comune(
                         check_zip, city, state
                     )
-                    if not comune_valid:
-                        # Downgrade to review — corrected ZIP still doesn't match comune
-                        if outcome.status in ("valid", "corrected"):
+                    if not comune_valid and "not in database" not in comune_msg:
+                        # Downgrade to review — but only if our DB actually knows this
+                        # comune and says the CAP is wrong (not just "comune unknown")
+                        if outcome.status in ("valid", "corrected") and not outcome.zip_confirmed:
                             outcome.status = "review"
                         outcome.reasons.append(comune_msg)
                     elif state:
