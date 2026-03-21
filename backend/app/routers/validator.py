@@ -501,15 +501,21 @@ async def apply_corrections(job_id: str, body: ApplyCorrectionsRequest):
     city_col = next((columns_lower[n] for n in ['city', 'città', 'citta'] if n in columns_lower), None)
     zip_col = next((columns_lower[n] for n in ['zip', 'cap', 'postal code', 'postcode', 'zip code'] if n in columns_lower), None)
 
+    def _sanitize_cell(value: str) -> str:
+        """Prevent Excel formula injection by escaping dangerous prefixes."""
+        if value and value.strip() and value.strip()[0] in ('=', '+', '-', '@', '\t', '\r', '\n'):
+            return "'" + value
+        return value
+
     applied = 0
     for idx_str, fields in body.corrections.items():
         idx = int(idx_str)
         if idx < 0 or idx >= len(df):
             continue
         if "street" in fields and street_col:
-            df.at[idx, street_col] = fields["street"]
+            df.at[idx, street_col] = _sanitize_cell(fields["street"])
         if "city" in fields and city_col:
-            df.at[idx, city_col] = fields["city"]
+            df.at[idx, city_col] = _sanitize_cell(fields["city"])
         if "zip" in fields and zip_col:
             zip_val = fields["zip"]
             if df[zip_col].dtype in ('int64', 'float64'):

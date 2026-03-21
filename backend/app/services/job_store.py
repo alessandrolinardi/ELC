@@ -94,12 +94,16 @@ class JobStore:
             (job_dir / filename).write_bytes(data)
 
     def get_file_path(self, job_id: str, filename: str) -> Optional[Path]:
+        import re as _re
+        # Validate job_id is a UUID to prevent path traversal
+        if not _re.fullmatch(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', job_id):
+            return None
         safe_name = Path(filename).name  # strips directory components
         if not safe_name:
             return None
         path = (self._base_dir / job_id / safe_name).resolve()
-        expected_root = (self._base_dir / job_id).resolve()
-        if not str(path).startswith(str(expected_root)):
+        # Anchor check against base_dir, not the attacker-controlled job_id subdirectory
+        if not str(path).startswith(str(self._base_dir.resolve())):
             return None
         if path.exists():
             return path
