@@ -270,6 +270,18 @@ class AddressParser:
                         break
                 break
 
+        # Step 1a: If street has a dash/hyphen before a known street prefix,
+        # split on it (e.g., "Due-Via Togliatti,2" → location="Due", street="Via Togliatti,2")
+        if not location_info:
+            for sp in STREET_PREFIXES:
+                dash_match = re.search(
+                    rf'[\-]\s*({re.escape(sp)}[\.\s])', clean_street, re.IGNORECASE
+                )
+                if dash_match:
+                    location_info = clean_street[:dash_match.start()].strip()
+                    clean_street = clean_street[dash_match.start() + 1:].strip()
+                    break
+
         # Step 1b: Extract trailing location suffix (e.g., "Via della Pace-Loc. Pascolaro")
         if not location_info:
             trailing_loc_match = re.search(
