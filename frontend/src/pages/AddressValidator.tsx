@@ -77,9 +77,9 @@ export default function AddressValidator() {
 
   // Submit mutation (Phase 1: upload + parse)
   const submitMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (file: File) => {
       const formData = new FormData()
-      formData.append("excel_file", excelFile!)
+      formData.append("excel_file", file)
       formData.append("confidence_threshold", String(confidence))
       formData.append("street_confidence_threshold", String(streetConfidence))
       if (bypassPin) formData.append("bypass_pin", bypassPin)
@@ -247,7 +247,7 @@ export default function AddressValidator() {
             )}
 
             <Button
-              onClick={() => submitMutation.mutate()}
+              onClick={() => excelFile && submitMutation.mutate(excelFile)}
               disabled={!excelFile || submitMutation.isPending}
               className="bg-primary hover:bg-primary/90 text-white w-full"
             >
