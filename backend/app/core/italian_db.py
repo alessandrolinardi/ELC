@@ -97,10 +97,20 @@ class ItalianDB:
 
         self._loaded = True
 
+    def _is_generic_cap(self, cap: str) -> bool:
+        """Check if CAP is a generic city CAP (xx100 pattern).
+        Major Italian cities accept a generic CAP ending in 100
+        that covers all specific sub-CAPs (e.g., 16100 for Genova)."""
+        if not cap or len(cap) != 5 or not cap.endswith('00'):
+            return False
+        # Check if any specific CAPs exist with the same prefix
+        prefix = cap[:3]
+        return any(c.startswith(prefix) and c != cap for c in self._all_caps)
+
     def is_valid_cap(self, cap: str) -> bool:
-        """Check if a CAP exists in Italy."""
+        """Check if a CAP exists in Italy (including generic xx100 CAPs)."""
         self.load()
-        return cap in self._all_caps
+        return cap in self._all_caps or self._is_generic_cap(cap)
 
     def get_valid_caps_for_comune(self, comune: str, provincia: str = "") -> set[str]:
         """Get all valid CAPs for a given comune (and optionally provincia)."""
@@ -141,6 +151,12 @@ class ItalianDB:
 
         if cap in valid_caps:
             return True, f"CAP {cap} valid for {comune}"
+
+        # Accept generic CAP (xx100) if the comune has specific CAPs with same prefix
+        if self._is_generic_cap(cap):
+            prefix = cap[:3]
+            if any(c.startswith(prefix) for c in valid_caps):
+                return True, f"CAP {cap} is generic for {comune}"
 
         # CAP not valid — suggest correct ones
         if len(valid_caps) == 1:
