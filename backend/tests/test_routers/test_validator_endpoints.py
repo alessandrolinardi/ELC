@@ -467,3 +467,160 @@ class TestApplyCorrections:
         corrected_path = job_store.get_file_path(job_id, "corrected.xlsx")
         df = pd.read_excel(corrected_path)
         assert df["Street 1"].iloc[0] == "'=CMD()"
+
+
+class TestReadExcelPreserveZip:
+    """Test the _read_excel_preserve_zip helper preserves leading zeros."""
+
+    def test_zip_leading_zeros_preserved(self):
+        """ZIP '00187' stored as text should stay '00187', not become 187."""
+        from app.routers.validator import _read_excel_preserve_zip
+
+        df_src = pd.DataFrame({"Street 1": ["Via Roma 10"], "City": ["Roma"], "Zip": ["00187"]})
+        buf = io.BytesIO()
+        df_src.to_excel(buf, index=False, engine='openpyxl')
+        buf.seek(0)
+
+        df = _read_excel_preserve_zip(buf)
+        assert df["Zip"].iloc[0] == "00187", f"Expected '00187', got {df['Zip'].iloc[0]!r}"
+
+    def test_no_zip_column_does_not_crash(self):
+        """Excel with no ZIP-like column should be read without error."""
+        from app.routers.validator import _read_excel_preserve_zip
+
+        df_src = pd.DataFrame({"Name": ["Alice"], "City": ["Roma"]})
+        buf = io.BytesIO()
+        df_src.to_excel(buf, index=False, engine='openpyxl')
+        buf.seek(0)
+
+        df = _read_excel_preserve_zip(buf)
+        assert len(df) == 1
+        assert "Name" in df.columns
+
+    def test_cap_column_detected_and_preserved(self):
+        """Italian 'CAP' column should also be treated as ZIP and preserved."""
+        from app.routers.validator import _read_excel_preserve_zip
+
+        df_src = pd.DataFrame({"Street 1": ["Via Roma 10"], "City": ["Roma"], "CAP": ["00187"]})
+        buf = io.BytesIO()
+        df_src.to_excel(buf, index=False, engine='openpyxl')
+        buf.seek(0)
+
+        df = _read_excel_preserve_zip(buf)
+        assert df["CAP"].iloc[0] == "00187", f"Expected '00187', got {df['CAP'].iloc[0]!r}"
+
+
+class TestProcessParseColumnValidation:
+    """Test that _process_parse validates required columns (City / ZIP)."""
+
+    def test_missing_city_column_fails(self):
+        """Excel without a City column should fail with descriptive error."""
+        excel = _make_excel_bytes([
+            {"Street 1": "Via Roma 10", "Zip": "20121"},
+        ])
+        with _apply_security_mocks():
+            resp = client.post(
+                "/api/v1/jobs/validator",
+                files={"excel_file": ("no_city.xlsx", excel,
+                       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+                data={"confidence_threshold": 90, "street_confidence_threshold": 85},
+            )
+            assert resp.status_code == 200
+            job_id = resp.json()["data"]["job_id"]
+            status = _wait_for_status(job_id, "failed")
+
+        assert status["status"] == "failed"
+        assert "obbligatorie" in status["error"].lower() or "city" in status["error"].lower()
+
+    def test_missing_zip_column_fails(self):
+        """Excel without a ZIP column should fail with descriptive error."""
+        excel = _make_excel_bytes([
+            {"Street 1": "Via Roma 10", "City": "Milano"},
+        ])
+        with _apply_security_mocks():
+            resp = client.post(
+                "/api/v1/jobs/validator",
+                files={"excel_file": ("no_zip.xlsx", excel,
+                       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+                data={"confidence_threshold": 90, "street_confidence_threshold": 85},
+            )
+            assert resp.status_code == 200
+            job_id = resp.json()["data"]["job_id"]
+            status = _wait_for_status(job_id, "failed")
+
+        assert status["status"] == "failed"
+        assert "obbligatorie" in status["error"].lower() or "zip" in status["error"].lower()
+
+    def test_italian_column_names_succeed(self):
+        """Excel with Italian column names (Città, CAP) should parse OK."""
+        excel = _make_excel_bytes([
+            {"Indirizzo": "Via Roma 10", "Città": "Milano", "CAP": "20121"},
+        ])
+        with _apply_security_mocks():
+            resp = client.post(
+                "/api/v1/jobs/validator",
+                files={"excel_file": ("italian.xlsx", excel,
+                       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+                data={"confidence_threshold": 90, "street_confidence_threshold": 85},
+            )
+            assert resp.status_code == 200
+            job_id = resp.json()["data"]["job_id"]
+            status = _wait_for_status(job_id, "parsed")
+
+        assert status["status"] == "parsed", f"Expected parsed, got: {status['status']}, error: {status.get('error')}"
+        assert len(status["result"]["rows"]) == 1
+
+
+class TestApplyCorrectionsEdgeCases:
+    """Edge-case tests for the apply-corrections endpoint."""
+
+    def _create_complete_job(self, rows: list[dict]) -> str:
+        """Helper: create a complete job with a corrected.xlsx from given rows."""
+        job_id = job_store.create_job("validator")
+        df = pd.DataFrame(rows)
+        buf = io.BytesIO()
+        df.to_excel(buf, index=False, engine='openpyxl')
+        job_store.save_file(job_id, "corrected.xlsx", buf.getvalue())
+        job_store.update_status(job_id, "complete", result={"results": []})
+        return job_id
+
+    def test_out_of_bounds_row_index_skipped(self):
+        """Correction with row index beyond DataFrame length should be silently skipped."""
+        job_id = self._create_complete_job([
+            {"Street 1": "Via Roma 10", "City": "Roma", "Zip": "00100"},
+        ])
+        resp = client.post(f"/api/v1/jobs/{job_id}/apply-corrections", json={
+            "corrections": {"999": {"street": "Via Garibaldi 5"}},
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+        assert data["data"]["applied"] == 0
+
+    def test_empty_corrections_dict(self):
+        """Empty corrections dict should return applied=0."""
+        job_id = self._create_complete_job([
+            {"Street 1": "Via Roma 10", "City": "Roma", "Zip": "00100"},
+        ])
+        resp = client.post(f"/api/v1/jobs/{job_id}/apply-corrections", json={
+            "corrections": {},
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+        assert data["data"]["applied"] == 0
+
+    def test_correction_missing_street_column_skipped(self):
+        """Correction targeting 'street' on a file without a Street column should not crash."""
+        job_id = self._create_complete_job([
+            {"City": "Roma", "Zip": "00100"},
+        ])
+        resp = client.post(f"/api/v1/jobs/{job_id}/apply-corrections", json={
+            "corrections": {"0": {"street": "Via Garibaldi 5"}},
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+        # The row index is valid so the loop increments applied,
+        # but the street field is simply not written because street_col is None
+        assert data["data"]["applied"] == 1
