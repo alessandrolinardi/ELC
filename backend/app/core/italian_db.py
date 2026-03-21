@@ -204,12 +204,34 @@ class ItalianDB:
 
         input_norm = _norm(provincia)
 
+        def _is_close(a: str, b: str) -> bool:
+            """Check if two strings are within edit distance 1 (handles typos like Lombrardia)."""
+            if a == b:
+                return True
+            if abs(len(a) - len(b)) > 1:
+                return False
+            # Try single deletion from the longer string
+            longer, shorter = (a, b) if len(a) >= len(b) else (b, a)
+            for i in range(len(longer)):
+                if longer[:i] + longer[i+1:] == shorter:
+                    return True
+            # Try single substitution (same length)
+            if len(a) == len(b):
+                diffs = sum(1 for x, y in zip(a, b) if x != y)
+                return diffs == 1
+            return False
+
         # Check against province sigla (PE, MI), province name, AND region name
         for r in comuni:
             sigla = r.get("sigla_provincia", "").upper()
             prov_name = r.get("denominazione_provincia", "")
             region = r.get("denominazione_regione", "")
-            if provincia.upper().strip() == sigla or input_norm in (_norm(prov_name), _norm(region)):
+            if provincia.upper().strip() == sigla:
+                return True, f"CAP {cap} matches {provincia}"
+            if input_norm in (_norm(prov_name), _norm(region)):
+                return True, f"CAP {cap} matches {provincia}"
+            # Fuzzy match for typos (edit distance 1)
+            if _is_close(input_norm, _norm(prov_name)) or _is_close(input_norm, _norm(region)):
                 return True, f"CAP {cap} matches {provincia}"
 
         # CAP exists but belongs to different area

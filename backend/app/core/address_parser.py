@@ -253,7 +253,7 @@ class AddressParser:
     def parse_single_regex(self, street: str, city: str, zip_code: str,
                            default_country: str = "IT") -> ParsedAddress:
         """Parse a single address using regex patterns."""
-        original = street.strip() if street else ""
+        original = street.strip().rstrip(',').strip() if street else ""
 
         # Step 1: Extract location prefix (C.C., Centro Commerciale, etc.)
         location_info = ""
