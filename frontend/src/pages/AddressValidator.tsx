@@ -40,8 +40,12 @@ export default function AddressValidator() {
   const [streetConfidence, setStreetConfidence] = useState(85)
   const [bypassPin, setBypassPin] = useState("")
 
-  // Edit state for the review step
+  // Edit state for the review step (Phase 1)
   const [edits, setEdits] = useState<Record<string, Record<string, string>>>({})
+
+  // Edit state for results step (Phase 2 results review)
+  const [resultEdits, setResultEdits] = useState<Record<string, Record<string, string>>>({})
+  const [filesReady, setFilesReady] = useState(false)
 
   // Job polling — result type varies by phase
   // During Phase 1 (parsing): result is ParsedJobResult
@@ -121,6 +125,38 @@ export default function AddressValidator() {
     confirmMutation.mutate({ edits, retry_regex_rows: true })
   }, [confirmMutation, edits])
 
+  // Edit handler for results table (Phase 2)
+  const handleResultEdit = useCallback((index: number, field: string, value: string) => {
+    setResultEdits((prev) => ({
+      ...prev,
+      [String(index)]: {
+        ...(prev[String(index)] || {}),
+        [field]: value,
+      },
+    }))
+  }, [])
+
+  // Generate files mutation
+  const generateMutation = useMutation({
+    mutationFn: async () => {
+      if (Object.keys(resultEdits).length > 0) {
+        // Apply user corrections then generate
+        return api.post(`/api/v1/jobs/${jobId}/apply-corrections`, {
+          corrections: resultEdits,
+        })
+      }
+      // No edits — files already exist from Phase 2
+      return Promise.resolve()
+    },
+    onSuccess: () => {
+      setFilesReady(true)
+    },
+  })
+
+  const handleGenerate = useCallback(() => {
+    generateMutation.mutate()
+  }, [generateMutation])
+
   // Reset to start
   const handleReset = () => {
     setCurrentStep(0)
@@ -129,6 +165,8 @@ export default function AddressValidator() {
     setShowAdvanced(false)
     setBypassPin("")
     setEdits({})
+    setResultEdits({})
+    setFilesReady(false)
   }
 
   return (
@@ -419,26 +457,44 @@ export default function AddressValidator() {
               </div>
             )}
 
-            {/* Download cards */}
-            <div className="grid grid-cols-2 gap-4">
-              <DownloadCard
-                label="File corretto"
-                subtitle="Excel con correzioni applicate"
-                href={api.fileUrl(jobId!, "corrected.xlsx")}
-                variant="primary"
-                icon={"\uD83D\uDCCA"}
-              />
-              <DownloadCard
-                label="Report revisione"
-                subtitle="Dettaglio righe da verificare"
-                href={api.fileUrl(jobId!, "review.xlsx")}
-                variant={validatorResult.review_count > 0 ? "secondary" : "disabled"}
-                icon={"\uD83D\uDCCB"}
-              />
-            </div>
+            {/* Results table with inline edit + generate */}
+            <ResultsTable
+              rows={validatorResult.results}
+              devMode={isDevMode}
+              edits={resultEdits}
+              onEditRow={handleResultEdit}
+              onGenerate={handleGenerate}
+              isGenerating={generateMutation.isPending}
+              filesReady={filesReady}
+            />
 
-            {/* Results table */}
-            <ResultsTable rows={validatorResult.results} devMode={isDevMode} />
+            {generateMutation.error && (
+              <p className="text-sm text-destructive text-center">
+                {generateMutation.error instanceof Error
+                  ? generateMutation.error.message
+                  : "Errore durante la generazione"}
+              </p>
+            )}
+
+            {/* Download cards — only after user confirms */}
+            {filesReady && (
+              <div className="grid grid-cols-2 gap-4">
+                <DownloadCard
+                  label="File corretto"
+                  subtitle="Excel con correzioni applicate"
+                  href={api.fileUrl(jobId!, "corrected.xlsx")}
+                  variant="primary"
+                  icon={"\uD83D\uDCCA"}
+                />
+                <DownloadCard
+                  label="Report revisione"
+                  subtitle="Dettaglio righe da verificare"
+                  href={api.fileUrl(jobId!, "review.xlsx")}
+                  variant={validatorResult.review_count > 0 ? "secondary" : "disabled"}
+                  icon={"\uD83D\uDCCB"}
+                />
+              </div>
+            )}
 
             {/* Reset button */}
             <div className="text-center">

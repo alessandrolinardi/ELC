@@ -348,8 +348,13 @@ class ZipValidator:
         logger.info(f"Parsing complete: {self.address_parser.metrics.claude_parsed} by Claude, "
                      f"{self.address_parser.metrics.regex_fallback} by regex")
 
-        # Step 2: Validate (delegated)
-        return self._validate_addresses(df, parsed_addresses, progress_callback)
+        # Step 2: Validate (delegated) — scale 0-100% from _validate_addresses to 20-100%
+        def scaled_callback(current, total, message):
+            if progress_callback:
+                pct = 20 + int(current / total * 80) if total > 0 else 20
+                progress_callback(pct, 100, message)
+
+        return self._validate_addresses(df, parsed_addresses, scaled_callback)
 
     def _validate_addresses(
         self,
@@ -367,6 +372,18 @@ class ZipValidator:
         Returns:
             tuple[ValidationReport, pd.DataFrame] — same as process_dataframe()
         """
+        col_map = self._map_columns(df)
+        required = ['city', 'zip']
+        missing = [k for k in required if k not in col_map]
+        if missing:
+            raise ValueError(f"Missing required columns: {missing}")
+
+        if len(parsed_addresses) != len(df):
+            raise ValueError(
+                f"parsed_addresses length ({len(parsed_addresses)}) != "
+                f"DataFrame rows ({len(df)})"
+            )
+
         results = []
         valid_count = 0
         corrected_count = 0
@@ -375,15 +392,14 @@ class ZipValidator:
         street_verified_count = 0
         street_corrected_count = 0
         po_invalid_count = 0
-
-        col_map = self._map_columns(df)
         has_country_col = col_map.get('country') is not None
         has_state_col = col_map.get('state') is not None
+        has_street2_col = col_map.get('street2') is not None
         total = len(df)
 
         for i, (idx, row) in enumerate(df.iterrows()):
             if progress_callback:
-                pct = 20 + int((i + 1) / total * 80)
+                pct = int((i + 1) / total * 100)
                 progress_callback(pct, 100, f"Validating address {i + 1}/{total}...")
 
             parsed = parsed_addresses[i]
@@ -476,6 +492,14 @@ class ZipValidator:
                 skipped_count += 1
                 continue
 
+            # Read Street 2 (CC name, location info) — sent to Google for context
+            street2 = ''
+            if has_street2_col:
+                s2_raw = row.get(col_map['street2'], '')
+                street2 = str(s2_raw).strip().rstrip('-').strip() if pd.notna(s2_raw) else ''
+                if street2.lower() == 'nan':
+                    street2 = ''
+
             # Pad ZIP for Italian addresses
             try:
                 zip_padded = str(int(float(str(original_zip)))).zfill(5)
@@ -484,7 +508,7 @@ class ZipValidator:
 
             # --- Call Google Address Validation API ---
             api_response = self.address_validator.validate_address(
-                parsed, city, zip_padded, state
+                parsed, city, zip_padded, state, street2=street2
             )
 
             if not api_response or "result" not in api_response:
@@ -576,12 +600,20 @@ class ZipValidator:
             # Handle location info → Street 2 (prefer API's point_of_interest, fall back to Claude's)
             location_info = outcome.location_info or parsed.location_info
             street2_col = col_map.get('street2')
-            if location_info and street2_col:
-                existing_street2 = str(row.get(street2_col, '')).strip()
-                if not existing_street2 or existing_street2.lower() == 'nan':
-                    df.at[idx, street2_col] = location_info
-                elif location_info.lower() not in existing_street2.lower():
-                    df.at[idx, street2_col] = f"{existing_street2} - {location_info}"
+            if street2_col:
+                existing_street2 = str(row.get(street2_col, '')).strip().rstrip('-').strip()
+                if existing_street2.lower() == 'nan':
+                    existing_street2 = ''
+                # Always write back cleaned Street 2 (trailing dash removed)
+                if location_info:
+                    if not existing_street2:
+                        df.at[idx, street2_col] = location_info
+                    elif location_info.lower() not in existing_street2.lower():
+                        df.at[idx, street2_col] = f"{existing_street2} - {location_info}"
+                    else:
+                        df.at[idx, street2_col] = existing_street2
+                elif existing_street2:
+                    df.at[idx, street2_col] = existing_street2
 
             result = ValidationResult(
                 row_index=idx,
@@ -687,6 +719,15 @@ class ZipValidator:
                 current_phone = df.at[result.row_index, phone_col]
                 if pd.isna(current_phone) or not str(current_phone).strip() or str(current_phone).lower() == 'nan':
                     df.at[result.row_index, phone_col] = self.DEFAULT_PHONE
+
+            # Clean trailing dashes from Street 2 (common in import files)
+            street2_col = col_map.get('street2')
+            if street2_col:
+                s2 = str(df.at[result.row_index, street2_col]).strip()
+                if s2 and s2.lower() != 'nan':
+                    cleaned = s2.rstrip('-').strip()
+                    if cleaned != s2:
+                        df.at[result.row_index, street2_col] = cleaned
 
             # Set Cash on Delivery to 0 always (IT addresses only)
             if cod_col and result.country_code == 'IT':

@@ -32,8 +32,32 @@ export function ParseReviewTable({
   // Inline edit draft state (local to this component, flushed on Save)
   const [editDraft, setEditDraft] = useState<Record<string, string>>({})
 
+  // Filter state: null = show all, or one of the badge filter keys
+  const [activeFilter, setActiveFilter] = useState<"ai" | "regex" | "modified" | "unchanged" | null>(null)
+
   const modifiedRows = rows.filter((r) => r.changed && r.method === "ai")
   const aiCoverage = summary.total > 0 ? Math.round((summary.ai_parsed / summary.total) * 100) : 0
+
+  // Apply filter to rows shown in the table
+  const filteredRows = activeFilter
+    ? rows.filter((r) => {
+        switch (activeFilter) {
+          case "ai": return r.method === "ai"
+          case "regex": return r.method === "regex"
+          case "modified": return r.changed
+          case "unchanged": return !r.changed
+        }
+      })
+    : rows
+
+  function toggleFilter(filter: "ai" | "regex" | "modified" | "unchanged") {
+    if (activeFilter === filter) {
+      setActiveFilter(null)
+    } else {
+      setActiveFilter(filter)
+      setShowAllRows(true)
+    }
+  }
 
   // Get the current display value for a row field (edits override parsed)
   function getDisplayValue(row: ParsedRow, field: keyof ParsedRow["parsed"]): string {
@@ -86,20 +110,56 @@ export function ParseReviewTable({
             </div>
           </div>
 
-          {/* Stats row */}
+          {/* Stats row — clickable filters */}
           <div className="flex flex-wrap gap-2">
-            <Badge variant="outline" className="text-xs px-2.5 py-1">
+            <Badge
+              variant="outline"
+              className={cn(
+                "text-xs px-2.5 py-1 cursor-pointer transition-colors select-none",
+                activeFilter === "ai"
+                  ? "bg-indigo-100 border-indigo-500 text-indigo-700"
+                  : "hover:bg-muted"
+              )}
+              onClick={() => toggleFilter("ai")}
+            >
               {summary.ai_parsed} AI
             </Badge>
             {summary.regex_fallback > 0 && (
-              <Badge variant="outline" className="text-xs px-2.5 py-1 border-amber-400 text-amber-700">
+              <Badge
+                variant="outline"
+                className={cn(
+                  "text-xs px-2.5 py-1 cursor-pointer transition-colors select-none",
+                  activeFilter === "regex"
+                    ? "bg-amber-100 border-amber-500 text-amber-800"
+                    : "border-amber-400 text-amber-700 hover:bg-amber-50"
+                )}
+                onClick={() => toggleFilter("regex")}
+              >
                 {summary.regex_fallback} regex fallback
               </Badge>
             )}
-            <Badge variant="outline" className="text-xs px-2.5 py-1">
+            <Badge
+              variant="outline"
+              className={cn(
+                "text-xs px-2.5 py-1 cursor-pointer transition-colors select-none",
+                activeFilter === "modified"
+                  ? "bg-indigo-100 border-indigo-500 text-indigo-700"
+                  : "hover:bg-muted"
+              )}
+              onClick={() => toggleFilter("modified")}
+            >
               {summary.ai_modified} modificati
             </Badge>
-            <Badge variant="outline" className="text-xs px-2.5 py-1">
+            <Badge
+              variant="outline"
+              className={cn(
+                "text-xs px-2.5 py-1 cursor-pointer transition-colors select-none",
+                activeFilter === "unchanged"
+                  ? "bg-indigo-100 border-indigo-500 text-indigo-700"
+                  : "hover:bg-muted"
+              )}
+              onClick={() => toggleFilter("unchanged")}
+            >
               {summary.unchanged} invariati
             </Badge>
           </div>
@@ -242,8 +302,22 @@ export function ParseReviewTable({
           onClick={() => setShowAllRows(!showAllRows)}
           className="w-full px-5 py-3 text-left text-sm font-medium text-primary hover:bg-muted/50 transition-colors flex items-center justify-between"
         >
-          <span>Mostra tutti ({rows.length} righe)</span>
-          <span className="text-xs">{showAllRows ? "\u25B4" : "\u25BE"}</span>
+          <span>
+            {activeFilter
+              ? `${filteredRows.length} di ${rows.length} righe`
+              : `Mostra tutti (${rows.length} righe)`}
+          </span>
+          <div className="flex items-center gap-2">
+            {activeFilter && (
+              <span
+                className="text-xs text-muted-foreground hover:text-foreground cursor-pointer"
+                onClick={(e) => { e.stopPropagation(); setActiveFilter(null) }}
+              >
+                Rimuovi filtro
+              </span>
+            )}
+            <span className="text-xs">{showAllRows ? "\u25B4" : "\u25BE"}</span>
+          </div>
         </button>
 
         {showAllRows && (
@@ -259,7 +333,7 @@ export function ParseReviewTable({
                 </tr>
               </thead>
               <tbody>
-                {rows.map((row) => (
+                {filteredRows.map((row) => (
                   <tr
                     key={row.index}
                     className={cn(

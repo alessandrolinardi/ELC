@@ -76,3 +76,8 @@ class ParsedJobResult(BaseModel):
 class ConfirmRequest(BaseModel):
     edits: dict[str, dict[str, str]] = {}
     retry_regex_rows: bool = False
+
+
+class ApplyCorrectionsRequest(BaseModel):
+    """User corrections applied to Phase 2 results before file generation."""
+    corrections: dict[str, dict[str, str]] = {}  # row_index -> {field: value}

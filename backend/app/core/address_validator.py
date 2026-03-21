@@ -28,17 +28,22 @@ class AddressValidator:
         self._italian_db = get_italian_db()
 
     def validate_address(self, parsed: ParsedAddress, city: str,
-                          zip_code: str, state: str = "") -> Optional[dict]:
+                          zip_code: str, state: str = "",
+                          street2: str = "") -> Optional[dict]:
         """Call Google Address Validation API for a single address."""
         if not self.api_key:
             return None
+
+        address_lines = [parsed.street_with_number]
+        if street2:
+            address_lines.append(street2)
 
         payload = {
             "address": {
                 "regionCode": parsed.country_code,
                 "locality": city,
                 "postalCode": zip_code,
-                "addressLines": [parsed.street_with_number],
+                "addressLines": address_lines,
                 "administrativeArea": state,
             }
         }
@@ -79,6 +84,8 @@ class AddressValidator:
 
         # --- Step 1: Override FIX for missing house number ---
         critical_missing = [m for m in missing if m not in IGNORABLE_MISSING]
+        # Address intentionally has no house number (empty or SNC)
+        no_house_number = not parsed.house_number or parsed.house_number.upper() == "SNC"
 
         if action == "FIX" and not critical_missing:
             has_suspicious = any(
@@ -87,9 +94,13 @@ class AddressValidator:
             )
             has_unresolved = bool(address.get("unresolvedTokens"))
 
-            if has_suspicious or has_unresolved or granularity == "OTHER":
+            if has_suspicious or has_unresolved:
+                action = "FIX"
+            elif granularity == "OTHER" and not no_house_number:
+                # OTHER granularity is suspicious only when a house number was provided
                 action = "FIX"
             else:
+                # ROUTE granularity is expected when no house number was given
                 action = "CONFIRM"
 
         # --- Step 2: Detect silent corrections ---

@@ -14,9 +14,29 @@ from ..core.security import (
     check_rate_limit, record_usage, validate_excel_content,
     sanitize_filename, record_failed_attempt
 )
-from ..schemas.validator import ConfirmRequest
+from ..schemas.validator import ConfirmRequest, ApplyCorrectionsRequest
 
 router = APIRouter()
+
+# Shared regex-only parser for re-parsing user edits (no API key needed)
+_regex_parser = AddressParser()
+
+# ZIP-like column names (lowercase) — read as string to preserve leading zeros
+_ZIP_COLUMN_NAMES = {'zip', 'cap', 'postal code', 'postcode', 'zip code'}
+
+
+def _read_excel_preserve_zip(source, **kwargs) -> pd.DataFrame:
+    """Read Excel, keeping ZIP columns as strings to preserve leading zeros."""
+    # First pass: read header only to find ZIP column
+    df_head = pd.read_excel(source, nrows=0, **kwargs)
+    str_cols = {
+        col: str for col in df_head.columns
+        if col.lower().strip() in _ZIP_COLUMN_NAMES
+    }
+    # Re-read with ZIP columns forced to string
+    if hasattr(source, 'seek'):
+        source.seek(0)
+    return pd.read_excel(source, dtype=str_cols, **kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -34,9 +54,13 @@ def _process_parse(
     """Run AI address parsing in background thread (Phase 1)."""
     settings = get_settings()
     try:
-        # Parse Excel
-        df = pd.read_excel(io.BytesIO(excel_bytes))
+        # Parse Excel (preserve ZIP leading zeros)
+        df = _read_excel_preserve_zip(io.BytesIO(excel_bytes))
         df = df.reset_index(drop=True)
+
+        if len(df) == 0:
+            job_store.update_status(job_id, "failed", error="Il file non contiene righe di dati")
+            return
 
         # Content validation
         valid, error = validate_excel_content(df)
@@ -89,10 +113,19 @@ def _process_parse(
         ai_modified = 0
         unchanged = 0
 
+        def _normalize_for_diff(s: str) -> str:
+            """Normalize street for meaningful-change detection.
+            Strips punctuation and collapses whitespace so 'Via Roma,1' == 'Via Roma 1'."""
+            import re as _re
+            s = s.strip().lower()
+            s = _re.sub(r'[,.\-\'\"()/]', ' ', s)
+            s = _re.sub(r'\s+', ' ', s).strip()
+            return s
+
         for i, (parsed_addr, raw) in enumerate(zip(parsed_addresses, raw_addresses)):
             original_street = raw["street"]
             parsed_street = parsed_addr.full_street
-            changed = original_street.strip().lower() != parsed_street.strip().lower()
+            changed = _normalize_for_diff(original_street) != _normalize_for_diff(parsed_street)
 
             changes = []
             if changed:
@@ -168,10 +201,12 @@ def _process_validate(
     settings = get_settings()
     try:
         # Retry regex rows if requested
+        has_retry = False
         if retry_regex:
             regex_rows = [r for r in parsed_rows if r["method"] == "regex" and not r.get("edited")]
             if regex_rows:
-                job_store.update_progress(job_id, 0, len(regex_rows), "Nuovo tentativo AI...")
+                has_retry = True
+                job_store.update_progress(job_id, 0, 100, "Nuovo tentativo AI...")
                 parser = AddressParser(api_key=settings.anthropic_api_key)
                 addresses = [
                     {"street": r["original"]["street"], "city": r["original"]["city"], "zip": r["original"]["zip"]}
@@ -191,13 +226,40 @@ def _process_validate(
                         row["method"] = new_parsed.parse_method
                 except Exception:
                     pass  # Keep regex results
+                job_store.update_progress(job_id, 10, 100, "Re-parsing complete")
 
         # Load original Excel — reset index to ensure 0-based alignment
         excel_path = job_store.get_file_path(job_id, "original.xlsx")
         if not excel_path:
             job_store.update_status(job_id, "failed", error="Original Excel file not found")
             return
-        df = pd.read_excel(excel_path).reset_index(drop=True)
+        df = _read_excel_preserve_zip(excel_path).reset_index(drop=True)
+
+        # Apply confirmed/edited values to the DataFrame so Google API
+        # receives the AI-fixed + user-edited data, not the raw originals.
+        # Map column names once to find Street/City/Zip columns.
+        columns_lower = {c.lower().strip(): c for c in df.columns}
+        street_col = next((columns_lower[n] for n in ['street 1', 'street', 'address', 'indirizzo', 'via'] if n in columns_lower), None)
+        city_col = next((columns_lower[n] for n in ['city', 'città', 'citta'] if n in columns_lower), None)
+        zip_col = next((columns_lower[n] for n in ['zip', 'cap', 'postal code', 'postcode', 'zip code'] if n in columns_lower), None)
+
+        for row in parsed_rows:
+            idx = row["index"]
+            if idx < len(df):
+                parsed_data = row["parsed"]
+                if street_col and "street" in parsed_data:
+                    df.at[idx, street_col] = parsed_data["street"]
+                if city_col and "city" in parsed_data:
+                    df.at[idx, city_col] = parsed_data["city"]
+                if zip_col and "zip" in parsed_data:
+                    # Convert to match column dtype (ZIP may be int64 in Excel)
+                    zip_val = parsed_data["zip"]
+                    if df[zip_col].dtype in ('int64', 'float64'):
+                        try:
+                            zip_val = int(float(zip_val))
+                        except (ValueError, TypeError):
+                            pass
+                    df.at[idx, zip_col] = zip_val
 
         # Build ParsedAddress objects from confirmed rows
         parsed_addresses = []
@@ -210,6 +272,7 @@ def _process_validate(
                 location_info=comp.get("location_info", ""),
                 country_code=comp.get("country_code", "IT"),
                 confidence="medium",
+                parse_method=row.get("method", "unknown"),
             ))
 
         # Run Google validation (Phase 2)
@@ -220,8 +283,16 @@ def _process_validate(
             anthropic_api_key=settings.anthropic_api_key,
         )
 
+        # Scale validation progress: 10-100% if retry happened, 0-100% otherwise
+        progress_base = 10 if has_retry else 0
+        progress_range = 100 - progress_base
+
         def progress_callback(current, total, message):
-            job_store.update_progress(job_id, current, total, message)
+            if total > 0:
+                scaled = progress_base + int(current / total * progress_range)
+            else:
+                scaled = progress_base
+            job_store.update_progress(job_id, scaled, 100, message)
 
         report, preprocessed_df = validator._validate_addresses(df, parsed_addresses, progress_callback)
 
@@ -252,9 +323,9 @@ def _process_validate(
                 corrections.append(f"Via \u2192 {r.suggested_street}")
 
             # Carry forward parse method from Phase 1
-            parse_method = "ai"
+            parse_method = "unknown"
             if i < len(parsed_rows):
-                parse_method = parsed_rows[i].get("method", "ai")
+                parse_method = parsed_rows[i].get("method", "unknown")
 
             row_results.append({
                 "status": status,
@@ -308,6 +379,20 @@ async def create_validator_job(
             "ok": False, "error": {"code": "FILE_TOO_LARGE", "message": f"File exceeds {settings.max_file_size_mb}MB"}
         })
 
+    # Quick-check: reject empty files before creating a job
+    try:
+        quick_df = _read_excel_preserve_zip(io.BytesIO(content))
+        if len(quick_df) == 0:
+            raise HTTPException(status_code=400, detail={
+                "ok": False, "error": {"code": "EMPTY_FILE", "message": "Il file non contiene righe di dati"}
+            })
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=400, detail={
+            "ok": False, "error": {"code": "INVALID_FILE", "message": "Unable to read Excel file"}
+        })
+
     client_ip = request.client.host if request.client else "unknown"
 
     # Validate bypass_pin in request handler (not in background thread)
@@ -326,29 +411,35 @@ async def create_validator_job(
 
 @router.post("/jobs/{job_id}/confirm")
 async def confirm_validation(job_id: str, body: ConfirmRequest):
-    status = job_store.get_status(job_id)
-    if status is None:
-        raise HTTPException(status_code=404, detail={
-            "ok": False, "error": {"code": "JOB_NOT_FOUND", "message": "Job not found or expired"}
-        })
-    if status["status"] != "parsed":
+    # Atomic state transition — prevents double-confirm
+    if not job_store.transition_status(job_id, "parsed", "processing_validate"):
+        status = job_store.get_status(job_id)
+        if status is None:
+            raise HTTPException(status_code=404, detail={
+                "ok": False, "error": {"code": "JOB_NOT_FOUND", "message": "Job not found or expired"}
+            })
         raise HTTPException(status_code=409, detail={
-            "ok": False, "error": {"code": "INVALID_STATE", "message": f"Job is in state '{status['status']}', expected 'parsed'"}
+            "ok": False, "error": {"code": "INVALID_STATE",
+            "message": f"Job is in state '{status['status']}', expected 'parsed'"}
         })
 
-    # Apply user edits
+    # Now safe — status is "processing_validate", no other confirm can pass
+    status = job_store.get_status(job_id)  # deep copy, safe to mutate
     parsed_rows = status["result"]["rows"]
+
+    # Apply user edits
     for idx_str, field_edits in body.edits.items():
         idx = int(idx_str)
         row = next((r for r in parsed_rows if r["index"] == idx), None)
         if row:
             row["parsed"].update(field_edits)
-            if "street" in field_edits:
-                parser = AddressParser()
-                re_parsed = parser.parse_single_regex(
-                    field_edits["street"],
+            if "street" in field_edits or "city" in field_edits or "zip" in field_edits:
+                existing_country = row.get("parsed_components", {}).get("country_code", "IT")
+                re_parsed = _regex_parser.parse_single_regex(
+                    row["parsed"].get("street", ""),
                     row["parsed"].get("city", ""),
                     row["parsed"].get("zip", ""),
+                    default_country=existing_country,
                 )
                 row["parsed_components"] = {
                     "street_prefix": re_parsed.street_prefix,
@@ -357,12 +448,11 @@ async def confirm_validation(job_id: str, body: ConfirmRequest):
                     "location_info": re_parsed.location_info,
                     "country_code": re_parsed.country_code,
                 }
+                row["method"] = "user_edit"
             row["edited"] = True
 
     # Get stored config from the parsed result
     config = status.get("result", {}).get("config", {})
-
-    job_store.update_status(job_id, "processing_validate")
 
     loop = asyncio.get_running_loop()
     loop.run_in_executor(
@@ -373,3 +463,66 @@ async def confirm_validation(job_id: str, body: ConfirmRequest):
     )
 
     return {"ok": True, "data": {"status": "processing_validate"}}
+
+
+@router.post("/jobs/{job_id}/apply-corrections")
+async def apply_corrections(job_id: str, body: ApplyCorrectionsRequest):
+    """Apply user corrections to the corrected Excel file.
+
+    Called after Phase 2 when user has reviewed results and made edits
+    to 'Da verificare' rows before downloading.
+    """
+    status = job_store.get_status(job_id)
+    if status is None:
+        raise HTTPException(status_code=404, detail={
+            "ok": False, "error": {"code": "JOB_NOT_FOUND", "message": "Job not found or expired"}
+        })
+    if status["status"] != "complete":
+        raise HTTPException(status_code=409, detail={
+            "ok": False, "error": {"code": "INVALID_STATE",
+            "message": f"Job is in state '{status['status']}', expected 'complete'"}
+        })
+
+    if not body.corrections:
+        return {"ok": True, "data": {"applied": 0}}
+
+    # Load the corrected Excel
+    corrected_path = job_store.get_file_path(job_id, "corrected.xlsx")
+    if not corrected_path:
+        raise HTTPException(status_code=404, detail={
+            "ok": False, "error": {"code": "FILE_NOT_FOUND", "message": "Corrected file not found"}
+        })
+
+    df = _read_excel_preserve_zip(corrected_path)
+
+    # Map column names
+    columns_lower = {c.lower().strip(): c for c in df.columns}
+    street_col = next((columns_lower[n] for n in ['street 1', 'street', 'address', 'indirizzo', 'via'] if n in columns_lower), None)
+    city_col = next((columns_lower[n] for n in ['city', 'città', 'citta'] if n in columns_lower), None)
+    zip_col = next((columns_lower[n] for n in ['zip', 'cap', 'postal code', 'postcode', 'zip code'] if n in columns_lower), None)
+
+    applied = 0
+    for idx_str, fields in body.corrections.items():
+        idx = int(idx_str)
+        if idx < 0 or idx >= len(df):
+            continue
+        if "street" in fields and street_col:
+            df.at[idx, street_col] = fields["street"]
+        if "city" in fields and city_col:
+            df.at[idx, city_col] = fields["city"]
+        if "zip" in fields and zip_col:
+            zip_val = fields["zip"]
+            if df[zip_col].dtype in ('int64', 'float64'):
+                try:
+                    zip_val = int(float(zip_val))
+                except (ValueError, TypeError):
+                    pass
+            df.at[idx, zip_col] = zip_val
+        applied += 1
+
+    # Write back
+    output = io.BytesIO()
+    df.to_excel(output, index=False, engine='openpyxl')
+    job_store.save_file(job_id, "corrected.xlsx", output.getvalue())
+
+    return {"ok": True, "data": {"applied": applied}}

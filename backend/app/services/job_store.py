@@ -1,4 +1,5 @@
 """Job storage — in-memory index + disk for result files."""
+import copy
 import shutil
 import time
 import uuid
@@ -68,12 +69,21 @@ class JobStore:
                 "message": message,
             }
 
+    def transition_status(self, job_id: str, expected: str, new_status: str) -> bool:
+        """Atomically check current status and transition. Returns True if transitioned."""
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None or job["status"] != expected:
+                return False
+            job["status"] = new_status
+            return True
+
     def get_status(self, job_id: str) -> Optional[dict]:
         with self._lock:
             job = self._jobs.get(job_id)
             if job is None:
                 return None
-            return {**job}
+            return copy.deepcopy(job)
 
     def save_file(self, job_id: str, filename: str, data: bytes):
         with self._lock:

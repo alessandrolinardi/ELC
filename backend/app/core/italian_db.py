@@ -152,8 +152,9 @@ class ItalianDB:
 
     def validate_cap_for_provincia(self, cap: str, provincia: str) -> tuple[bool, str]:
         """
-        Validate if a CAP belongs to a given provincia.
-        More accurate than the old prefix-based check.
+        Validate if a CAP belongs to a given provincia or region.
+        Accepts province codes (PE, MI), province names (Pescara, Milano),
+        or region names (Abruzzo, Lombardia).
         """
         self.load()
 
@@ -167,14 +168,20 @@ class ItalianDB:
                 return True, ""  # CAP exists but no province match data
             return False, f"CAP {cap} does not exist in Italy"
 
-        # Check if any comune with this CAP is in the given provincia
-        for r in comuni:
-            if r.get("sigla_provincia", "").upper() == provincia.upper().strip():
-                return True, f"CAP {cap} matches province {provincia}"
+        input_upper = provincia.upper().strip()
 
-        # CAP exists but belongs to different provincia
+        # Check against province sigla (PE, MI), province name, AND region name
+        for r in comuni:
+            sigla = r.get("sigla_provincia", "").upper()
+            prov_name = r.get("denominazione_provincia", "").upper()
+            region = r.get("denominazione_regione", "").upper()
+            if input_upper in (sigla, prov_name, region):
+                return True, f"CAP {cap} matches {provincia}"
+
+        # CAP exists but belongs to different area
         actual_provinces = set(r.get("sigla_provincia", "") for r in comuni)
-        return False, f"CAP {cap} belongs to province {', '.join(sorted(actual_provinces))}, not {provincia}"
+        actual_regions = set(r.get("denominazione_regione", "") for r in comuni)
+        return False, f"CAP {cap} belongs to province {', '.join(sorted(actual_provinces))} ({', '.join(sorted(actual_regions))}), not {provincia}"
 
     def get_comune_info(self, comune: str) -> list[dict]:
         """Get all records for a comune name."""

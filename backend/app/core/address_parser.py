@@ -31,6 +31,9 @@ LOCATION_PREFIXES = [
     'galleria commerciale',
     'outlet',
     'retail park',
+    # Località / Frazione prefixes (common in rural Italian addresses)
+    'località', 'localita', 'loc.', 'loc ',
+    'frazione', 'fraz.', 'fraz ',
 ]
 
 PARSE_TOOL = {
@@ -79,6 +82,9 @@ Critical rules for Italian addresses:
 - "KM 5" at the end is a house_number (kilometer marker)
 - Location prefixes come BEFORE the street: "C.C. Le Grange Via Roma 1"
   → location_info="C.C. Le Grange", street_prefix="Via", street_name="Roma", house_number="1"
+- Location can also trail AFTER the street: "Via della Pace-Loc. Pascolaro"
+  → street_prefix="Via", street_name="della Pace", location_info="Loc. Pascolaro"
+- Loc./Località/Fraz./Frazione indicate location info, not part of the street name
 - Abbreviations: "V."="Via", "P.zza"="Piazza", "C.so"="Corso", "V.le"="Viale", "L.go"="Largo"
   Expand them in street_prefix.
 - Country detection: Italian ZIPs are 5 digits (00xxx-99xxx), Italian streets start with Via/Piazza/Corso etc.
@@ -125,6 +131,7 @@ class AddressParser:
             batches.append((i, batch))
 
         # Process batches in parallel
+        failed_batches = []
         with ThreadPoolExecutor(max_workers=4) as executor:
             futures = {}
             for start_idx, batch in batches:
@@ -138,21 +145,26 @@ class AddressParser:
                     for i, parsed in enumerate(batch_results):
                         results[start_idx + i] = parsed
                 except Exception as e:
-                    logger.warning(f"Batch at {start_idx} failed: {e}, retrying in 2s...")
-                    time.sleep(2)
-                    try:
-                        batch_results = self._parse_batch_claude(batch, start_idx)
-                        for i, parsed in enumerate(batch_results):
-                            results[start_idx + i] = parsed
-                        self.metrics.batch_retries_succeeded += 1
-                    except Exception as e2:
-                        logger.error(f"Batch at {start_idx} retry also failed: {e2}, falling back to regex")
-                        self.metrics.batch_failures += 1
-                        for i, addr in enumerate(batch):
-                            results[start_idx + i] = self.parse_single_regex(
-                                addr["street"], addr["city"], addr["zip"]
-                            )
-                            self.metrics.regex_fallback += 1
+                    logger.warning(f"Batch at {start_idx} failed: {e}, queuing retry")
+                    failed_batches.append((start_idx, batch))
+
+        # Retry failed batches outside the executor loop
+        if failed_batches:
+            time.sleep(2)
+            for start_idx, batch in failed_batches:
+                try:
+                    batch_results = self._parse_batch_claude(batch, start_idx)
+                    for i, parsed in enumerate(batch_results):
+                        results[start_idx + i] = parsed
+                    self.metrics.batch_retries_succeeded += 1
+                except Exception as e2:
+                    logger.error(f"Batch at {start_idx} retry failed: {e2}, falling back to regex")
+                    self.metrics.batch_failures += 1
+                    for i, addr in enumerate(batch):
+                        results[start_idx + i] = self.parse_single_regex(
+                            addr["street"], addr["city"], addr["zip"]
+                        )
+                        self.metrics.regex_fallback += 1
 
         # Fill any remaining None slots with regex
         for i, result in enumerate(results):
@@ -238,7 +250,8 @@ class AddressParser:
             results.append(parsed)
         return results
 
-    def parse_single_regex(self, street: str, city: str, zip_code: str) -> ParsedAddress:
+    def parse_single_regex(self, street: str, city: str, zip_code: str,
+                           default_country: str = "IT") -> ParsedAddress:
         """Parse a single address using regex patterns."""
         original = street.strip() if street else ""
 
@@ -256,6 +269,24 @@ class AddressParser:
                         clean_street = original[match.start():].strip()
                         break
                 break
+
+        # Step 1b: Extract trailing location suffix (e.g., "Via della Pace-Loc. Pascolaro")
+        if not location_info:
+            trailing_loc_match = re.search(
+                r'[\s\-]+(?:loc\.?|località|localita|fraz\.?|frazione)\s+',
+                clean_street, re.IGNORECASE
+            )
+            if trailing_loc_match:
+                loc_part = clean_street[trailing_loc_match.start():].lstrip(' -').strip()
+                # Don't capture trailing house number (e.g., "Loc. San Polo,1" → loc="Loc. San Polo", num goes to street)
+                loc_num_match = re.search(r'[,]\s*(\d+[/\-]?\w*)\s*$', loc_part)
+                if loc_num_match:
+                    location_info = loc_part[:loc_num_match.start()].strip()
+                    # Put house number back on clean_street for Step 3
+                    clean_street = clean_street[:trailing_loc_match.start()].strip() + "," + loc_num_match.group(1)
+                else:
+                    location_info = loc_part
+                    clean_street = clean_street[:trailing_loc_match.start()].strip()
 
         # Step 2: Extract street prefix
         street_prefix = ""
@@ -284,15 +315,17 @@ class AddressParser:
                 street_name = street_name[:km_match.start()].strip()
             else:
                 # Match house numbers at the end: "10", "11/A", "123bis"
+                # Also handles comma-separated: "Giolitti,2", "Sparano,140"
+                # And compound numbers: "12/14/16", "12-12/A"
                 num_match = re.search(
-                    r'\s+(\d+[/\-]?\w*(?:\s+\d+[/\-]?\w*)*)\s*$', street_name
+                    r'[,\s]+(\d+(?:[/\-]\w+)*(?:[,\s]+\d+(?:[/\-]\w+)*)*)\s*$', street_name
                 )
                 if num_match:
                     house_number = num_match.group(1)
                     street_name = street_name[:num_match.start()].strip()
 
-        # Step 4: Detect country from ZIP format
-        country_code = "IT"  # default
+        # Step 4: Detect country from ZIP format (fall back to caller's default)
+        country_code = default_country
         zip_clean = re.sub(r'[^A-Z0-9]', '', str(zip_code).upper().strip())
 
         if re.match(r'^[A-Z]{1,2}[0-9][0-9A-Z]?\s*[0-9][A-Z]{2}$', zip_clean):
