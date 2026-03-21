@@ -10,6 +10,7 @@ from ..services.job_store import job_store
 from ..core.zip_validator import ZipValidator
 from ..core.address_parser import AddressParser
 from ..core.models import ParsedAddress
+from ..core.utils import map_columns, sanitize_cell
 from ..core.security import (
     check_rate_limit, record_usage, validate_excel_content,
     sanitize_filename, record_failed_attempt
@@ -242,11 +243,10 @@ def _process_validate(
 
         # Apply confirmed/edited values to the DataFrame so Google API
         # receives the AI-fixed + user-edited data, not the raw originals.
-        # Map column names once to find Street/City/Zip columns.
-        columns_lower = {c.lower().strip(): c for c in df.columns}
-        street_col = next((columns_lower[n] for n in ['street 1', 'street', 'address', 'indirizzo', 'via'] if n in columns_lower), None)
-        city_col = next((columns_lower[n] for n in ['city', 'città', 'citta'] if n in columns_lower), None)
-        zip_col = next((columns_lower[n] for n in ['zip', 'cap', 'postal code', 'postcode', 'zip code'] if n in columns_lower), None)
+        col_map = map_columns(df)
+        street_col = col_map.get("street")
+        city_col = col_map.get("city")
+        zip_col = col_map.get("zip")
 
         for row in parsed_rows:
             idx = row["index"]
@@ -500,17 +500,10 @@ async def apply_corrections(job_id: str, body: ApplyCorrectionsRequest):
 
     df = _read_excel_preserve_zip(corrected_path)
 
-    # Map column names
-    columns_lower = {c.lower().strip(): c for c in df.columns}
-    street_col = next((columns_lower[n] for n in ['street 1', 'street', 'address', 'indirizzo', 'via'] if n in columns_lower), None)
-    city_col = next((columns_lower[n] for n in ['city', 'città', 'citta'] if n in columns_lower), None)
-    zip_col = next((columns_lower[n] for n in ['zip', 'cap', 'postal code', 'postcode', 'zip code'] if n in columns_lower), None)
-
-    def _sanitize_cell(value: str) -> str:
-        """Prevent Excel formula injection by escaping dangerous prefixes."""
-        if value and value.strip() and value.strip()[0] in ('=', '+', '-', '@', '\t', '\r', '\n'):
-            return "'" + value
-        return value
+    col_map = map_columns(df)
+    street_col = col_map.get("street")
+    city_col = col_map.get("city")
+    zip_col = col_map.get("zip")
 
     applied = 0
     for idx_str, fields in body.corrections.items():
@@ -518,9 +511,9 @@ async def apply_corrections(job_id: str, body: ApplyCorrectionsRequest):
         if idx < 0 or idx >= len(df):
             continue
         if "street" in fields and street_col:
-            df.at[idx, street_col] = _sanitize_cell(fields["street"])
+            df.at[idx, street_col] = sanitize_cell(fields["street"])
         if "city" in fields and city_col:
-            df.at[idx, city_col] = _sanitize_cell(fields["city"])
+            df.at[idx, city_col] = sanitize_cell(fields["city"])
         if "zip" in fields and zip_col:
             zip_val = fields["zip"]
             if df[zip_col].dtype in ('int64', 'float64'):

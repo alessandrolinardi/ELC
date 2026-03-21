@@ -6,7 +6,6 @@ Uses Supabase for reliable persistence across deploys and instances.
 """
 
 import hashlib
-import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 import logging

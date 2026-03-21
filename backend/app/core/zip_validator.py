@@ -23,6 +23,7 @@ from .config_compat import get_supabase_client
 from .models import ParsedAddress, ValidationOutcome, ParsingMetrics
 from .address_parser import AddressParser
 from .address_validator import AddressValidator
+from .utils import map_columns, sanitize_cell
 
 # Logger for this module
 logger = get_logger(__name__)
@@ -256,18 +257,6 @@ class ZipValidator:
 
     # =========================================================================
     # Regex fallback (kept for Tier 2/3)
-    # =========================================================================
-
-    def _extract_house_number(self, street: str) -> tuple[str, str]:
-        """Extract house number from the end of a street address."""
-        if not street:
-            return "", ""
-        match = re.search(r'\s+(\d+[/\-]?\w*(?:\s+\d+[/\-]?\w*)*)\s*$', street)
-        if match:
-            house_num = match.group(1)
-            street_only = street[:match.start()].strip()
-            return street_only, house_num
-        return street, ""
 
     # =========================================================================
     # Column mapping (unchanged)
@@ -275,29 +264,7 @@ class ZipValidator:
 
     def _map_columns(self, df: pd.DataFrame) -> dict:
         """Map DataFrame columns to expected fields."""
-        col_map = {}
-        columns_lower = {c.lower().strip(): c for c in df.columns}
-
-        mappings = {
-            'name': ['name', 'nome', 'customer name'],
-            'street': ['street 1', 'street', 'address', 'indirizzo', 'via'],
-            'street2': ['street 2', 'street2', 'address 2', 'indirizzo 2'],
-            'city': ['city', 'città', 'citta'],
-            'state': ['state', 'province', 'provincia', 'regione'],
-            'zip': ['zip', 'cap', 'postal code', 'postcode', 'zip code'],
-            'country': ['country', 'paese', 'nazione'],
-            'phone': ['phone', 'telefono', 'tel', 'phone number', 'telephone'],
-            'cash_on_delivery': ['cash on delivery', 'cod', 'contrassegno', 'cash_on_delivery'],
-            'order_number': ['order number', 'order', 'ordine', 'numero ordine', 'po', 'purchase order'],
-        }
-
-        for field, possible_names in mappings.items():
-            for name in possible_names:
-                if name in columns_lower:
-                    col_map[field] = columns_lower[name]
-                    break
-
-        return col_map
+        return map_columns(df)
 
     # =========================================================================
     # Main pipeline
@@ -741,7 +708,7 @@ class ZipValidator:
         # Sanitize string cells to prevent Excel formula injection
         for col in df.columns:
             df[col] = df[col].apply(
-                lambda x: "'" + str(x) if isinstance(x, str) and x and x.strip() and x.strip()[0] in ('=', '+', '-', '@', '\t', '\r', '\n') else x
+                lambda x: sanitize_cell(x) if isinstance(x, str) else x
             )
 
         output = BytesIO()
@@ -819,7 +786,7 @@ class ZipValidator:
         # Sanitize string cells to prevent Excel formula injection
         for col in df.columns:
             df[col] = df[col].apply(
-                lambda x: "'" + str(x) if isinstance(x, str) and x and x.strip() and x.strip()[0] in ('=', '+', '-', '@', '\t', '\r', '\n') else x
+                lambda x: sanitize_cell(x) if isinstance(x, str) else x
             )
 
         output = BytesIO()
