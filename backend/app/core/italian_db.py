@@ -188,6 +188,13 @@ class ItalianDB:
 
         # Find all comuni with this CAP
         comuni = self._cap_to_comuni.get(cap, [])
+        if not comuni and self._is_generic_cap(cap):
+            # Generic CAP (e.g., 57100 for Livorno) — look up comuni by specific CAPs with same prefix
+            prefix = cap[:2]
+            for specific_cap, cap_comuni in self._cap_to_comuni.items():
+                if specific_cap.startswith(prefix):
+                    comuni = cap_comuni
+                    break
         if not comuni:
             if cap in self._all_caps:
                 return True, ""  # CAP exists but no province match data
