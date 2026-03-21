@@ -376,22 +376,24 @@ export function ParseReviewTable({
         )}
       </div>
 
-      {/* === Action Bar === */}
-      <div className="flex justify-center pt-2">
-        <Button
-          onClick={onConfirm}
-          disabled={isConfirming}
-          className="bg-primary hover:bg-primary/90 text-white px-6"
-        >
-          {isConfirming ? (
-            <>
-              <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2" />
-              Avvio validazione...
-            </>
-          ) : (
-            "Conferma e avvia validazione Google"
-          )}
-        </Button>
+      {/* === Sticky Action Bar === */}
+      <div className="sticky bottom-0 z-10 bg-background/95 backdrop-blur-sm border-t border-border py-3 -mx-1 px-1">
+        <div className="flex justify-center">
+          <Button
+            onClick={onConfirm}
+            disabled={isConfirming}
+            className="bg-primary hover:bg-primary/90 text-white px-8 shadow-lg"
+          >
+            {isConfirming ? (
+              <>
+                <span className="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-2" />
+                Avvio validazione...
+              </>
+            ) : (
+              "Conferma e avvia validazione Google"
+            )}
+          </Button>
+        </div>
       </div>
     </div>
   )
