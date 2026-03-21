@@ -168,14 +168,23 @@ class ItalianDB:
                 return True, ""  # CAP exists but no province match data
             return False, f"CAP {cap} does not exist in Italy"
 
-        input_upper = provincia.upper().strip()
+        def _norm(s: str) -> str:
+            """Normalize for region/province comparison:
+            lowercase, strip, replace hyphens with spaces, drop bilingual suffixes."""
+            s = s.lower().strip().replace('-', ' ')
+            # Handle bilingual: "Valle d'Aosta/Vallée d'Aoste" → "valle d aosta"
+            if '/' in s:
+                s = s.split('/')[0].strip()
+            return s
+
+        input_norm = _norm(provincia)
 
         # Check against province sigla (PE, MI), province name, AND region name
         for r in comuni:
             sigla = r.get("sigla_provincia", "").upper()
-            prov_name = r.get("denominazione_provincia", "").upper()
-            region = r.get("denominazione_regione", "").upper()
-            if input_upper in (sigla, prov_name, region):
+            prov_name = r.get("denominazione_provincia", "")
+            region = r.get("denominazione_regione", "")
+            if provincia.upper().strip() == sigla or input_norm in (_norm(prov_name), _norm(region)):
                 return True, f"CAP {cap} matches {provincia}"
 
         # CAP exists but belongs to different area
