@@ -125,7 +125,11 @@ class AddressValidator:
         )
         locality_mismatch = False
         if api_admin3 and input_city:
-            if api_admin3.lower().strip() != input_city.lower().strip():
+            api_lower = api_admin3.lower().strip()
+            city_lower = input_city.lower().strip()
+            # Exact match, or one contains the other (handles frazioni like
+            # "Torreano di Martignacco" containing comune "Martignacco")
+            if api_lower != city_lower and api_lower not in city_lower and city_lower not in api_lower:
                 locality_mismatch = True
                 reasons.append(f"Address matched to {api_admin3}, not {input_city}")
 
