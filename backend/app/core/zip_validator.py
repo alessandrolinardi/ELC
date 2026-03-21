@@ -359,9 +359,6 @@ class ZipValidator:
         street_verified_count = 0
         street_corrected_count = 0
         po_invalid_count = 0
-        has_country_col = col_map.get('country') is not None
-        has_state_col = col_map.get('state') is not None
-        has_street2_col = col_map.get('street2') is not None
         total = len(df)
 
         for i, (idx, row) in enumerate(df.iterrows()):
@@ -370,264 +367,45 @@ class ZipValidator:
                 progress_callback(pct, 100, f"Validating address {i + 1}/{total}...")
 
             parsed = parsed_addresses[i]
-
-            name = str(row.get(col_map.get('name', ''), ''))
-            street = str(row.get(col_map.get('street', ''), ''))
-            city = str(row.get(col_map['city'], ''))
-            original_zip = str(row.get(col_map['zip'], ''))
-
-            # Get state/province if available
-            state = ''
-            if has_state_col:
-                state_raw = row.get(col_map['state'], '')
-                state = str(state_raw).strip() if pd.notna(state_raw) else ''
-
-            # Get phone — track if missing
-            phone_col = col_map.get('phone')
-            original_phone = ''
-            phone_missing = False
-            if phone_col:
-                phone_raw = row.get(phone_col, '')
-                original_phone = str(phone_raw).strip() if pd.notna(phone_raw) else ''
-                phone_missing = not original_phone or original_phone.lower() == 'nan'
-
-            # Get COD — track if needs to be set to 0
-            cod_col = col_map.get('cash_on_delivery')
-            original_cod = ''
-            cod_changed = False
-            if cod_col:
-                cod_raw = row.get(cod_col, '')
-                original_cod = str(cod_raw).strip() if pd.notna(cod_raw) else ''
-                try:
-                    cod_changed = float(original_cod) != 0.0
-                except (ValueError, TypeError):
-                    cod_changed = bool(original_cod) and original_cod.lower() != 'nan'
-
-            # Get Order Number — validate PO
-            order_col = col_map.get('order_number')
-            po_value = ''
-            po_extracted = ''
-            po_invalid = False
-            if order_col:
-                order_raw = row.get(order_col, '')
-                po_value = str(order_raw).strip() if pd.notna(order_raw) else ''
-                if po_value and po_value.lower() != 'nan':
-                    po_valid, po_extracted, po_error = self.validate_po_number(po_value)
-                    po_invalid = not po_valid
-
-            # Get country from Claude parsing or Excel column
-            country = parsed.country_code
-            country_detected = True
-            if has_country_col:
-                country_raw = row.get(col_map['country'], '')
-                country_explicit = str(country_raw).strip() if pd.notna(country_raw) and str(country_raw).strip() else ''
-                if country_explicit:
-                    # Normalize to 2-letter code
-                    country_upper = country_explicit.upper()
-                    if country_upper in ('ITALY', 'ITALIA'):
-                        country = 'IT'
-                    elif country_upper in ('GERMANY', 'DEUTSCHLAND'):
-                        country = 'DE'
-                    elif country_upper in ('FRANCE',):
-                        country = 'FR'
-                    elif country_upper in ('SPAIN', 'ESPAÑA', 'ESPANA'):
-                        country = 'ES'
-                    elif country_upper in ('UNITED KINGDOM', 'UK', 'GREAT BRITAIN'):
-                        country = 'GB'
-                    elif len(country_explicit) == 2:
-                        country = country_upper
-                    country_detected = False
+            row_fields = self._extract_row_fields(row, parsed, col_map)
 
             # Skip non-IT countries
-            if country not in ('IT',):
+            if row_fields["country"] not in ('IT',):
                 results.append(ValidationResult(
-                    row_index=idx,
-                    name=name,
-                    city=city,
-                    street=street,
-                    original_zip=original_zip,
-                    suggested_zip=original_zip,
+                    row_index=idx, name=row_fields["name"],
+                    city=row_fields["city"], street=row_fields["street"],
+                    original_zip=row_fields["original_zip"],
+                    suggested_zip=row_fields["original_zip"],
                     confidence=100,
-                    reason=f"Non-IT country ({country}) - skipped",
-                    is_valid=True,
-                    street_verified=True,
-                    street_confidence=100,
-                    country_code=country,
-                    country_detected=country_detected,
-                    phone_missing=phone_missing,
-                    original_phone=original_phone,
-                    cod_changed=cod_changed,
-                    original_cod=original_cod
+                    reason=f"Non-IT country ({row_fields['country']}) - skipped",
+                    is_valid=True, street_verified=True, street_confidence=100,
+                    country_code=row_fields["country"],
+                    country_detected=row_fields["country_detected"],
+                    phone_missing=row_fields["phone_missing"],
+                    original_phone=row_fields["original_phone"],
+                    cod_changed=row_fields["cod_changed"],
+                    original_cod=row_fields["original_cod"],
                 ))
                 skipped_count += 1
                 continue
 
-            # Read Street 2 (CC name, location info) — sent to Google for context
-            street2 = ''
-            if has_street2_col:
-                s2_raw = row.get(col_map['street2'], '')
-                street2 = str(s2_raw).strip().rstrip('-').strip() if pd.notna(s2_raw) else ''
-                if street2.lower() == 'nan':
-                    street2 = ''
-
-            # Pad ZIP for Italian addresses
-            try:
-                zip_padded = str(int(float(str(original_zip)))).zfill(5)
-            except (ValueError, TypeError):
-                zip_padded = str(original_zip).strip()
-
-            # --- Call Google Address Validation API ---
-            api_response = self.address_validator.validate_address(
-                parsed, city, zip_padded, state, street2=street2
-            )
-
-            if not api_response or "result" not in api_response:
-                # API unavailable — mark for review
-                results.append(ValidationResult(
-                    row_index=idx,
-                    name=name,
-                    city=city,
-                    street=street,
-                    original_zip=original_zip,
-                    suggested_zip=None,
-                    confidence=0,
-                    reason="Google API unavailable",
-                    is_valid=False,
-                    country_code=country,
-                    country_detected=country_detected,
-                    phone_missing=phone_missing,
-                    original_phone=original_phone,
-                    cod_changed=cod_changed,
-                    original_cod=original_cod,
-                    po_invalid=po_invalid,
-                    po_value=po_value,
-                    po_extracted=po_extracted
-                ))
-                review_count += 1
-                continue
-
-            # --- Interpret verdict ---
-            api_result = api_response["result"]
-            outcome = self.address_validator.interpret_verdict(
-                api_result.get("verdict", {}),
-                api_result.get("address", {}),
-                parsed,
-                zip_padded,
-                city
-            )
-
-            # --- Cross-check ZIP with Italian comuni database ---
-            check_zip = outcome.output_zip or zip_padded
-            if check_zip:
-                # Check 1: Is this CAP even valid in Italy?
-                # Only flag if Google also didn't confirm it — our local DB may be incomplete
-                if not self.address_validator.is_valid_italian_cap(check_zip) and not outcome.zip_confirmed:
-                    outcome.status = "review"
-                    outcome.reasons.append(f"CAP {check_zip} not in local database")
-                else:
-                    # Check 2: Does this CAP match the comune (city)?
-                    comune_valid, comune_msg = self.address_validator.validate_zip_comune(
-                        check_zip, city, state
-                    )
-                    if not comune_valid and "not in database" not in comune_msg:
-                        # Downgrade to review — but only if our DB actually knows this
-                        # comune and says the CAP is wrong (not just "comune unknown")
-                        if outcome.status in ("valid", "corrected") and not outcome.zip_confirmed:
-                            outcome.status = "review"
-                        outcome.reasons.append(comune_msg)
-                    elif state:
-                        # Check 3: Does this CAP match the provincia?
-                        prov_valid, prov_msg = self.address_validator.validate_zip_province(
-                            check_zip, state
-                        )
-                        if not prov_valid:
-                            outcome.status = "review"
-                            outcome.reasons.append(prov_msg)
-
-            # --- Build suggested street: API name + original house number ---
-            suggested_street = None
-            if outcome.street_corrected or outcome.silent_correction:
-                suggested_street = f"{outcome.output_street} {parsed.house_number}".strip()
-
-            # --- Map outcome to ValidationResult ---
-            is_valid = outcome.status == "valid"
-            auto_corrected = outcome.status == "corrected"
-            street_verified = outcome.street_confirmed and not outcome.street_corrected
-            street_auto_corrected = outcome.street_corrected
-
-            # Confidence mapping from verdict
-            if is_valid:
-                confidence = 100
-            elif auto_corrected:
-                confidence = 95
-            else:
-                confidence = 50
-
-            reason = "; ".join(outcome.reasons) if outcome.reasons else outcome.action
-
-            # Write to cache for good results
-            if outcome.status in ("valid", "corrected"):
-                self._write_cache(street, city, outcome, parsed)
-
-            # Handle location info → Street 2 (prefer API's point_of_interest, fall back to Claude's)
-            location_info = outcome.location_info or parsed.location_info
-            street2_col = col_map.get('street2')
-            if street2_col:
-                existing_street2 = str(row.get(street2_col, '')).strip().rstrip('-').strip()
-                if existing_street2.lower() == 'nan':
-                    existing_street2 = ''
-                # Always write back cleaned Street 2 (trailing dash removed)
-                if location_info:
-                    if not existing_street2:
-                        df.at[idx, street2_col] = location_info
-                    elif location_info.lower() not in existing_street2.lower():
-                        df.at[idx, street2_col] = f"{existing_street2} - {location_info}"
-                    else:
-                        df.at[idx, street2_col] = existing_street2
-                elif existing_street2:
-                    df.at[idx, street2_col] = existing_street2
-
-            result = ValidationResult(
-                row_index=idx,
-                name=name,
-                city=city,
-                street=street,
-                original_zip=original_zip,
-                suggested_zip=outcome.output_zip if outcome.output_zip else None,
-                confidence=confidence,
-                reason=reason,
-                is_valid=is_valid,
-                auto_corrected=auto_corrected,
-                street_verified=street_verified,
-                suggested_street=suggested_street,
-                street_confidence=95 if street_verified else (85 if street_auto_corrected else 0),
-                street_auto_corrected=street_auto_corrected,
-                country_code=country,
-                country_detected=country_detected,
-                phone_missing=phone_missing,
-                original_phone=original_phone,
-                cod_changed=cod_changed,
-                original_cod=original_cod,
-                po_invalid=po_invalid,
-                po_value=po_value,
-                po_extracted=po_extracted
+            result = self._validate_single_row(
+                idx, row, parsed, row_fields, col_map, df
             )
             results.append(result)
 
             # Count stats
-            if is_valid:
+            if result.is_valid:
                 valid_count += 1
-            elif auto_corrected:
+            elif result.auto_corrected:
                 corrected_count += 1
             else:
                 review_count += 1
-
-            if street_verified:
+            if result.street_verified:
                 street_verified_count += 1
-            elif street_auto_corrected:
+            elif result.street_auto_corrected:
                 street_corrected_count += 1
-
-            if po_invalid:
+            if result.po_invalid:
                 po_invalid_count += 1
 
         logger.info(
@@ -647,6 +425,240 @@ class ZipValidator:
             po_invalid_count=po_invalid_count
         )
         return report, df
+
+    def _extract_row_fields(self, row, parsed: ParsedAddress, col_map: dict) -> dict:
+        """Extract and normalize all fields from a DataFrame row."""
+        name = str(row.get(col_map.get('name', ''), ''))
+        street = str(row.get(col_map.get('street', ''), ''))
+        city = str(row.get(col_map['city'], ''))
+        original_zip = str(row.get(col_map['zip'], ''))
+
+        # State/province
+        state = ''
+        if col_map.get('state'):
+            state_raw = row.get(col_map['state'], '')
+            state = str(state_raw).strip() if pd.notna(state_raw) else ''
+
+        # Phone
+        original_phone = ''
+        phone_missing = False
+        phone_col = col_map.get('phone')
+        if phone_col:
+            phone_raw = row.get(phone_col, '')
+            original_phone = str(phone_raw).strip() if pd.notna(phone_raw) else ''
+            phone_missing = not original_phone or original_phone.lower() == 'nan'
+
+        # Cash on Delivery
+        original_cod = ''
+        cod_changed = False
+        cod_col = col_map.get('cash_on_delivery')
+        if cod_col:
+            cod_raw = row.get(cod_col, '')
+            original_cod = str(cod_raw).strip() if pd.notna(cod_raw) else ''
+            try:
+                cod_changed = float(original_cod) != 0.0
+            except (ValueError, TypeError):
+                cod_changed = bool(original_cod) and original_cod.lower() != 'nan'
+
+        # PO validation
+        po_value = ''
+        po_extracted = ''
+        po_invalid = False
+        order_col = col_map.get('order_number')
+        if order_col:
+            order_raw = row.get(order_col, '')
+            po_value = str(order_raw).strip() if pd.notna(order_raw) else ''
+            if po_value and po_value.lower() != 'nan':
+                po_valid, po_extracted, _ = self.validate_po_number(po_value)
+                po_invalid = not po_valid
+
+        # Country detection
+        country = parsed.country_code
+        country_detected = True
+        if col_map.get('country'):
+            country_raw = row.get(col_map['country'], '')
+            country_explicit = str(country_raw).strip() if pd.notna(country_raw) and str(country_raw).strip() else ''
+            if country_explicit:
+                country_upper = country_explicit.upper()
+                country_map = {
+                    'ITALY': 'IT', 'ITALIA': 'IT',
+                    'GERMANY': 'DE', 'DEUTSCHLAND': 'DE',
+                    'FRANCE': 'FR',
+                    'SPAIN': 'ES', 'ESPAÑA': 'ES', 'ESPANA': 'ES',
+                    'UNITED KINGDOM': 'GB', 'UK': 'GB', 'GREAT BRITAIN': 'GB',
+                }
+                if country_upper in country_map:
+                    country = country_map[country_upper]
+                elif len(country_explicit) == 2:
+                    country = country_upper
+                country_detected = False
+
+        # Street 2
+        street2 = ''
+        if col_map.get('street2'):
+            s2_raw = row.get(col_map['street2'], '')
+            street2 = str(s2_raw).strip().rstrip('-').strip() if pd.notna(s2_raw) else ''
+            if street2.lower() == 'nan':
+                street2 = ''
+
+        return {
+            "name": name, "street": street, "city": city,
+            "original_zip": original_zip, "state": state,
+            "original_phone": original_phone, "phone_missing": phone_missing,
+            "original_cod": original_cod, "cod_changed": cod_changed,
+            "po_value": po_value, "po_extracted": po_extracted, "po_invalid": po_invalid,
+            "country": country, "country_detected": country_detected,
+            "street2": street2,
+        }
+
+    def _validate_single_row(
+        self, idx, row, parsed: ParsedAddress,
+        fields: dict, col_map: dict, df: pd.DataFrame,
+    ) -> ValidationResult:
+        """Validate a single Italian address row against Google API and local DB."""
+        city = fields["city"]
+        original_zip = fields["original_zip"]
+        state = fields["state"]
+        street = fields["street"]
+
+        # Pad ZIP
+        try:
+            zip_padded = str(int(float(str(original_zip)))).zfill(5)
+        except (ValueError, TypeError):
+            zip_padded = str(original_zip).strip()
+
+        # Call Google API
+        api_response = self.address_validator.validate_address(
+            parsed, city, zip_padded, state, street2=fields["street2"]
+        )
+
+        if not api_response or "result" not in api_response:
+            return ValidationResult(
+                row_index=idx, name=fields["name"],
+                city=city, street=street,
+                original_zip=original_zip, suggested_zip=None,
+                confidence=0, reason="Google API unavailable",
+                is_valid=False,
+                country_code=fields["country"],
+                country_detected=fields["country_detected"],
+                phone_missing=fields["phone_missing"],
+                original_phone=fields["original_phone"],
+                cod_changed=fields["cod_changed"],
+                original_cod=fields["original_cod"],
+                po_invalid=fields["po_invalid"],
+                po_value=fields["po_value"],
+                po_extracted=fields["po_extracted"],
+            )
+
+        # Interpret Google verdict
+        api_result = api_response["result"]
+        outcome = self.address_validator.interpret_verdict(
+            api_result.get("verdict", {}),
+            api_result.get("address", {}),
+            parsed, zip_padded, city
+        )
+
+        # Cross-check ZIP with Italian comuni database
+        self._cross_check_zip(outcome, zip_padded, city, state)
+
+        # Build suggested street
+        suggested_street = None
+        if outcome.street_corrected or outcome.silent_correction:
+            suggested_street = f"{outcome.output_street} {parsed.house_number}".strip()
+
+        # Map outcome to result fields
+        is_valid = outcome.status == "valid"
+        auto_corrected = outcome.status == "corrected"
+        street_verified = outcome.street_confirmed and not outcome.street_corrected
+        street_auto_corrected = outcome.street_corrected
+
+        if is_valid:
+            confidence = 100
+        elif auto_corrected:
+            confidence = 95
+        else:
+            confidence = 50
+
+        reason = "; ".join(outcome.reasons) if outcome.reasons else outcome.action
+
+        # Cache good results
+        if outcome.status in ("valid", "corrected"):
+            self._write_cache(street, city, outcome, parsed)
+
+        # Handle Street 2 location info
+        self._update_street2(df, idx, row, col_map, outcome, parsed)
+
+        return ValidationResult(
+            row_index=idx, name=fields["name"],
+            city=city, street=street,
+            original_zip=original_zip,
+            suggested_zip=outcome.output_zip if outcome.output_zip else None,
+            confidence=confidence, reason=reason,
+            is_valid=is_valid, auto_corrected=auto_corrected,
+            street_verified=street_verified,
+            suggested_street=suggested_street,
+            street_confidence=95 if street_verified else (85 if street_auto_corrected else 0),
+            street_auto_corrected=street_auto_corrected,
+            country_code=fields["country"],
+            country_detected=fields["country_detected"],
+            phone_missing=fields["phone_missing"],
+            original_phone=fields["original_phone"],
+            cod_changed=fields["cod_changed"],
+            original_cod=fields["original_cod"],
+            po_invalid=fields["po_invalid"],
+            po_value=fields["po_value"],
+            po_extracted=fields["po_extracted"],
+        )
+
+    def _cross_check_zip(self, outcome: ValidationOutcome, zip_padded: str,
+                          city: str, state: str):
+        """Cross-check ZIP against Italian comuni database, mutating outcome in place."""
+        check_zip = outcome.output_zip or zip_padded
+        if not check_zip:
+            return
+
+        if not self.address_validator.is_valid_italian_cap(check_zip) and not outcome.zip_confirmed:
+            outcome.status = "review"
+            outcome.reasons.append(f"CAP {check_zip} not in local database")
+            return
+
+        comune_valid, comune_msg = self.address_validator.validate_zip_comune(
+            check_zip, city, state
+        )
+        if not comune_valid and "not in database" not in comune_msg:
+            if outcome.status in ("valid", "corrected") and not outcome.zip_confirmed:
+                outcome.status = "review"
+            outcome.reasons.append(comune_msg)
+        elif state:
+            prov_valid, prov_msg = self.address_validator.validate_zip_province(
+                check_zip, state
+            )
+            if not prov_valid:
+                outcome.status = "review"
+                outcome.reasons.append(prov_msg)
+
+    def _update_street2(self, df: pd.DataFrame, idx, row,
+                         col_map: dict, outcome: ValidationOutcome,
+                         parsed: ParsedAddress):
+        """Handle location info → Street 2 column (clean trailing dashes, merge)."""
+        street2_col = col_map.get('street2')
+        if not street2_col:
+            return
+
+        location_info = outcome.location_info or parsed.location_info
+        existing_street2 = str(row.get(street2_col, '')).strip().rstrip('-').strip()
+        if existing_street2.lower() == 'nan':
+            existing_street2 = ''
+
+        if location_info:
+            if not existing_street2:
+                df.at[idx, street2_col] = location_info
+            elif location_info.lower() not in existing_street2.lower():
+                df.at[idx, street2_col] = f"{existing_street2} - {location_info}"
+            else:
+                df.at[idx, street2_col] = existing_street2
+        elif existing_street2:
+            df.at[idx, street2_col] = existing_street2
 
     # =========================================================================
     # Excel output
