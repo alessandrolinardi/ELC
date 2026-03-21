@@ -23,6 +23,15 @@ class JobStore:
 
     def create_job(self, job_type: str) -> str:
         with self._lock:
+            # Evict expired jobs before checking capacity
+            now = time.time()
+            expired = [jid for jid, j in self._jobs.items() if now - j["created_at"] > self._ttl]
+            for jid in expired:
+                del self._jobs[jid]
+                job_dir = self._base_dir / jid
+                if job_dir.exists():
+                    shutil.rmtree(job_dir, ignore_errors=True)
+
             # Check capacity (count ALL jobs, not just processing)
             if len(self._jobs) >= self._max_jobs:
                 raise RuntimeError(f"Max jobs ({self._max_jobs}) reached")
@@ -90,8 +99,9 @@ class JobStore:
             if job_id not in self._jobs:
                 return  # job was cleaned up, don't write
             job_dir = self._base_dir / job_id
-            job_dir.mkdir(parents=True, exist_ok=True)
-            (job_dir / filename).write_bytes(data)
+        # Disk write outside the lock
+        job_dir.mkdir(parents=True, exist_ok=True)
+        (job_dir / filename).write_bytes(data)
 
     def get_file_path(self, job_id: str, filename: str) -> Optional[Path]:
         import re as _re

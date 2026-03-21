@@ -4,12 +4,14 @@ Loads gi_comuni_cap.json for exact CAP-per-comune validation.
 """
 import json
 import logging
+import threading
 from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger(__name__)
 
 _db = None  # singleton
+_db_lock = threading.Lock()
 
 
 class ItalianDB:
@@ -27,6 +29,13 @@ class ItalianDB:
         """Load the database from JSON files."""
         if self._loaded:
             return
+        with _db_lock:
+            if self._loaded:
+                return
+            self._load_unlocked()
+
+    def _load_unlocked(self):
+        """Actually load the database (must be called under _db_lock)."""
 
         data_dir = Path(__file__).parent.parent.parent / "data"
 
@@ -101,10 +110,10 @@ class ItalianDB:
         """Check if CAP is a generic city CAP (xx100 pattern).
         Major Italian cities accept a generic CAP ending in 100
         that covers all specific sub-CAPs (e.g., 16100 for Genova)."""
-        if not cap or len(cap) != 5 or not cap.endswith('00'):
+        if not cap or len(cap) != 5 or not cap.endswith('100'):
             return False
-        # Check if any specific CAPs exist with the same prefix
-        prefix = cap[:3]
+        # Check if any specific CAPs exist with the same 2-char prefix
+        prefix = cap[:2]
         return any(c.startswith(prefix) and c != cap for c in self._all_caps)
 
     def is_valid_cap(self, cap: str) -> bool:
@@ -228,5 +237,7 @@ def get_italian_db() -> ItalianDB:
     """Get singleton instance of the Italian DB."""
     global _db
     if _db is None:
-        _db = ItalianDB()
+        with _db_lock:
+            if _db is None:
+                _db = ItalianDB()
     return _db

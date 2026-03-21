@@ -95,6 +95,11 @@ def _process_parse(
 
         progress_callback(0, 100, "Parsing addresses with AI...")
 
+        if 'city' not in col_map or 'zip' not in col_map:
+            job_store.update_status(job_id, "failed",
+                error=f"Colonne obbligatorie mancanti (City/ZIP). Colonne trovate: {list(df.columns)}")
+            return
+
         raw_addresses = []
         for idx, row in df.iterrows():
             street = str(row.get(col_map.get('street', ''), ''))

@@ -62,11 +62,7 @@ export default function AddressValidator() {
   useEffect(() => {
     if (jobStatus === "parsed" && currentStep === 0) {
       setCurrentStep(1)
-    }
-  }, [jobStatus, currentStep])
-
-  useEffect(() => {
-    if (jobStatus === "complete" && currentStep === 2) {
+    } else if (jobStatus === "complete" && currentStep === 2) {
       setCurrentStep(3)
     }
   }, [jobStatus, currentStep])
@@ -159,6 +155,7 @@ export default function AddressValidator() {
 
   // Reset to start
   const handleReset = () => {
+    queryClient.removeQueries({ queryKey: ["job-status"] })
     setCurrentStep(0)
     setExcelFile(null)
     setJobId(null)
@@ -263,7 +260,7 @@ export default function AddressValidator() {
             )}
 
             {/* Parsing in progress (between upload and "parsed" status) */}
-            {jobId && jobStatus !== "parsed" && jobStatus !== "failed" && !isExpired && (
+            {jobId && jobStatus !== "parsed" && jobStatus !== "failed" && jobStatus !== "complete" && !isExpired && (
               <div className="elc-card text-center py-8">
                 <div className="inline-block w-8 h-8 border-4 border-primary/20 border-t-primary rounded-full animate-spin mb-3" />
                 <p className="text-sm font-semibold text-foreground">

@@ -35,6 +35,7 @@ export function FileDropZone({
 }: FileDropZoneProps) {
   const [isDragging, setIsDragging] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
 
   const handleFiles = useCallback(
     (fileList: FileList | null) => {
@@ -69,7 +70,8 @@ export function FileDropZone({
     setIsDragging(true)
   }, [])
 
-  const handleDragLeave = useCallback(() => {
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    if (containerRef.current && containerRef.current.contains(e.relatedTarget as Node)) return
     setIsDragging(false)
   }, [])
 
@@ -78,6 +80,7 @@ export function FileDropZone({
   return (
     <div>
       <div
+        ref={containerRef}
         className={cn(
           "relative rounded-lg border-2 border-dashed p-8 text-center cursor-pointer transition-colors",
           isDragging && "bg-indigo-light border-primary",

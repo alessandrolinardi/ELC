@@ -23,6 +23,13 @@ from app.core.models import ParsedAddress
 client = TestClient(app)
 
 
+@pytest.fixture(autouse=True)
+def _cleanup_job_store():
+    """Clean up job store between tests to prevent cross-test contamination."""
+    yield
+    job_store.cleanup_all()
+
+
 def _make_excel_bytes(rows: list[dict]) -> bytes:
     """Create an Excel file in memory from a list of dicts."""
     df = pd.DataFrame(rows)
@@ -325,15 +332,14 @@ class TestMethodPreservation:
         # We can check the final result once the job completes/fails.
         status = _wait_for_status(job_id, "complete", timeout=15)
 
-        # Whether it completed or failed (no real Google API),
-        # the parse_method in results should reflect the edit
-        if status["status"] == "complete" and status.get("result"):
-            results = status["result"].get("results", [])
-            if len(results) >= 2:
-                # Row 0 was edited -> should be "user_edit"
-                assert results[0]["parse_method"] == "user_edit"
-                # Row 1 was NOT edited -> should keep "ai"
-                assert results[1]["parse_method"] == "ai"
+        # Assertions must be unconditional — a failing job should fail the test
+        assert status["status"] == "complete", f"Expected complete, got: {status['status']}, error: {status.get('error')}"
+        results = status["result"]["results"]
+        assert len(results) >= 2, f"Expected at least 2 results, got {len(results)}"
+        # Row 0 was edited -> should be "user_edit"
+        assert results[0]["parse_method"] == "user_edit"
+        # Row 1 was NOT edited -> should keep "ai"
+        assert results[1]["parse_method"] == "ai"
 
     def test_unedited_row_keeps_original_method(self):
         """Rows not in edits should keep their original method."""
@@ -404,3 +410,60 @@ class TestFileSizeLimit:
                 data={"confidence_threshold": 90, "street_confidence_threshold": 85},
             )
             assert resp.status_code == 413
+
+
+class TestApplyCorrections:
+    """Issue #16: Tests for the apply-corrections endpoint."""
+
+    def _create_complete_job_with_corrected_file(self) -> str:
+        """Helper: create a job in 'complete' state with a corrected.xlsx file."""
+        job_id = job_store.create_job("validator")
+        df = pd.DataFrame({"Street 1": ["Via Roma 10"], "City": ["Roma"], "Zip": ["00100"]})
+        buf = io.BytesIO()
+        df.to_excel(buf, index=False, engine='openpyxl')
+        job_store.save_file(job_id, "corrected.xlsx", buf.getvalue())
+        job_store.update_status(job_id, "complete", result={"results": []})
+        return job_id
+
+    def test_apply_corrections_on_complete_job(self):
+        """Applying corrections to a complete job should succeed."""
+        job_id = self._create_complete_job_with_corrected_file()
+        resp = client.post(f"/api/v1/jobs/{job_id}/apply-corrections", json={
+            "corrections": {"0": {"street": "Via Garibaldi 5"}},
+        })
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+        assert data["data"]["applied"] == 1
+
+    def test_apply_corrections_on_non_complete_job(self):
+        """Applying corrections to a non-complete job should return 409."""
+        job_id = job_store.create_job("validator")
+        # Job is in 'processing' state by default
+        resp = client.post(f"/api/v1/jobs/{job_id}/apply-corrections", json={
+            "corrections": {"0": {"street": "Via Garibaldi 5"}},
+        })
+        assert resp.status_code == 409
+        assert resp.json()["detail"]["error"]["code"] == "INVALID_STATE"
+
+    def test_apply_corrections_nonexistent_job(self):
+        """Applying corrections to a nonexistent job should return 404."""
+        resp = client.post("/api/v1/jobs/nonexistent-uuid/apply-corrections", json={
+            "corrections": {"0": {"street": "Via Garibaldi 5"}},
+        })
+        assert resp.status_code == 404
+        assert resp.json()["detail"]["error"]["code"] == "JOB_NOT_FOUND"
+
+    def test_apply_corrections_sanitizes_formulas(self):
+        """Formula injection in corrections should be sanitized."""
+        job_id = self._create_complete_job_with_corrected_file()
+        resp = client.post(f"/api/v1/jobs/{job_id}/apply-corrections", json={
+            "corrections": {"0": {"street": "=CMD()"}},
+        })
+        assert resp.status_code == 200
+        assert resp.json()["data"]["applied"] == 1
+
+        # Read back the saved file and verify the value was sanitized
+        corrected_path = job_store.get_file_path(job_id, "corrected.xlsx")
+        df = pd.read_excel(corrected_path)
+        assert df["Street 1"].iloc[0] == "'=CMD()"

@@ -44,7 +44,7 @@ export function ParseReviewTable({
         switch (activeFilter) {
           case "ai": return r.method === "ai"
           case "regex": return r.method === "regex"
-          case "modified": return r.changed
+          case "modified": return r.changed && r.method === "ai"
           case "unchanged": return !r.changed
         }
       })
@@ -311,7 +311,7 @@ export function ParseReviewTable({
             {activeFilter && (
               <span
                 className="text-xs text-muted-foreground hover:text-foreground cursor-pointer"
-                onClick={(e) => { e.stopPropagation(); setActiveFilter(null) }}
+                onClick={(e) => { e.stopPropagation(); setActiveFilter(null); setShowAllRows(false) }}
               >
                 Rimuovi filtro
               </span>

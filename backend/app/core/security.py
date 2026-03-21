@@ -7,7 +7,7 @@ Uses Supabase for reliable persistence across deploys and instances.
 
 import hashlib
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Tuple
 import logging
 
@@ -36,7 +36,7 @@ def _get_current_period() -> Tuple[str, str, datetime]:
     Period ID format: "2026-02-03-AM" or "2026-02-03-PM"
     AM = 00:00-11:59, PM = 12:00-23:59
     """
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     today = now.strftime("%Y-%m-%d")
 
     if now.hour < 12:
@@ -122,7 +122,7 @@ def check_rate_limit(ip: str, rows_to_validate: int) -> Tuple[bool, str, dict]:
     # Check if we'd exceed the limit
     if current_usage + rows_to_validate > MAX_VALIDATIONS_PER_12H:
         remaining = MAX_VALIDATIONS_PER_12H - current_usage
-        time_left = period_end - datetime.now()
+        time_left = period_end - datetime.now(timezone.utc)
         hours_left = int(time_left.total_seconds() // 3600)
         mins_left = int((time_left.total_seconds() % 3600) // 60)
 
@@ -134,10 +134,10 @@ def check_rate_limit(ip: str, rows_to_validate: int) -> Tuple[bool, str, dict]:
         try:
             last_request_str = record["last_request"]
             if isinstance(last_request_str, str):
-                last_request = datetime.fromisoformat(last_request_str.replace("Z", "+00:00")).replace(tzinfo=None)
+                last_request = datetime.fromisoformat(last_request_str.replace("Z", "+00:00"))
             else:
                 last_request = last_request_str
-            elapsed = (datetime.now() - last_request).total_seconds()
+            elapsed = (datetime.now(timezone.utc) - last_request).total_seconds()
             if elapsed < MIN_SECONDS_BETWEEN_REQUESTS:
                 wait_time = int(MIN_SECONDS_BETWEEN_REQUESTS - elapsed)
                 return False, f"Attendi {wait_time} secondi prima della prossima validazione.", {}
@@ -171,7 +171,7 @@ def record_usage(ip: str, rows_validated: int):
 
         client.table("rate_limits").update({
             "request_count": new_count,
-            "last_request": datetime.now().isoformat()
+            "last_request": datetime.now(timezone.utc).isoformat()
         }).eq("ip_hash", "global").eq("hour", period_id).execute()
 
         logger.debug(f"Recorded {rows_validated} validations, total now: {new_count}")
@@ -268,7 +268,7 @@ def cleanup_old_records():
         return
 
     try:
-        cutoff_date = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+        cutoff_date = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%d")
         client.table("rate_limits").delete().lt("date", cutoff_date).execute()
         logger.info(f"Cleaned up records older than {cutoff_date}")
     except Exception as e:

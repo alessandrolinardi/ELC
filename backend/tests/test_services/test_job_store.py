@@ -74,13 +74,15 @@ class TestJobStore:
             store.cleanup_all()
 
     def test_cleanup_expired(self):
-        store = JobStore(base_dir="/tmp/elc-test-jobs-ttl", ttl_seconds=1)
-        job_id = store.create_job("labels")
-        store.save_file(job_id, "test.pdf", b"data")
-        time.sleep(1.5)
-        store.cleanup_expired()
-        assert store.get_status(job_id) is None
-        store.cleanup_all()
+        store = JobStore(base_dir="/tmp/elc-test-jobs-ttl", ttl_seconds=0)
+        try:
+            job_id = store.create_job("labels")
+            store.save_file(job_id, "test.pdf", b"data")
+            time.sleep(0.1)
+            store.cleanup_expired()
+            assert store.get_status(job_id) is None
+        finally:
+            store.cleanup_all()
 
     def test_concurrent_create_jobs(self):
         """Verify thread safety of create_job under concurrent access."""
@@ -109,15 +111,17 @@ class TestJobStore:
         store.cleanup_all()
 
     def test_cleanup_removes_files_from_disk(self):
-        store = JobStore(base_dir="/tmp/elc-test-cleanup-files", ttl_seconds=1)
-        job_id = store.create_job("test")
-        store.save_file(job_id, "test.pdf", b"data")
-        path = store.get_file_path(job_id, "test.pdf")
-        assert path is not None and path.exists()
+        store = JobStore(base_dir="/tmp/elc-test-cleanup-files", ttl_seconds=0)
+        try:
+            job_id = store.create_job("test")
+            store.save_file(job_id, "test.pdf", b"data")
+            path = store.get_file_path(job_id, "test.pdf")
+            assert path is not None and path.exists()
 
-        time.sleep(1.5)
-        store.cleanup_expired()
+            time.sleep(0.1)
+            store.cleanup_expired()
 
-        assert store.get_status(job_id) is None
-        assert not path.exists()
-        store.cleanup_all()
+            assert store.get_status(job_id) is None
+            assert not path.exists()
+        finally:
+            store.cleanup_all()

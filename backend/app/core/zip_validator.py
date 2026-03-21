@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from typing import Optional, Callable
 from io import BytesIO
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import unicodedata
 
 import pandas as pd
@@ -145,8 +145,8 @@ class ZipValidator:
                 if record.get('expires_at'):
                     expires = datetime.fromisoformat(
                         record['expires_at'].replace('Z', '+00:00')
-                    ).replace(tzinfo=None)
-                    if datetime.now() > expires:
+                    )
+                    if datetime.now(timezone.utc) > expires:
                         return None
 
                 self._cache_hits += 1
@@ -182,9 +182,9 @@ class ZipValidator:
                 "validated_street": outcome.output_street[:255] if outcome.output_street else None,
                 "confidence": 95 if outcome.status == "valid" else 90,
                 "times_used": 1,
-                "created_at": datetime.now().isoformat(),
-                "updated_at": datetime.now().isoformat(),
-                "expires_at": (datetime.now() + timedelta(days=90)).isoformat(),
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "expires_at": (datetime.now(timezone.utc) + timedelta(days=90)).isoformat(),
                 # New columns for parsed data
                 "parsed_prefix": parsed.street_prefix,
                 "parsed_name": parsed.street_name,
@@ -431,7 +431,10 @@ class ZipValidator:
             if cod_col:
                 cod_raw = row.get(cod_col, '')
                 original_cod = str(cod_raw).strip() if pd.notna(cod_raw) else ''
-                cod_changed = original_cod != '0' and original_cod.lower() != 'nan' and original_cod != ''
+                try:
+                    cod_changed = float(original_cod) != 0.0
+                except (ValueError, TypeError):
+                    cod_changed = bool(original_cod) and original_cod.lower() != 'nan'
 
             # Get Order Number — validate PO
             order_col = col_map.get('order_number')
@@ -738,7 +741,7 @@ class ZipValidator:
         # Sanitize string cells to prevent Excel formula injection
         for col in df.columns:
             df[col] = df[col].apply(
-                lambda x: "'" + str(x) if isinstance(x, str) and x and x[0] in ('=', '+', '-', '@', '\t', '\r', '\n') else x
+                lambda x: "'" + str(x) if isinstance(x, str) and x and x.strip() and x.strip()[0] in ('=', '+', '-', '@', '\t', '\r', '\n') else x
             )
 
         output = BytesIO()
@@ -749,9 +752,7 @@ class ZipValidator:
 
             # Format ZIP column as text with leading zeros preserved (IT only)
             if zip_col:
-                from openpyxl.styles import numbers
                 zip_col_idx = list(df.columns).index(zip_col) + 1
-                country_col = col_map.get('country')
                 country_col_idx = list(df.columns).index(country_col) + 1 if country_col else None
                 for row in range(2, len(df) + 2):
                     cell = worksheet.cell(row=row, column=zip_col_idx)
@@ -818,7 +819,7 @@ class ZipValidator:
         # Sanitize string cells to prevent Excel formula injection
         for col in df.columns:
             df[col] = df[col].apply(
-                lambda x: "'" + str(x) if isinstance(x, str) and x and x[0] in ('=', '+', '-', '@', '\t', '\r', '\n') else x
+                lambda x: "'" + str(x) if isinstance(x, str) and x and x.strip() and x.strip()[0] in ('=', '+', '-', '@', '\t', '\r', '\n') else x
             )
 
         output = BytesIO()
