@@ -288,16 +288,35 @@ class AddressParser:
                     location_info = loc_part
                     clean_street = clean_street[:trailing_loc_match.start()].strip()
 
-        # Step 2: Extract street prefix
+        # Step 2: Extract street prefix (including abbreviation expansion)
+        # Abbreviation map: short form → expanded form (longest first to avoid partial matches)
+        ABBREVIATIONS = [
+            ('p.zza', 'Piazza'), ('p.za', 'Piazza'),
+            ('s.s.', 'Strada Statale'), ('s.p.', 'Strada Provinciale'),
+            ('c.so', 'Corso'), ('v.le', 'Viale'), ('l.go', 'Largo'),
+            ('v.', 'Via'), ('p.', 'Piazza'),
+        ]
+
         street_prefix = ""
         street_name = clean_street
         clean_lower = clean_street.lower()
 
-        for prefix in STREET_PREFIXES:
-            if clean_lower.startswith(prefix + ' ') or clean_lower.startswith(prefix + '.'):
-                street_prefix = clean_street[:len(prefix)]
-                street_name = clean_street[len(prefix):].strip(' .')
+        # Try abbreviations first (more specific, already sorted longest-first)
+        matched_abbrev = False
+        for abbrev, expanded in ABBREVIATIONS:
+            if clean_lower.startswith(abbrev):
+                street_prefix = expanded
+                street_name = clean_street[len(abbrev):].strip(' .')
+                matched_abbrev = True
                 break
+
+        # Then try full prefixes
+        if not matched_abbrev:
+            for prefix in STREET_PREFIXES:
+                if clean_lower.startswith(prefix + ' ') or clean_lower.startswith(prefix + '.'):
+                    street_prefix = clean_street[:len(prefix)]
+                    street_name = clean_street[len(prefix):].strip(' .')
+                    break
 
         # Step 3: Extract house number from end
         house_number = ""
