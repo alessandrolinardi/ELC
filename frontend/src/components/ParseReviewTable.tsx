@@ -166,8 +166,8 @@ export function ParseReviewTable({
         </CardContent>
       </Card>
 
-      {/* === Modified Rows (AI) === */}
-      {modifiedRows.length > 0 && (
+      {/* === Modified Rows (AI) — hidden when a filter is active === */}
+      {modifiedRows.length > 0 && !activeFilter && (
         <Card>
           <CardHeader>
             <CardTitle className="text-base">
@@ -264,8 +264,8 @@ export function ParseReviewTable({
         </Card>
       )}
 
-      {/* === Regex Fallback Warning === */}
-      {summary.regex_fallback > 0 && (
+      {/* === Regex Fallback Warning — hidden when filtering === */}
+      {summary.regex_fallback > 0 && !activeFilter && (
         <div className="rounded-lg bg-amber-50 border border-amber-200 px-5 py-4">
           <p className="text-sm font-semibold text-amber-800">
             {summary.regex_fallback} {summary.regex_fallback === 1 ? "riga elaborata" : "righe elaborate"} con regex (senza AI)
