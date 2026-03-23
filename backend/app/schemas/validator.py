@@ -3,6 +3,25 @@ from pydantic import BaseModel
 from typing import Optional
 
 
+class OrderIDWarning(BaseModel):
+    type: str  # "within_file_duplicate" | "cross_file_duplicate" | "format_error"
+    message: str
+    row_indices: list[int] = []
+    processed_at: Optional[str] = None
+
+
+class OrderIDSummary(BaseModel):
+    total: int
+    valid: int
+    normalized: int
+    format_errors: int
+    within_file_duplicates: int
+    cross_file_duplicates: int
+    warnings: list[OrderIDWarning] = []
+    detected_campaign: str = ""
+    detected_version: Optional[int] = None
+
+
 class ValidatorResultRow(BaseModel):
     status: str  # verified | corrected | review
     city: str

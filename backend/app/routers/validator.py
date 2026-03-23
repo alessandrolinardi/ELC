@@ -16,6 +16,11 @@ from ..core.security import (
     sanitize_filename, record_failed_attempt
 )
 from ..schemas.validator import ConfirmRequest, ApplyCorrectionsRequest
+from ..core.order_id_manager import (
+    parse_order_id, find_within_file_duplicates, find_cross_file_duplicates,
+    record_processed_orders,
+)
+from ..core.config_compat import get_supabase_client as _get_supabase_for_dedup
 
 router = APIRouter()
 
@@ -51,6 +56,8 @@ def _process_parse(
     street_confidence: int,
     pin_valid: bool,
     client_ip: str,
+    brand: str = "",
+    campaign: str = "",
 ):
     """Run AI address parsing in background thread (Phase 1)."""
     settings = get_settings()
@@ -164,6 +171,67 @@ def _process_parse(
                 "changes": changes,
             })
 
+        # --- Order ID processing ---
+        order_col = col_map.get('order_number')
+        order_numbers: list[str] = []
+        for idx, row in df.iterrows():
+            raw_val = str(row.get(order_col, '') if order_col else '')
+            order_numbers.append(raw_val.strip())
+
+        order_id_warnings = []
+        valid_count = 0
+        format_errors = 0
+        detected_campaign = ""
+        detected_version = None
+
+        for i, raw_oid in enumerate(order_numbers):
+            parsed_oid = parse_order_id(raw_oid)
+            if parsed_oid is None:
+                if raw_oid:
+                    format_errors += 1
+                    order_id_warnings.append({
+                        "type": "format_error",
+                        "message": f"Row {i}: invalid Order ID format: {raw_oid!r}",
+                        "row_indices": [i],
+                        "processed_at": None,
+                    })
+            else:
+                valid_count += 1
+                if not detected_campaign and parsed_oid.campaign:
+                    detected_campaign = parsed_oid.campaign
+                if detected_version is None and parsed_oid.version is not None:
+                    detected_version = parsed_oid.version
+
+        within_dupes = find_within_file_duplicates(order_numbers)
+        for oid, indices in within_dupes.items():
+            order_id_warnings.append({
+                "type": "within_file_duplicate",
+                "message": f"Order ID {oid!r} appears {len(indices)} times in this file",
+                "row_indices": indices,
+                "processed_at": None,
+            })
+
+        cross_dupes = find_cross_file_duplicates(order_numbers, _get_supabase_for_dedup())
+        for oid, record in cross_dupes.items():
+            order_id_warnings.append({
+                "type": "cross_file_duplicate",
+                "message": f"Order ID {oid!r} was already processed",
+                "row_indices": [],
+                "processed_at": record.get("processed_at"),
+            })
+
+        order_id_summary = {
+            "total": len(order_numbers),
+            "valid": valid_count,
+            "normalized": 0,
+            "format_errors": format_errors,
+            "within_file_duplicates": len(within_dupes),
+            "cross_file_duplicates": len(cross_dupes),
+            "warnings": order_id_warnings,
+            "detected_campaign": detected_campaign,
+            "detected_version": detected_version,
+        }
+
         # Save original Excel to disk for Phase 2
         job_store.save_file(job_id, "original.xlsx", excel_bytes)
 
@@ -177,11 +245,15 @@ def _process_parse(
                 "unchanged": unchanged,
             },
             "rows": rows,
+            "order_id_summary": order_id_summary,
             "config": {
                 "confidence": confidence,
                 "street_confidence": street_confidence,
                 "pin_valid": pin_valid,
                 "client_ip": client_ip,
+                "brand": brand,
+                "campaign": campaign,
+                "order_numbers": order_numbers,
             },
         }
 
@@ -202,6 +274,9 @@ def _process_validate(
     pin_valid: bool,
     client_ip: str,
     retry_regex: bool,
+    brand: str = "",
+    campaign: str = "",
+    order_numbers: list = None,
 ):
     """Run Google validation in background thread (Phase 2)."""
     settings = get_settings()
@@ -359,6 +434,18 @@ def _process_validate(
                 "review": f"/api/v1/jobs/{job_id}/files/review.xlsx",
             },
         })
+
+        # Record processed orders for future cross-file dedup
+        _order_numbers = order_numbers or []
+        if _order_numbers:
+            record_processed_orders(
+                order_numbers=_order_numbers,
+                job_id=job_id,
+                brand=brand,
+                campaign=campaign,
+                po_number="",
+                supabase_client=_get_supabase_for_dedup(),
+            )
     except Exception as e:
         job_store.update_status(job_id, "failed", error=str(e))
 
@@ -374,6 +461,8 @@ async def create_validator_job(
     confidence_threshold: int = Form(90),
     street_confidence_threshold: int = Form(85),
     bypass_pin: str = Form(""),
+    brand: str = Form(""),
+    campaign: str = Form(""),
 ):
     settings = get_settings()
 
@@ -409,6 +498,7 @@ async def create_validator_job(
     loop.run_in_executor(
         None, _process_parse, job_id, content,
         confidence_threshold, street_confidence_threshold, pin_valid, client_ip,
+        brand, campaign,
     )
 
     return {"ok": True, "data": {"job_id": job_id}}
@@ -465,6 +555,8 @@ async def confirm_validation(job_id: str, body: ConfirmRequest):
         config.get("confidence", 90), config.get("street_confidence", 85),
         config.get("pin_valid", False), config.get("client_ip", "unknown"),
         body.retry_regex_rows,
+        config.get("brand", ""), config.get("campaign", ""),
+        config.get("order_numbers", []),
     )
 
     return {"ok": True, "data": {"status": "processing_validate"}}
