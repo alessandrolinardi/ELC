@@ -12,7 +12,7 @@ from slowapi.middleware import SlowAPIMiddleware
 
 from .config import get_settings, APP_VERSION
 from .limiter import limiter
-from .routers import health, jobs, addresses, pickup, labels, validator
+from .routers import health, jobs, addresses, pickup, labels, validator, brands
 
 # Suppress noisy health check logs from uvicorn
 class _HealthCheckFilter(logging.Filter):
@@ -75,3 +75,4 @@ app.include_router(addresses.router, prefix="/api/v1")
 app.include_router(pickup.router, prefix="/api/v1")
 app.include_router(labels.router, prefix="/api/v1")
 app.include_router(validator.router, prefix="/api/v1")
+app.include_router(brands.router, prefix="/api/v1", tags=["brands"])
