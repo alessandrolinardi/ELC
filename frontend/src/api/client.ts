@@ -130,3 +130,11 @@ export async function confirmValidation(
 ): Promise<{ status: string }> {
   return api.post<{ status: string }>(`/api/v1/jobs/${jobId}/confirm`, body)
 }
+
+export async function fetchBrands(): Promise<{ name: string }[]> {
+  return api.get<{ name: string }[]>("/api/v1/brands")
+}
+
+export async function createBrand(name: string): Promise<{ name: string }> {
+  return api.post<{ name: string }>("/api/v1/brands", { name })
+}

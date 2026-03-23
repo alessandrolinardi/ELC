@@ -54,9 +54,29 @@ export interface ParsingSummary {
   unchanged: number
 }
 
+export interface OrderIDWarning {
+  type: "within_file_duplicate" | "cross_file_duplicate" | "format_error"
+  message: string
+  row_indices: number[]
+  processed_at?: string
+}
+
+export interface OrderIDSummary {
+  total: number
+  valid: number
+  normalized: number
+  format_errors: number
+  within_file_duplicates: number
+  cross_file_duplicates: number
+  warnings: OrderIDWarning[]
+  detected_campaign: string
+  detected_version: number | null
+}
+
 export interface ParsedJobResult {
   parsing_summary: ParsingSummary
   rows: ParsedRow[]
+  order_id_summary?: OrderIDSummary
 }
 
 export interface ConfirmRequest {

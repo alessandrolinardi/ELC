@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { api } from "@/api/client"
-import { confirmValidation } from "@/api/client"
+import { confirmValidation, fetchBrands, createBrand } from "@/api/client"
 import { PageShell } from "@/components/layout/PageShell"
 import { StepIndicator } from "@/components/StepIndicator"
 import { FileDropZone } from "@/components/FileDropZone"
@@ -40,6 +40,12 @@ export default function AddressValidator() {
   const [streetConfidence, setStreetConfidence] = useState(85)
   const [bypassPin, setBypassPin] = useState("")
 
+  const [brand, setBrand] = useState("")
+  const [campaign, setCampaign] = useState("")
+  const [brands, setBrands] = useState<string[]>([])
+  const [showNewBrand, setShowNewBrand] = useState(false)
+  const [newBrandName, setNewBrandName] = useState("")
+
   // Edit state for the review step (Phase 1)
   const [edits, setEdits] = useState<Record<string, Record<string, string>>>({})
 
@@ -67,6 +73,10 @@ export default function AddressValidator() {
     }
   }, [jobStatus, currentStep])
 
+  useEffect(() => {
+    fetchBrands().then(data => setBrands(data.map(b => b.name))).catch(() => {})
+  }, [])
+
   // Typed result accessors
   const parsedResult = jobStatus === "parsed" ? (rawResult as ParsedJobResult | null) : null
   const validatorResult = jobStatus === "complete" ? (rawResult as ValidatorJobResult | null) : null
@@ -79,6 +89,8 @@ export default function AddressValidator() {
       formData.append("confidence_threshold", String(confidence))
       formData.append("street_confidence_threshold", String(streetConfidence))
       if (bypassPin) formData.append("bypass_pin", bypassPin)
+      if (brand) formData.append("brand", brand)
+      if (campaign) formData.append("campaign", campaign)
       return api.postForm<JobCreatedResponse>("/api/v1/jobs/validator", formData)
     },
     onSuccess: (data) => {
@@ -164,6 +176,8 @@ export default function AddressValidator() {
     setEdits({})
     setResultEdits({})
     setFilesReady(false)
+    setBrand("")
+    setCampaign("")
   }
 
   return (
@@ -242,6 +256,65 @@ export default function AddressValidator() {
                 </div>
               </div>
             )}
+
+            {/* Brand + Campaign */}
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <Label className="text-xs text-muted-foreground">Brand</Label>
+                {showNewBrand ? (
+                  <div className="flex gap-2 mt-1">
+                    <Input
+                      value={newBrandName}
+                      onChange={(e) => setNewBrandName(e.target.value)}
+                      placeholder="Nome brand"
+                      className="flex-1"
+                    />
+                    <Button
+                      size="sm"
+                      onClick={async () => {
+                        if (newBrandName.trim()) {
+                          try {
+                            await createBrand(newBrandName)
+                            const upper = newBrandName.trim().toUpperCase()
+                            setBrands(prev => [...prev, upper].sort())
+                            setBrand(upper)
+                          } catch {}
+                          setShowNewBrand(false)
+                          setNewBrandName("")
+                        }
+                      }}
+                    >
+                      Salva
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => { setShowNewBrand(false); setNewBrandName("") }}>
+                      Annulla
+                    </Button>
+                  </div>
+                ) : (
+                  <select
+                    value={brand}
+                    onChange={(e) => {
+                      if (e.target.value === "__new__") setShowNewBrand(true)
+                      else setBrand(e.target.value)
+                    }}
+                    className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+                  >
+                    <option value="">Seleziona brand...</option>
+                    {brands.map(b => <option key={b} value={b}>{b}</option>)}
+                    <option value="__new__">+ Aggiungi brand</option>
+                  </select>
+                )}
+              </div>
+              <div>
+                <Label className="text-xs text-muted-foreground">Campagna</Label>
+                <Input
+                  value={campaign}
+                  onChange={(e) => setCampaign(e.target.value)}
+                  placeholder="es. GENNAIO TRADE VISIBILITY"
+                  className="mt-1"
+                />
+              </div>
+            </div>
 
             <Button
               onClick={() => excelFile && submitMutation.mutate(excelFile)}
@@ -324,6 +397,61 @@ export default function AddressValidator() {
                   onConfirm={handleConfirm}
                   isConfirming={confirmMutation.isPending}
                 />
+
+                {/* Order ID Warnings */}
+                {parsedResult?.order_id_summary && parsedResult.order_id_summary.warnings.length > 0 && (
+                  <div className="rounded-lg bg-amber-50 border border-amber-200 px-5 py-4 space-y-3">
+                    <p className="text-sm font-semibold text-amber-800">
+                      Problemi con gli Order ID
+                    </p>
+                    {parsedResult.order_id_summary.warnings.map((w, i) => (
+                      <p key={i} className="text-sm text-amber-700">
+                        {w.type === "within_file_duplicate" && "\u26A0\uFE0F "}
+                        {w.type === "cross_file_duplicate" && "\uD83D\uDD04 "}
+                        {w.message}
+                      </p>
+                    ))}
+                    {parsedResult.order_id_summary.cross_file_duplicates > 0 && (
+                      <div className="pt-2 border-t border-amber-200">
+                        <p className="text-sm text-amber-800 font-medium">
+                          È un ri-caricamento per correggere errori?
+                        </p>
+                        <div className="flex gap-2 mt-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={handleConfirm}
+                            disabled={confirmMutation.isPending}
+                            className="border-amber-400 text-amber-800 hover:bg-amber-100"
+                          >
+                            Sì, incrementa versione
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={handleConfirm}
+                            disabled={confirmMutation.isPending}
+                            className="text-muted-foreground"
+                          >
+                            No, procedi comunque
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Order ID stats */}
+                {parsedResult?.order_id_summary && (
+                  <div className="flex gap-2 text-xs text-muted-foreground">
+                    <span>Order ID: {parsedResult.order_id_summary.valid}/{parsedResult.order_id_summary.total} validi</span>
+                    {parsedResult.order_id_summary.format_errors > 0 && (
+                      <Badge variant="outline" className="text-xs px-2 py-0.5 border-amber-400 text-amber-700">
+                        {parsedResult.order_id_summary.format_errors} errori formato
+                      </Badge>
+                    )}
+                  </div>
+                )}
 
                 {confirmMutation.error && (
                   <p className="text-sm text-destructive text-center">
