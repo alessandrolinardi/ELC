@@ -128,6 +128,17 @@ export default function AddressValidator() {
     confirmMutation.mutate({ edits, retry_regex_rows: false })
   }, [confirmMutation, edits])
 
+  // Confirm with version bump (re-upload)
+  const handleConfirmWithVersionBump = useCallback(() => {
+    // The backend will handle version bumping based on the campaign + processed_orders table
+    // We append V{next} to the campaign before confirming
+    const summary = parsedResult?.order_id_summary
+    const nextVersion = (summary?.detected_version || 1) + 1
+    const bumpedCampaign = campaign ? `${campaign} V${nextVersion}` : `V${nextVersion}`
+    setCampaign(bumpedCampaign)
+    confirmMutation.mutate({ edits, retry_regex_rows: false })
+  }, [confirmMutation, edits, parsedResult, campaign])
+
   // Retry regex handler
   const handleRetryRegex = useCallback(() => {
     confirmMutation.mutate({ edits, retry_regex_rows: true })
@@ -257,68 +268,84 @@ export default function AddressValidator() {
               </div>
             )}
 
-            {/* Brand + Campaign */}
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label className="text-xs text-muted-foreground">Brand</Label>
-                {showNewBrand ? (
-                  <div className="flex gap-2 mt-1">
-                    <Input
-                      value={newBrandName}
-                      onChange={(e) => setNewBrandName(e.target.value)}
-                      placeholder="Nome brand"
-                      className="flex-1"
-                    />
-                    <Button
-                      size="sm"
-                      onClick={async () => {
-                        if (newBrandName.trim()) {
-                          try {
-                            await createBrand(newBrandName)
-                            const upper = newBrandName.trim().toUpperCase()
-                            setBrands(prev => [...prev, upper].sort())
-                            setBrand(upper)
-                          } catch {}
-                          setShowNewBrand(false)
-                          setNewBrandName("")
-                        }
-                      }}
-                    >
-                      Salva
-                    </Button>
-                    <Button size="sm" variant="outline" onClick={() => { setShowNewBrand(false); setNewBrandName("") }}>
-                      Annulla
-                    </Button>
+            {/* Brand + Campaign — shown after file is selected */}
+            {excelFile && (
+              <div className="elc-card space-y-4">
+                <p className="text-sm font-semibold text-foreground">Configurazione spedizione</p>
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label className="text-xs text-muted-foreground">
+                      Brand <span className="text-destructive">*</span>
+                    </Label>
+                    {showNewBrand ? (
+                      <div className="flex gap-2 mt-1">
+                        <Input
+                          value={newBrandName}
+                          onChange={(e) => setNewBrandName(e.target.value)}
+                          placeholder="Nome brand"
+                          className="flex-1"
+                          autoFocus
+                        />
+                        <Button
+                          size="sm"
+                          onClick={async () => {
+                            if (newBrandName.trim()) {
+                              try {
+                                await createBrand(newBrandName)
+                                const upper = newBrandName.trim().toUpperCase()
+                                setBrands(prev => [...prev, upper].sort())
+                                setBrand(upper)
+                                setShowNewBrand(false)
+                                setNewBrandName("")
+                              } catch (err) {
+                                // Show inline error — keep the form open
+                                alert(err instanceof Error ? err.message : "Errore durante la creazione del brand")
+                              }
+                            }
+                          }}
+                        >
+                          Salva
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => { setShowNewBrand(false); setNewBrandName("") }}>
+                          Annulla
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="relative mt-1">
+                        <select
+                          value={brand}
+                          onChange={(e) => {
+                            if (e.target.value === "__new__") setShowNewBrand(true)
+                            else setBrand(e.target.value)
+                          }}
+                          className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring appearance-none"
+                        >
+                          <option value="">Seleziona brand...</option>
+                          {brands.map(b => <option key={b} value={b}>{b}</option>)}
+                          <option value="__new__">+ Aggiungi brand</option>
+                        </select>
+                        <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs">{"\u25BE"}</span>
+                      </div>
+                    )}
                   </div>
-                ) : (
-                  <select
-                    value={brand}
-                    onChange={(e) => {
-                      if (e.target.value === "__new__") setShowNewBrand(true)
-                      else setBrand(e.target.value)
-                    }}
-                    className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
-                  >
-                    <option value="">Seleziona brand...</option>
-                    {brands.map(b => <option key={b} value={b}>{b}</option>)}
-                    <option value="__new__">+ Aggiungi brand</option>
-                  </select>
-                )}
+                  <div>
+                    <Label className="text-xs text-muted-foreground">
+                      Campagna <span className="text-destructive">*</span>
+                    </Label>
+                    <Input
+                      value={campaign}
+                      onChange={(e) => setCampaign(e.target.value)}
+                      placeholder="es. GENNAIO TRADE VISIBILITY"
+                      className="mt-1"
+                    />
+                  </div>
+                </div>
               </div>
-              <div>
-                <Label className="text-xs text-muted-foreground">Campagna</Label>
-                <Input
-                  value={campaign}
-                  onChange={(e) => setCampaign(e.target.value)}
-                  placeholder="es. GENNAIO TRADE VISIBILITY"
-                  className="mt-1"
-                />
-              </div>
-            </div>
+            )}
 
             <Button
               onClick={() => excelFile && submitMutation.mutate(excelFile)}
-              disabled={!excelFile || submitMutation.isPending}
+              disabled={!excelFile || !brand || !campaign.trim() || submitMutation.isPending}
               className="bg-primary hover:bg-primary/90 text-white w-full"
             >
               {submitMutation.isPending ? "Avvio..." : "Avvia Validazione"}
@@ -388,17 +415,7 @@ export default function AddressValidator() {
               </div>
             ) : parsedResult ? (
               <>
-                <ParseReviewTable
-                  rows={parsedResult.rows}
-                  summary={parsedResult.parsing_summary}
-                  edits={edits}
-                  onEditRow={handleEditRow}
-                  onRetryRegex={handleRetryRegex}
-                  onConfirm={handleConfirm}
-                  isConfirming={confirmMutation.isPending}
-                />
-
-                {/* Order ID Warnings */}
+                {/* Order ID Warnings — shown BEFORE the table so problems are visible first */}
                 {parsedResult?.order_id_summary && parsedResult.order_id_summary.warnings.length > 0 && (
                   <div className="rounded-lg bg-amber-50 border border-amber-200 px-5 py-4 space-y-3">
                     <p className="text-sm font-semibold text-amber-800">
@@ -420,7 +437,7 @@ export default function AddressValidator() {
                           <Button
                             size="sm"
                             variant="outline"
-                            onClick={handleConfirm}
+                            onClick={handleConfirmWithVersionBump}
                             disabled={confirmMutation.isPending}
                             className="border-amber-400 text-amber-800 hover:bg-amber-100"
                           >
@@ -452,6 +469,16 @@ export default function AddressValidator() {
                     )}
                   </div>
                 )}
+
+                <ParseReviewTable
+                  rows={parsedResult.rows}
+                  summary={parsedResult.parsing_summary}
+                  edits={edits}
+                  onEditRow={handleEditRow}
+                  onRetryRegex={handleRetryRegex}
+                  onConfirm={handleConfirm}
+                  isConfirming={confirmMutation.isPending}
+                />
 
                 {confirmMutation.error && (
                   <p className="text-sm text-destructive text-center">
