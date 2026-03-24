@@ -5,6 +5,68 @@ from datetime import datetime, date, time
 from .config_compat import get_secret
 
 
+CARRIER_MAP = {
+    "DHL": {"carrier_name": "MyDHL", "carrier_id": 9536},
+    "UPS": {"carrier_name": "UPSv2", "carrier_id": 7743},
+    "FedEx": {"carrier_name": "FedExv2", "carrier_id": 3699},
+}
+
+
+def _build_pickup_webhook_payload(
+    carrier: str,
+    contact_name: str,
+    company: str,
+    address: str,
+    city: str,
+    province: str,
+    zip_code: str,
+    phone: str,
+    pickup_date: date,
+    time_start: time,
+    time_end: time,
+    num_packages: int,
+    weight_per_package: float,
+    length: float,
+    width: float,
+    height: float,
+    notes: str,
+    use_pallet: bool,
+    num_pallets: int,
+    pallet_dimensions_str: str,
+) -> dict:
+    """Build the flat payload expected by the shipments-backend pickup webhook."""
+    carrier_info = CARRIER_MAP.get(carrier, {"carrier_name": carrier, "carrier_id": 0})
+    time_windows = _split_time_window(time_start, time_end)
+
+    return {
+        "carrier_name": carrier_info["carrier_name"],
+        "carrier_id": carrier_info["carrier_id"],
+        "from_name": contact_name or company,
+        "from_company": company,
+        "from_street1": address,
+        "from_city": city,
+        "from_state": province,
+        "from_zip": zip_code,
+        "from_country": "IT",
+        "from_phone": phone,
+        "to_country": "IT",
+        "parcels": [
+            {
+                "length": length,
+                "width": width,
+                "height": height,
+                "weight": round(weight_per_package, 2),
+            }
+        ] * num_packages,
+        "pickup_date": pickup_date.isoformat(),
+        "pickup_morning_min": time_windows["PickupMorningMintime"],
+        "pickup_morning_max": time_windows["PickupMorningMaxtime"],
+        "pickup_afternoon_min": time_windows["PickupAfternoonMintime"],
+        "pickup_afternoon_max": time_windows["PickupAfternoonMaxtime"],
+        "pickup_note": _build_pickup_note(notes, use_pallet, num_pallets, pallet_dimensions_str),
+    }
+
+
 def _build_pickup_note(
     notes: str,
     use_pallet: bool,
@@ -172,32 +234,29 @@ def send_pickup_request(
         "summary_dimensions": f"Dimensioni collo: {package_dimensions_str}",
         "summary_pallet": f"{num_pallets} pallet ({pallet_dimensions_str})" if use_pallet else "Nessun pallet",
 
-        # === ShippyPro BookPickup compatible fields ===
-        # These are pre-formatted so a downstream integration can map directly.
-        "shippypro": {
-            "from_address": {
-                "name": contact_name or company,
-                "company": company,
-                "street1": address,
-                "city": city,
-                "state": province,
-                "zip": zip_code,
-                "country": "IT",
-                "phone": phone,
-            },
-            "to_address": {"country": "IT"},
-            "parcels": [
-                {
-                    "length": length,
-                    "width": width,
-                    "height": height,
-                    "weight": round(weight_per_package, 2),
-                }
-            ] * num_packages,
-            "PickupTime": int(datetime.combine(pickup_date, time_start).timestamp()),
-            "PickupNote": _build_pickup_note(notes, use_pallet, num_pallets, pallet_dimensions_str),
-            **_split_time_window(time_start, time_end),
-        },
+        # === Pickup webhook payload (matches shipments-backend schema) ===
+        "pickup_webhook": _build_pickup_webhook_payload(
+            carrier=carrier,
+            contact_name=contact_name,
+            company=company,
+            address=address,
+            city=city,
+            province=province,
+            zip_code=zip_code,
+            phone=phone,
+            pickup_date=pickup_date,
+            time_start=time_start,
+            time_end=time_end,
+            num_packages=num_packages,
+            weight_per_package=weight_per_package,
+            length=length,
+            width=width,
+            height=height,
+            notes=notes,
+            use_pallet=use_pallet,
+            num_pallets=num_pallets,
+            pallet_dimensions_str=pallet_dimensions_str,
+        ),
     }
 
     # --- Send to Zapier (email + Trello) ---
@@ -224,7 +283,7 @@ def send_pickup_request(
     if pickup_url:
         try:
             headers = {"X-Webhook-Secret": pickup_secret} if pickup_secret else {}
-            resp = requests.post(pickup_url, json=payload["shippypro"], headers=headers, timeout=10)
+            resp = requests.post(pickup_url, json=payload["pickup_webhook"], headers=headers, timeout=10)
             if resp.status_code == 200:
                 pickup_ok = True
             else:
