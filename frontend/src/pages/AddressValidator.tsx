@@ -288,41 +288,43 @@ export default function AddressValidator() {
                       Brand <span className="text-destructive">*</span>
                     </Label>
                     {showNewBrand ? (
-                      <div className="flex gap-2 mt-1">
-                        <Input
-                          value={newBrandName}
-                          onChange={(e) => setNewBrandName(e.target.value)}
-                          placeholder="Nome brand"
-                          className="flex-1"
-                          autoFocus
-                        />
-                        <Button
-                          size="sm"
-                          onClick={async () => {
-                            if (newBrandName.trim()) {
-                              setBrandError("")
-                              try {
-                                await createBrand(newBrandName)
-                                const upper = newBrandName.trim().toUpperCase()
-                                setBrands(prev => [...prev, upper].sort())
-                                setBrand(upper)
-                                setShowNewBrand(false)
-                                setNewBrandName("")
-                              } catch (err) {
-                                setBrandError(err instanceof Error ? err.message : "Errore durante la creazione del brand")
+                      <>
+                        <div className="flex gap-2 mt-1">
+                          <Input
+                            value={newBrandName}
+                            onChange={(e) => setNewBrandName(e.target.value)}
+                            placeholder="Nome brand"
+                            className="flex-1"
+                            autoFocus
+                          />
+                          <Button
+                            size="sm"
+                            onClick={async () => {
+                              if (newBrandName.trim()) {
+                                setBrandError("")
+                                try {
+                                  await createBrand(newBrandName)
+                                  const upper = newBrandName.trim().toUpperCase()
+                                  setBrands(prev => [...prev, upper].sort())
+                                  setBrand(upper)
+                                  setShowNewBrand(false)
+                                  setNewBrandName("")
+                                } catch (err) {
+                                  setBrandError(err instanceof Error ? err.message : "Errore durante la creazione del brand")
+                                }
                               }
-                            }
-                          }}
-                        >
-                          Salva
-                        </Button>
-                        <Button size="sm" variant="outline" onClick={() => { setShowNewBrand(false); setNewBrandName(""); setBrandError("") }}>
-                          Annulla
-                        </Button>
-                      </div>
-                      {brandError && (
-                        <p className="text-sm text-red-500 mt-1">{brandError}</p>
-                      )}
+                            }}
+                          >
+                            Salva
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={() => { setShowNewBrand(false); setNewBrandName(""); setBrandError("") }}>
+                            Annulla
+                          </Button>
+                        </div>
+                        {brandError && (
+                          <p className="text-sm text-red-500 mt-1">{brandError}</p>
+                        )}
+                      </>
                     ) : (
                       <div className="relative mt-1">
                         <select
