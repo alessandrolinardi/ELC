@@ -162,6 +162,8 @@ def find_within_file_duplicates(
     """
     seen: dict[str, list[int]] = {}
     for idx, number in enumerate(order_numbers):
+        if not number:
+            continue
         seen.setdefault(number, []).append(idx)
 
     return {num: indices for num, indices in seen.items() if len(indices) > 1}
@@ -180,12 +182,17 @@ def find_cross_file_duplicates(
     if supabase_client is None or not order_numbers:
         return {}
 
+    # Filter out empty strings to avoid spurious matches
+    filtered = [n for n in order_numbers if n]
+    if not filtered:
+        return {}
+
     try:
         response = (
             supabase_client
             .table("processed_orders")
             .select("*")
-            .in_("order_number", order_numbers)
+            .in_("order_number", filtered)
             .execute()
         )
         rows = response.data or []
@@ -224,7 +231,11 @@ def record_processed_orders(
             "expires_at": expires_at.isoformat(),
         }
         for num in order_numbers
+        if num  # skip empty strings
     ]
+
+    if not records:
+        return 0
 
     try:
         response = (

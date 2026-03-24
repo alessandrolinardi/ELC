@@ -35,6 +35,7 @@ const DEFAULT_FORM: PickupRequestData = {
   zip_code: "",
   city: "",
   province: "",
+  phone: "",
   reference: "",
   num_packages: 1,
   weight_per_package: 5,
@@ -53,6 +54,7 @@ export default function PickupRequest() {
   const [isDevMode] = useDevMode()
   const [form, setForm] = useState<PickupRequestData>(DEFAULT_FORM)
   const [showNotes, setShowNotes] = useState(false)
+  const [deliveryBy, setDeliveryBy] = useState("")
   const [selectedAddress, setSelectedAddress] = useState<Address | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -77,6 +79,7 @@ export default function PickupRequest() {
       zip_code: addr.zip,
       city: addr.city,
       province: addr.province,
+      phone: addr.phone,
       reference: addr.reference,
     }))
   }
@@ -92,6 +95,7 @@ export default function PickupRequest() {
       zip_code: data.zip_code,
       city: data.city,
       province: data.province,
+      phone: data.phone,
       reference: data.reference,
     }))
   }
@@ -110,6 +114,7 @@ export default function PickupRequest() {
       zip_code: data.zip_code,
       city: data.city,
       province: data.province ?? "",
+      phone: data.phone ?? "",
       reference: data.reference ?? "",
     }))
     // The new address will appear after the query refetch; try to select it
@@ -123,6 +128,7 @@ export default function PickupRequest() {
         zip: data.zip_code,
         city: data.city,
         province: data.province ?? "",
+        phone: data.phone ?? "",
         reference: data.reference ?? "",
         is_default: data.is_default ?? false,
       }
@@ -154,7 +160,14 @@ export default function PickupRequest() {
 
   const handleSubmit = () => {
     setSuccessMessage(null)
-    submitMutation.mutate(form)
+    // Prepend delivery deadline to notes if set
+    let notes = form.notes
+    if (deliveryBy) {
+      const [y, m, d] = deliveryBy.split("-")
+      const prefix = `Consegna entro: ${d}/${m}/${y}`
+      notes = notes ? `${prefix} | ${notes}` : prefix
+    }
+    submitMutation.mutate({ ...form, notes })
   }
 
   const update = <K extends keyof PickupRequestData>(
@@ -338,6 +351,28 @@ export default function PickupRequest() {
               </div>
             )}
           </div>
+        </div>
+
+        {/* Delivery deadline (optional) */}
+        <div className="elc-card">
+          <div className="flex items-center justify-between">
+            <Label className="text-sm font-semibold text-foreground">
+              Consegna entro
+            </Label>
+            <span className="text-xs text-muted-foreground">Opzionale</span>
+          </div>
+          <Input
+            type="date"
+            value={deliveryBy}
+            onChange={(e) => setDeliveryBy(e.target.value)}
+            min={new Date(new Date(form.pickup_date).getTime() + 86400000).toISOString().split("T")[0]}
+            className="mt-2 w-48"
+          />
+          {deliveryBy && (
+            <p className="text-xs text-muted-foreground mt-1">
+              Verrà aggiunto alle note per il corriere
+            </p>
+          )}
         </div>
 
         {/* Card 4: Notes (optional, hidden by default) */}

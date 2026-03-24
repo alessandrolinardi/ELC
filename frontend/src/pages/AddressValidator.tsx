@@ -45,6 +45,8 @@ export default function AddressValidator() {
   const [brands, setBrands] = useState<string[]>([])
   const [showNewBrand, setShowNewBrand] = useState(false)
   const [newBrandName, setNewBrandName] = useState("")
+  const [brandError, setBrandError] = useState("")
+  const [poNumber, setPoNumber] = useState("")
 
   // Edit state for the review step (Phase 1)
   const [edits, setEdits] = useState<Record<string, Record<string, string>>>({})
@@ -123,26 +125,33 @@ export default function AddressValidator() {
     }))
   }, [])
 
+  // PO is resolved from auto-detection or manual entry — must be present to confirm
+  const detectedPo = parsedResult?.order_id_summary?.detected_po
+  const resolvedPo = detectedPo || poNumber.trim()
+  const poOverride = resolvedPo || undefined
+  const allOrderIdsBroken = parsedResult?.order_id_summary != null
+    && parsedResult.order_id_summary.valid === 0
+    && parsedResult.order_id_summary.format_errors > 0
+  const poMissing = parsedResult?.order_id_summary != null && !resolvedPo && !allOrderIdsBroken
+
   // Confirm handler
   const handleConfirm = useCallback(() => {
-    confirmMutation.mutate({ edits, retry_regex_rows: false })
-  }, [confirmMutation, edits])
+    confirmMutation.mutate({ edits, retry_regex_rows: false, po_override: poOverride })
+  }, [confirmMutation, edits, poOverride])
 
   // Confirm with version bump (re-upload)
   const handleConfirmWithVersionBump = useCallback(() => {
-    // The backend will handle version bumping based on the campaign + processed_orders table
-    // We append V{next} to the campaign before confirming
     const summary = parsedResult?.order_id_summary
     const nextVersion = (summary?.detected_version || 1) + 1
     const bumpedCampaign = campaign ? `${campaign} V${nextVersion}` : `V${nextVersion}`
     setCampaign(bumpedCampaign)
-    confirmMutation.mutate({ edits, retry_regex_rows: false })
-  }, [confirmMutation, edits, parsedResult, campaign])
+    confirmMutation.mutate({ edits, retry_regex_rows: false, campaign_override: bumpedCampaign, po_override: poOverride })
+  }, [confirmMutation, edits, parsedResult, campaign, poOverride])
 
   // Retry regex handler
   const handleRetryRegex = useCallback(() => {
-    confirmMutation.mutate({ edits, retry_regex_rows: true })
-  }, [confirmMutation, edits])
+    confirmMutation.mutate({ edits, retry_regex_rows: true, po_override: poOverride })
+  }, [confirmMutation, edits, poOverride])
 
   // Edit handler for results table (Phase 2)
   const handleResultEdit = useCallback((index: number, field: string, value: string) => {
@@ -189,6 +198,7 @@ export default function AddressValidator() {
     setFilesReady(false)
     setBrand("")
     setCampaign("")
+    setPoNumber("")
   }
 
   return (
@@ -290,6 +300,7 @@ export default function AddressValidator() {
                           size="sm"
                           onClick={async () => {
                             if (newBrandName.trim()) {
+                              setBrandError("")
                               try {
                                 await createBrand(newBrandName)
                                 const upper = newBrandName.trim().toUpperCase()
@@ -298,18 +309,20 @@ export default function AddressValidator() {
                                 setShowNewBrand(false)
                                 setNewBrandName("")
                               } catch (err) {
-                                // Show inline error — keep the form open
-                                alert(err instanceof Error ? err.message : "Errore durante la creazione del brand")
+                                setBrandError(err instanceof Error ? err.message : "Errore durante la creazione del brand")
                               }
                             }
                           }}
                         >
                           Salva
                         </Button>
-                        <Button size="sm" variant="outline" onClick={() => { setShowNewBrand(false); setNewBrandName("") }}>
+                        <Button size="sm" variant="outline" onClick={() => { setShowNewBrand(false); setNewBrandName(""); setBrandError("") }}>
                           Annulla
                         </Button>
                       </div>
+                      {brandError && (
+                        <p className="text-sm text-red-500 mt-1">{brandError}</p>
+                      )}
                     ) : (
                       <div className="relative mt-1">
                         <select
@@ -438,7 +451,7 @@ export default function AddressValidator() {
                             size="sm"
                             variant="outline"
                             onClick={handleConfirmWithVersionBump}
-                            disabled={confirmMutation.isPending}
+                            disabled={confirmMutation.isPending || poMissing}
                             className="border-amber-400 text-amber-800 hover:bg-amber-100"
                           >
                             Sì, incrementa versione
@@ -447,25 +460,69 @@ export default function AddressValidator() {
                             size="sm"
                             variant="outline"
                             onClick={handleConfirm}
-                            disabled={confirmMutation.isPending}
+                            disabled={confirmMutation.isPending || poMissing}
                             className="text-muted-foreground"
                           >
                             No, procedi comunque
                           </Button>
                         </div>
+                        {poMissing && (
+                          <p className="text-xs text-amber-700 mt-1">Inserisci prima il PO per poter procedere.</p>
+                        )}
                       </div>
                     )}
                   </div>
                 )}
 
-                {/* Order ID stats */}
+                {/* Order ID stats + PO detection */}
                 {parsedResult?.order_id_summary && (
-                  <div className="flex gap-2 text-xs text-muted-foreground">
-                    <span>Order ID: {parsedResult.order_id_summary.valid}/{parsedResult.order_id_summary.total} validi</span>
-                    {parsedResult.order_id_summary.format_errors > 0 && (
-                      <Badge variant="outline" className="text-xs px-2 py-0.5 border-amber-400 text-amber-700">
-                        {parsedResult.order_id_summary.format_errors} errori formato
-                      </Badge>
+                  <div className="space-y-2">
+                    <div className="flex gap-2 text-xs text-muted-foreground items-center">
+                      <span>Order ID: {parsedResult.order_id_summary.valid}/{parsedResult.order_id_summary.total} validi</span>
+                      {parsedResult.order_id_summary.format_errors > 0 && (
+                        <Badge variant="outline" className="text-xs px-2 py-0.5 border-amber-400 text-amber-700">
+                          {parsedResult.order_id_summary.format_errors} errori formato
+                        </Badge>
+                      )}
+                      {parsedResult.order_id_summary.detected_po ? (
+                        <Badge variant="outline" className="text-xs px-2 py-0.5 border-emerald-400 text-emerald-700">
+                          PO: {parsedResult.order_id_summary.detected_po}
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-xs px-2 py-0.5 border-slate-300 text-slate-500">
+                          Nessun PO rilevato
+                        </Badge>
+                      )}
+                    </div>
+                    {!parsedResult.order_id_summary.detected_po && !poNumber && (
+                      <div className="rounded-md bg-amber-50 border border-amber-200 px-4 py-3">
+                        <p className="text-sm text-amber-800 font-medium">
+                          PO non rilevato — inseriscilo per continuare
+                        </p>
+                        <div className="flex gap-2 mt-2 items-center">
+                          <Input
+                            value={poNumber}
+                            onChange={(e) => setPoNumber(e.target.value)}
+                            placeholder="Es. 3501494822"
+                            className="w-48 h-8 text-sm"
+                          />
+                        </div>
+                        <p className="text-xs text-amber-600 mt-1">Necessario per il tracciamento ordini</p>
+                      </div>
+                    )}
+                    {!parsedResult.order_id_summary.detected_po && poNumber && (
+                      <div className="flex gap-2 text-xs items-center">
+                        <Badge variant="outline" className="px-2 py-0.5 border-blue-400 text-blue-700">
+                          PO: {poNumber}
+                        </Badge>
+                        <button
+                          type="button"
+                          onClick={() => setPoNumber("")}
+                          className="text-xs text-muted-foreground underline hover:text-foreground"
+                        >
+                          Modifica
+                        </button>
+                      </div>
                     )}
                   </div>
                 )}
@@ -478,6 +535,7 @@ export default function AddressValidator() {
                   onRetryRegex={handleRetryRegex}
                   onConfirm={handleConfirm}
                   isConfirming={confirmMutation.isPending}
+                  blockReason={poMissing ? "Inserisci il PO per procedere" : undefined}
                 />
 
                 {confirmMutation.error && (

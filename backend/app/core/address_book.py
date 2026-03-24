@@ -25,6 +25,7 @@ class Address:
     zip: str
     city: str
     province: str
+    phone: str
     reference: str
     is_default: bool = False
     created_at: str = ""
@@ -41,6 +42,7 @@ class Address:
             "zip": self.zip,
             "city": self.city,
             "province": self.province,
+            "phone": self.phone,
             "reference": self.reference,
             "is_default": self.is_default,
             "created_at": self.created_at,
@@ -59,6 +61,7 @@ class Address:
             zip=data.get("zip", ""),
             city=data.get("city", ""),
             province=data.get("province", ""),
+            phone=data.get("phone", ""),
             reference=data.get("reference", ""),
             is_default=data.get("is_default", False),
             created_at=data.get("created_at", ""),
@@ -170,6 +173,7 @@ def add_address(
     zip_code: str,
     city: str,
     province: str = "",
+    phone: str = "",
     reference: str = "",
     contact_name: str = "",
     is_default: bool = False
@@ -184,7 +188,8 @@ def add_address(
         zip_code: ZIP/postal code
         city: City name
         province: Province code (optional)
-        reference: Reference/phone (optional)
+        phone: Phone number (optional)
+        reference: Reference note (optional)
         contact_name: Full name of contact person (optional)
         is_default: Whether this should be the default address
 
@@ -224,6 +229,7 @@ def add_address(
             zip=zip_code,
             city=city,
             province=province,
+            phone=phone,
             reference=reference,
             is_default=is_default,
             created_at=now,

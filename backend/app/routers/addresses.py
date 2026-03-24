@@ -18,7 +18,7 @@ async def list_addresses(request: Request):
     return {"ok": True, "data": [AddressResponse(
         id=a.id, name=a.name, company=a.company, contact_name=a.contact_name,
         street=a.street, zip=a.zip, city=a.city, province=a.province,
-        reference=a.reference, is_default=a.is_default
+        phone=a.phone, reference=a.reference, is_default=a.is_default
     ).model_dump() for a in addresses]}
 
 
@@ -28,7 +28,8 @@ async def create_address(request: Request, body: AddressCreate):
     result = add_address(
         name=body.name, company=body.company, contact_name=body.contact_name,
         street=body.street, zip_code=body.zip_code, city=body.city,
-        province=body.province, reference=body.reference, is_default=body.is_default
+        province=body.province, phone=body.phone, reference=body.reference,
+        is_default=body.is_default
     )
     if result is None:
         raise HTTPException(status_code=409, detail={

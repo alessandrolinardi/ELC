@@ -11,6 +11,7 @@ class AddressCreate(BaseModel):
     zip_code: str
     city: str
     province: str = ""
+    phone: str = ""
     reference: str = ""
     is_default: bool = False
 
@@ -30,6 +31,7 @@ class AddressUpdate(BaseModel):
     zip_code: Optional[str] = None
     city: Optional[str] = None
     province: Optional[str] = None
+    phone: Optional[str] = None
     reference: Optional[str] = None
 
     @field_validator("zip_code")
@@ -49,5 +51,6 @@ class AddressResponse(BaseModel):
     zip: str
     city: str
     province: str
+    phone: str
     reference: str
     is_default: bool

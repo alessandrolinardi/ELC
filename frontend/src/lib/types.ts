@@ -71,6 +71,7 @@ export interface OrderIDSummary {
   warnings: OrderIDWarning[]
   detected_campaign: string
   detected_version: number | null
+  detected_po: string
 }
 
 export interface ParsedJobResult {
@@ -82,6 +83,8 @@ export interface ParsedJobResult {
 export interface ConfirmRequest {
   edits: Record<string, Record<string, string>>
   retry_regex_rows: boolean
+  campaign_override?: string
+  po_override?: string
 }
 
 // --- Label Sorter ---
@@ -149,6 +152,7 @@ export interface Address {
   zip: string
   city: string
   province: string
+  phone: string
   reference: string
   is_default: boolean
 }
@@ -161,6 +165,7 @@ export interface AddressCreate {
   zip_code: string
   city: string
   province?: string
+  phone?: string
   reference?: string
   is_default?: boolean
 }
@@ -173,6 +178,7 @@ export interface AddressUpdate {
   zip_code?: string
   city?: string
   province?: string
+  phone?: string
   reference?: string
 }
 
@@ -189,6 +195,7 @@ export interface PickupRequestData {
   zip_code: string
   city: string
   province: string
+  phone: string
   reference: string
   num_packages: number
   weight_per_package: number

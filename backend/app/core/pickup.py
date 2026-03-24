@@ -5,6 +5,61 @@ from datetime import datetime, date, time
 from .config_compat import get_secret
 
 
+def _build_pickup_note(
+    notes: str,
+    use_pallet: bool,
+    num_pallets: int,
+    pallet_dimensions_str: str,
+) -> str:
+    """Build PickupNote (max 255 chars) combining user notes + pallet info."""
+    parts = []
+    if use_pallet and num_pallets > 0:
+        parts.append(f"{num_pallets} pallet ({pallet_dimensions_str})")
+    if notes:
+        parts.append(notes)
+    result = " | ".join(parts)
+    return result[:255]
+
+
+def _split_time_window(
+    start: time, end: time, midday: time = time(13, 0),
+) -> dict[str, str]:
+    """Split a single time window into ShippyPro morning/afternoon format.
+
+    Rules:
+    - If the window is entirely before midday → morning only, afternoon empty
+    - If the window is entirely after midday → morning empty, afternoon only
+    - If it spans both → split at midday boundary
+    """
+    s, e = start.strftime("%H:%M"), end.strftime("%H:%M")
+    m = midday.strftime("%H:%M")
+
+    if end <= midday:
+        # Entirely morning
+        return {
+            "PickupMorningMintime": s,
+            "PickupMorningMaxtime": e,
+            "PickupAfternoonMintime": "",
+            "PickupAfternoonMaxtime": "",
+        }
+    elif start >= midday:
+        # Entirely afternoon
+        return {
+            "PickupMorningMintime": "",
+            "PickupMorningMaxtime": "",
+            "PickupAfternoonMintime": s,
+            "PickupAfternoonMaxtime": e,
+        }
+    else:
+        # Spans both
+        return {
+            "PickupMorningMintime": s,
+            "PickupMorningMaxtime": m,
+            "PickupAfternoonMintime": m,
+            "PickupAfternoonMaxtime": e,
+        }
+
+
 def send_pickup_request(
     carrier: str,
     pickup_date: date,
@@ -16,6 +71,7 @@ def send_pickup_request(
     zip_code: str,
     city: str,
     province: str,
+    phone: str,
     reference: str,
     num_packages: int,
     weight_per_package: float,
@@ -77,6 +133,7 @@ def send_pickup_request(
         "zip_code": zip_code,
         "city": city,
         "province": province,
+        "phone": phone,
         "reference": reference,
         # Address - Formatted
         "full_address": f"{address}, {zip_code} {city} ({province})",
@@ -113,32 +170,76 @@ def send_pickup_request(
         # === Summary for email body ===
         "summary_packages": f"{num_packages} colli x {weight_per_package} kg = {total_weight:.1f} kg totali",
         "summary_dimensions": f"Dimensioni collo: {package_dimensions_str}",
-        "summary_pallet": f"{num_pallets} pallet ({pallet_dimensions_str})" if use_pallet else "Nessun pallet"
+        "summary_pallet": f"{num_pallets} pallet ({pallet_dimensions_str})" if use_pallet else "Nessun pallet",
+
+        # === ShippyPro BookPickup compatible fields ===
+        # These are pre-formatted so a downstream integration can map directly.
+        "shippypro": {
+            "from_address": {
+                "name": contact_name or company,
+                "company": company,
+                "street1": address,
+                "city": city,
+                "state": province,
+                "zip": zip_code,
+                "country": "IT",
+                "phone": phone,
+            },
+            "to_address": {"country": "IT"},
+            "parcels": [
+                {
+                    "length": length,
+                    "width": width,
+                    "height": height,
+                    "weight": round(weight_per_package, 2),
+                }
+            ] * num_packages,
+            "PickupTime": int(datetime.combine(pickup_date, time_start).timestamp()),
+            "PickupNote": _build_pickup_note(notes, use_pallet, num_pallets, pallet_dimensions_str),
+            **_split_time_window(time_start, time_end),
+        },
     }
 
-    try:
-        # Get Zapier webhook URL from secrets
-        webhook_url = get_secret("zapier", "webhook_url")
-        if not webhook_url:
-            return False, "Configurazione Zapier mancante. Aggiungi ZAPIER_WEBHOOK_URL nelle variabili d'ambiente."
+    # --- Send to Zapier (email + Trello) ---
+    zapier_ok = False
+    zapier_msg = ""
+    zapier_url = get_secret("zapier", "webhook_url")
+    if zapier_url:
+        try:
+            resp = requests.post(zapier_url, json=payload, timeout=10)
+            if resp.status_code == 200:
+                zapier_ok = True
+            else:
+                zapier_msg = f"Zapier HTTP {resp.status_code}"
+        except requests.exceptions.Timeout:
+            zapier_msg = "Zapier timeout"
+        except requests.exceptions.RequestException as e:
+            zapier_msg = f"Zapier: {e}"
 
-        # Send POST request to Zapier
-        response = requests.post(
-            webhook_url,
-            json=payload,
-            timeout=10
-        )
+    # --- Send to pickup webhook (ShippyPro processing) ---
+    pickup_ok = False
+    pickup_msg = ""
+    pickup_url = get_secret("pickup", "webhook_url")
+    pickup_secret = get_secret("pickup", "webhook_secret")
+    if pickup_url:
+        try:
+            headers = {"X-Webhook-Secret": pickup_secret} if pickup_secret else {}
+            resp = requests.post(pickup_url, json=payload["shippypro"], headers=headers, timeout=10)
+            if resp.status_code == 200:
+                pickup_ok = True
+            else:
+                pickup_msg = f"Pickup webhook HTTP {resp.status_code}"
+        except requests.exceptions.Timeout:
+            pickup_msg = "Pickup webhook timeout"
+        except requests.exceptions.RequestException as e:
+            pickup_msg = f"Pickup webhook: {e}"
 
-        if response.status_code == 200:
-            return True, "Richiesta inviata tramite Zapier"
-        else:
-            return False, f"Errore Zapier: HTTP {response.status_code}"
+    # --- Result ---
+    if not zapier_url and not pickup_url:
+        return False, "Nessun webhook configurato. Aggiungi ZAPIER_WEBHOOK_URL o PICKUP_WEBHOOK_URL."
 
-    except KeyError as e:
-        return False, f"Configurazione mancante: {e}"
-    except requests.exceptions.Timeout:
-        return False, "Timeout connessione a Zapier"
-    except requests.exceptions.RequestException as e:
-        return False, f"Errore connessione: {str(e)}"
-    except Exception as e:
-        return False, f"Errore: {str(e)}"
+    errors = [m for m in [zapier_msg, pickup_msg] if m]
+    if errors:
+        return False, " | ".join(errors)
+
+    return True, "Richiesta inviata"

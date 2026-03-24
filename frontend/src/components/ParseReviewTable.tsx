@@ -15,6 +15,7 @@ interface ParseReviewTableProps {
   onRetryRegex: () => void
   onConfirm: () => void
   isConfirming: boolean
+  blockReason?: string
 }
 
 export function ParseReviewTable({
@@ -25,6 +26,7 @@ export function ParseReviewTable({
   onRetryRegex,
   onConfirm,
   isConfirming,
+  blockReason,
 }: ParseReviewTableProps) {
   const [editingRow, setEditingRow] = useState<number | null>(null)
   const [showAllRows, setShowAllRows] = useState(false)
@@ -378,10 +380,10 @@ export function ParseReviewTable({
 
       {/* === Sticky Action Bar === */}
       <div className="sticky bottom-0 z-10 bg-background/95 backdrop-blur-sm border-t border-border py-3 -mx-1 px-1">
-        <div className="flex justify-center">
+        <div className="flex flex-col items-center gap-1">
           <Button
             onClick={onConfirm}
-            disabled={isConfirming}
+            disabled={isConfirming || !!blockReason}
             className="bg-primary hover:bg-primary/90 text-white px-8 shadow-lg"
           >
             {isConfirming ? (
@@ -393,6 +395,9 @@ export function ParseReviewTable({
               "Conferma e avvia validazione Google"
             )}
           </Button>
+          {blockReason && !isConfirming && (
+            <p className="text-xs text-amber-600">{blockReason}</p>
+          )}
         </div>
       </div>
     </div>

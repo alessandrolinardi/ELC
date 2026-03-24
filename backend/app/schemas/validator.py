@@ -20,6 +20,7 @@ class OrderIDSummary(BaseModel):
     warnings: list[OrderIDWarning] = []
     detected_campaign: str = ""
     detected_version: Optional[int] = None
+    detected_po: str = ""
 
 
 class ValidatorResultRow(BaseModel):
@@ -95,6 +96,8 @@ class ParsedJobResult(BaseModel):
 class ConfirmRequest(BaseModel):
     edits: dict[str, dict[str, str]] = {}
     retry_regex_rows: bool = False
+    campaign_override: str | None = None
+    po_override: str | None = None
 
 
 class ApplyCorrectionsRequest(BaseModel):

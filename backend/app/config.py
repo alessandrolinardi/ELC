@@ -18,6 +18,8 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     google_address_validation_api_key: str = ""
     zapier_webhook_url: str = ""
+    pickup_webhook_url: str = ""
+    pickup_webhook_secret: str = ""
 
     # App
     bypass_pin: str = ""

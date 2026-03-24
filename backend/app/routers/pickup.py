@@ -22,6 +22,7 @@ async def create_pickup_request(request: Request, body: PickupRequest):
         zip_code=body.zip_code,
         city=body.city,
         province=body.province,
+        phone=body.phone,
         reference=body.reference,
         num_packages=body.num_packages,
         weight_per_package=body.weight_per_package,

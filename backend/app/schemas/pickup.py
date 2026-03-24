@@ -14,6 +14,7 @@ class PickupRequest(BaseModel):
     zip_code: str
     city: str
     province: str = ""
+    phone: str = ""
     reference: str = ""
     num_packages: int
     weight_per_package: float

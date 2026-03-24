@@ -24,6 +24,7 @@ const EMPTY_FORM: AddressCreate = {
   zip_code: "",
   city: "",
   province: "",
+  phone: "",
   reference: "",
   is_default: false,
 }
@@ -84,6 +85,7 @@ export function AddressDrawer({
       zip_code: addr.zip,
       city: addr.city,
       province: addr.province || "",
+      phone: addr.phone || "",
       reference: addr.reference || "",
       is_default: addr.is_default,
     })
@@ -297,13 +299,24 @@ export function AddressDrawer({
                   />
                 </div>
               </div>
-              <div>
-                <Label className="text-xs text-muted-foreground">Riferimento / Telefono</Label>
-                <Input
-                  value={form.reference ?? ""}
-                  onChange={(e) => updateForm("reference", e.target.value)}
-                  className="mt-1"
-                />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-xs text-muted-foreground">Telefono</Label>
+                  <Input
+                    value={form.phone ?? ""}
+                    onChange={(e) => updateForm("phone", e.target.value)}
+                    placeholder="Es. 0212345678"
+                    className="mt-1"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs text-muted-foreground">Riferimento</Label>
+                  <Input
+                    value={form.reference ?? ""}
+                    onChange={(e) => updateForm("reference", e.target.value)}
+                    className="mt-1"
+                  />
+                </div>
               </div>
 
               <div className="flex items-center gap-2">

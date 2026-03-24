@@ -1,6 +1,7 @@
 """Address Validator endpoints."""
 import asyncio
 import io
+import math
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request
 
 import pandas as pd
@@ -175,32 +176,43 @@ def _process_parse(
         order_col = col_map.get('order_number')
         order_numbers: list[str] = []
         for idx, row in df.iterrows():
-            raw_val = str(row.get(order_col, '') if order_col else '')
-            order_numbers.append(raw_val.strip())
+            raw_val = row.get(order_col) if order_col else None
+            if raw_val is None or (isinstance(raw_val, float) and math.isnan(raw_val)):
+                order_numbers.append("")
+            else:
+                order_numbers.append(str(raw_val).strip())
 
         order_id_warnings = []
         valid_count = 0
         format_errors = 0
+        format_error_indices: list[int] = []
         detected_campaign = ""
         detected_version = None
+
+        detected_po = ""
 
         for i, raw_oid in enumerate(order_numbers):
             parsed_oid = parse_order_id(raw_oid)
             if parsed_oid is None:
                 if raw_oid:
                     format_errors += 1
-                    order_id_warnings.append({
-                        "type": "format_error",
-                        "message": f"Row {i}: invalid Order ID format: {raw_oid!r}",
-                        "row_indices": [i],
-                        "processed_at": None,
-                    })
+                    format_error_indices.append(i)
             else:
                 valid_count += 1
+                if not detected_po and parsed_oid.po:
+                    detected_po = parsed_oid.po
                 if not detected_campaign and parsed_oid.campaign:
                     detected_campaign = parsed_oid.campaign
                 if detected_version is None and parsed_oid.version is not None:
                     detected_version = parsed_oid.version
+
+        if format_error_indices:
+            order_id_warnings.append({
+                "type": "format_error",
+                "message": f"{format_errors} row{'s have' if format_errors != 1 else ' has'} invalid Order ID format",
+                "row_indices": format_error_indices,
+                "processed_at": None,
+            })
 
         within_dupes = find_within_file_duplicates(order_numbers)
         for oid, indices in within_dupes.items():
@@ -230,6 +242,7 @@ def _process_parse(
             "warnings": order_id_warnings,
             "detected_campaign": detected_campaign,
             "detected_version": detected_version,
+            "detected_po": detected_po,
         }
 
         # Save original Excel to disk for Phase 2
@@ -276,7 +289,8 @@ def _process_validate(
     retry_regex: bool,
     brand: str = "",
     campaign: str = "",
-    order_numbers: list = None,
+    order_numbers: list | None = None,
+    po_override: str = "",
 ):
     """Run Google validation in background thread (Phase 2)."""
     settings = get_settings()
@@ -418,6 +432,28 @@ def _process_validate(
                 "parse_method": parse_method,
             })
 
+        # Record processed orders BEFORE marking complete (so dedup data
+        # is persisted even if the status update were to fail, and a
+        # "complete" job always has its orders recorded).
+        _order_numbers = order_numbers or []
+        if _order_numbers:
+            # Use user-provided PO override, or extract from first parseable Order ID
+            _po = po_override
+            if not _po:
+                for _on in _order_numbers:
+                    _parsed = parse_order_id(_on)
+                    if _parsed:
+                        _po = _parsed.po
+                        break
+            record_processed_orders(
+                order_numbers=_order_numbers,
+                job_id=job_id,
+                brand=brand,
+                campaign=campaign,
+                po_number=_po or "",
+                supabase_client=_get_supabase_for_dedup(),
+            )
+
         # Complete
         job_store.update_status(job_id, "complete", result={
             "total_rows": report.total_rows,
@@ -434,18 +470,6 @@ def _process_validate(
                 "review": f"/api/v1/jobs/{job_id}/files/review.xlsx",
             },
         })
-
-        # Record processed orders for future cross-file dedup
-        _order_numbers = order_numbers or []
-        if _order_numbers:
-            record_processed_orders(
-                order_numbers=_order_numbers,
-                job_id=job_id,
-                brand=brand,
-                campaign=campaign,
-                po_number="",
-                supabase_client=_get_supabase_for_dedup(),
-            )
     except Exception as e:
         job_store.update_status(job_id, "failed", error=str(e))
 
@@ -548,6 +572,7 @@ async def confirm_validation(job_id: str, body: ConfirmRequest):
 
     # Get stored config from the parsed result
     config = status.get("result", {}).get("config", {})
+    campaign = body.campaign_override or config.get("campaign", "")
 
     loop = asyncio.get_running_loop()
     loop.run_in_executor(
@@ -555,8 +580,9 @@ async def confirm_validation(job_id: str, body: ConfirmRequest):
         config.get("confidence", 90), config.get("street_confidence", 85),
         config.get("pin_valid", False), config.get("client_ip", "unknown"),
         body.retry_regex_rows,
-        config.get("brand", ""), config.get("campaign", ""),
+        config.get("brand", ""), campaign,
         config.get("order_numbers", []),
+        body.po_override or "",
     )
 
     return {"ok": True, "data": {"status": "processing_validate"}}

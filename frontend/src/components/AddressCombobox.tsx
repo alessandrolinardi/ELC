@@ -13,6 +13,7 @@ export interface ManualAddressData {
   zip_code: string
   city: string
   province: string
+  phone: string
   reference: string
 }
 
@@ -33,6 +34,7 @@ const EMPTY_MANUAL: ManualAddressData = {
   zip_code: "",
   city: "",
   province: "",
+  phone: "",
   reference: "",
 }
 
@@ -110,6 +112,7 @@ export function AddressCombobox({
         zip_code: manualForm.zip_code,
         city: manualForm.city,
         province: manualForm.province || undefined,
+        phone: manualForm.phone || undefined,
         reference: manualForm.reference || undefined,
       })
       setManualMode(false)
@@ -196,7 +199,16 @@ export function AddressCombobox({
             />
           </div>
           <div>
-            <Label className="text-xs text-muted-foreground">Riferimento / Telefono</Label>
+            <Label className="text-xs text-muted-foreground">Telefono</Label>
+            <Input
+              value={manualForm.phone}
+              onChange={(e) => handleManualUpdate("phone", e.target.value)}
+              placeholder="Es. 0212345678"
+              className="mt-1"
+            />
+          </div>
+          <div>
+            <Label className="text-xs text-muted-foreground">Riferimento</Label>
             <Input
               value={manualForm.reference}
               onChange={(e) => handleManualUpdate("reference", e.target.value)}
@@ -335,6 +347,9 @@ export function AddressCombobox({
                 {selectedAddress.street}, {selectedAddress.zip} {selectedAddress.city}
                 {selectedAddress.province ? ` (${selectedAddress.province})` : ""}
               </p>
+              {selectedAddress.phone && (
+                <p className="text-xs text-muted-foreground">Tel: {selectedAddress.phone}</p>
+              )}
               {selectedAddress.reference && (
                 <p className="text-xs text-muted-foreground">{selectedAddress.reference}</p>
               )}
