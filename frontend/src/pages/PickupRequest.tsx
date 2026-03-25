@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react"
+import { useState, useEffect } from "react"
 import { useMutation } from "@tanstack/react-query"
 import { api } from "@/api/client"
 import { PageShell } from "@/components/layout/PageShell"
@@ -138,13 +138,13 @@ export default function PickupRequest() {
   }
 
   // Auto-select default address on load
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  useMemo(() => {
+  useEffect(() => {
     if (addresses.length > 0 && !selectedAddress) {
       const defaultAddr = addresses.find((a) => a.is_default) || addresses[0]
       selectAddress(defaultAddr)
     }
-  }, [addresses]) // eslint-disable-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [addresses])
 
   // Computed summary
   const totalWeight = form.num_packages * form.weight_per_package

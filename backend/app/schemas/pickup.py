@@ -1,5 +1,5 @@
 """Pydantic schemas for Pickup Request endpoints."""
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 from datetime import date, time
 
 
@@ -41,3 +41,9 @@ class PickupRequest(BaseModel):
         if not v.isdigit() or len(v) != 5:
             raise ValueError("CAP must be 5 digits")
         return v
+
+    @model_validator(mode="after")
+    def validate_time_window(self):
+        if self.time_end <= self.time_start:
+            raise ValueError("L'orario di fine deve essere successivo all'orario di inizio")
+        return self

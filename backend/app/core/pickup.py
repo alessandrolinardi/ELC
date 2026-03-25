@@ -62,25 +62,28 @@ def _build_pickup_webhook_payload(
                 "height": height,
                 "weight": round(weight_per_package, 2),
             }
-        ] * num_packages,
+            for _ in range(num_packages)
+        ],
         "pickup_date": pickup_date.isoformat(),
         "pickup_morning_min": time_windows["PickupMorningMintime"],
         "pickup_morning_max": time_windows["PickupMorningMaxtime"],
         "pickup_afternoon_min": time_windows["PickupAfternoonMintime"],
         "pickup_afternoon_max": time_windows["PickupAfternoonMaxtime"],
         "pickup_note": _build_pickup_note(notes, use_pallet, num_pallets, pallet_dimensions_str),
-        "order_ids": _generate_order_id(carrier, pickup_date, company, zip_code),
+        "order_ids": _generate_order_id(carrier, pickup_date, company, zip_code, time_start),
     }
 
 
-def _generate_order_id(carrier: str, pickup_date: date, company: str, zip_code: str) -> str:
+def _generate_order_id(carrier: str, pickup_date: date, company: str, zip_code: str, time_start: time) -> str:
     """Generate a deterministic order_id for idempotency.
 
-    Same carrier + date + company + zip within 24h → same order_id,
+    Same carrier + date + company + zip + time_start within 24h → same order_id,
     so the shipments-backend deduplicates accidental double-submits.
+    time_start is included so two pickups for the same entity on the same day
+    (e.g. morning run + afternoon run) get distinct IDs.
     """
-    key = f"ELC-{carrier}-{pickup_date.isoformat()}-{company}-{zip_code}"
-    short_hash = hashlib.sha256(key.encode()).hexdigest()[:8]
+    key = f"ELC-{carrier}-{pickup_date.isoformat()}-{company}-{zip_code}-{time_start.strftime('%H%M')}"
+    short_hash = hashlib.sha256(key.encode()).hexdigest()[:12]
     return f"ELC-{short_hash}"
 
 
@@ -322,11 +325,18 @@ def send_pickup_request(
             pickup_msg = f"Pickup webhook: {e}"
 
     # --- Result ---
+    # Pickup webhook is the primary business path; Zapier is secondary (notifications).
     if not zapier_url and not pickup_url:
         return False, "Nessun webhook configurato. Aggiungi ZAPIER_WEBHOOK_URL o PICKUP_WEBHOOK_URL.", None
 
-    errors = [m for m in [zapier_msg, pickup_msg] if m]
-    if errors:
-        return False, " | ".join(errors), pickup_result
+    # If the pickup webhook failed, that's a hard failure
+    if pickup_url and pickup_msg:
+        return False, pickup_msg, pickup_result
 
-    return True, "Richiesta inviata", pickup_result
+    # Pickup succeeded (or not configured). Zapier failure is a warning, not a blocker.
+    message = "Richiesta inviata"
+    if zapier_msg:
+        logger.warning("Zapier webhook failed: %s", zapier_msg)
+        message += f" (avviso: notifica Zapier fallita)"
+
+    return True, message, pickup_result

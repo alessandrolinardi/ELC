@@ -1,4 +1,5 @@
 """Pickup Request endpoint."""
+import asyncio
 from fastapi import APIRouter, HTTPException, Request
 
 from ..limiter import limiter
@@ -11,7 +12,7 @@ router = APIRouter()
 @router.post("/pickup/request")
 @limiter.limit("30/hour")
 async def create_pickup_request(request: Request, body: PickupRequest):
-    success, message, pickup_response = send_pickup_request(
+    success, message, pickup_response = await asyncio.to_thread(send_pickup_request,
         carrier=body.carrier,
         pickup_date=body.pickup_date,
         time_start=body.time_start,
@@ -44,8 +45,8 @@ async def create_pickup_request(request: Request, body: PickupRequest):
     data = {"message": message}
     if pickup_response:
         data["pickup_status"] = pickup_response.get("status")
-        data["pickup_id"] = pickup_response.get("id")
-        data["confirmation_id"] = pickup_response.get("confirmation_id")
+        data["pickup_id"] = str(pickup_response["id"]) if pickup_response.get("id") else None
+        data["confirmation_id"] = str(pickup_response["confirmation_id"]) if pickup_response.get("confirmation_id") else None
         if pickup_response.get("error_message"):
             data["error_detail"] = pickup_response["error_message"]
     return {"ok": True, "data": data}
