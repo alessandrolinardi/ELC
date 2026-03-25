@@ -280,15 +280,12 @@ def send_pickup_request(
     }
 
     # --- Send to Zapier (email + Trello) ---
-    zapier_ok = False
     zapier_msg = ""
     zapier_url = get_secret("zapier", "webhook_url")
     if zapier_url:
         try:
             resp = requests.post(zapier_url, json=payload, timeout=10)
-            if resp.status_code == 200:
-                zapier_ok = True
-            else:
+            if resp.status_code != 200:
                 zapier_msg = f"Zapier HTTP {resp.status_code}"
         except requests.exceptions.Timeout:
             zapier_msg = "Zapier timeout"
@@ -296,7 +293,6 @@ def send_pickup_request(
             zapier_msg = f"Zapier: {e}"
 
     # --- Send to pickup webhook (ShippyPro processing) ---
-    pickup_ok = False
     pickup_msg = ""
     pickup_result: Optional[dict] = None
     pickup_url = get_secret("pickup", "webhook_url")
@@ -306,7 +302,6 @@ def send_pickup_request(
             headers = {"X-Webhook-Secret": pickup_secret} if pickup_secret else {}
             resp = requests.post(pickup_url, json=payload["pickup_webhook"], headers=headers, timeout=40)
             if 200 <= resp.status_code < 300:
-                pickup_ok = True
                 try:
                     pickup_result = resp.json()
                 except ValueError:

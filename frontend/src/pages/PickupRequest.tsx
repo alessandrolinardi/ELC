@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { useMutation } from "@tanstack/react-query"
 import { api } from "@/api/client"
 import { PageShell } from "@/components/layout/PageShell"
@@ -70,7 +70,7 @@ export default function PickupRequest() {
   } = useAddresses()
 
   // Auto-populate from selected address
-  const selectAddress = (addr: Address) => {
+  const selectAddress = useCallback((addr: Address) => {
     setSelectedAddress(addr)
     setForm((prev) => ({
       ...prev,
@@ -83,7 +83,7 @@ export default function PickupRequest() {
       phone: addr.phone,
       reference: addr.reference,
     }))
-  }
+  }, [])
 
   // Handle manual address entry (use without saving)
   const handleManualEntry = (data: ManualAddressData) => {
@@ -143,8 +143,7 @@ export default function PickupRequest() {
       const defaultAddr = addresses.find((a) => a.is_default) || addresses[0]
       selectAddress(defaultAddr)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [addresses])
+  }, [addresses, selectedAddress, selectAddress])
 
   // Computed summary
   const totalWeight = form.num_packages * form.weight_per_package
