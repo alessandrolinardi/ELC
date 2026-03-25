@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { api } from "@/api/client"
 import { confirmValidation, fetchBrands, createBrand } from "@/api/client"
@@ -65,6 +65,17 @@ export default function AddressValidator() {
     error: jobError,
     isExpired,
   } = useJobPolling<ParsedJobResult | ValidatorJobResult>(jobId)
+
+  // True while a background job is running (Phase 1 or Phase 2)
+  const isProcessing = !!jobId && jobStatus !== "parsed" && jobStatus !== "failed" && jobStatus !== "complete" && !isExpired
+  const progressRef = useRef<HTMLDivElement>(null)
+
+  // Auto-scroll to progress indicator when parsing starts
+  useEffect(() => {
+    if (isProcessing && progressRef.current) {
+      progressRef.current.scrollIntoView({ behavior: "smooth", block: "center" })
+    }
+  }, [isProcessing])
 
   // Step transitions based on job status
   useEffect(() => {
@@ -360,10 +371,10 @@ export default function AddressValidator() {
 
             <Button
               onClick={() => excelFile && submitMutation.mutate(excelFile)}
-              disabled={!excelFile || !brand || !campaign.trim() || submitMutation.isPending}
+              disabled={!excelFile || !brand || !campaign.trim() || submitMutation.isPending || isProcessing}
               className="bg-primary hover:bg-primary/90 text-white w-full"
             >
-              {submitMutation.isPending ? "Avvio..." : "Avvia Validazione"}
+              {submitMutation.isPending || isProcessing ? "Avvio..." : "Avvia Validazione"}
             </Button>
 
             {submitMutation.error && (
@@ -375,8 +386,8 @@ export default function AddressValidator() {
             )}
 
             {/* Parsing in progress (between upload and "parsed" status) */}
-            {jobId && jobStatus !== "parsed" && jobStatus !== "failed" && jobStatus !== "complete" && !isExpired && (
-              <div className="elc-card text-center py-8">
+            {isProcessing && (
+              <div ref={progressRef} className="elc-card text-center py-8">
                 <div className="inline-block w-8 h-8 border-4 border-primary/20 border-t-primary rounded-full animate-spin mb-3" />
                 <p className="text-sm font-semibold text-foreground">
                   Parsing AI in corso...
