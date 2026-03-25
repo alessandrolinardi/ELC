@@ -1,8 +1,13 @@
-"""Pickup request business logic -- sends to Zapier webhook."""
+"""Pickup request business logic -- sends to Zapier webhook + pickup webhook."""
+import hashlib
 import requests
 from datetime import datetime, date, time
+from typing import Optional
 
 from .config_compat import get_secret
+from .logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 CARRIER_MAP = {
@@ -64,7 +69,19 @@ def _build_pickup_webhook_payload(
         "pickup_afternoon_min": time_windows["PickupAfternoonMintime"],
         "pickup_afternoon_max": time_windows["PickupAfternoonMaxtime"],
         "pickup_note": _build_pickup_note(notes, use_pallet, num_pallets, pallet_dimensions_str),
+        "order_ids": _generate_order_id(carrier, pickup_date, company, zip_code),
     }
+
+
+def _generate_order_id(carrier: str, pickup_date: date, company: str, zip_code: str) -> str:
+    """Generate a deterministic order_id for idempotency.
+
+    Same carrier + date + company + zip within 24h → same order_id,
+    so the shipments-backend deduplicates accidental double-submits.
+    """
+    key = f"ELC-{carrier}-{pickup_date.isoformat()}-{company}-{zip_code}"
+    short_hash = hashlib.sha256(key.encode()).hexdigest()[:8]
+    return f"ELC-{short_hash}"
 
 
 def _build_pickup_note(
@@ -146,12 +163,12 @@ def send_pickup_request(
     pallet_width: float,
     pallet_height: float,
     notes: str,
-) -> tuple[bool, str]:
+) -> tuple[bool, str, Optional[dict]]:
     """
-    Send pickup request via Zapier webhook.
+    Send pickup request via Zapier webhook + pickup webhook.
 
     Returns:
-        Tuple of (success, message)
+        Tuple of (success, message, pickup_webhook_response)
     """
     # Calculate totals
     total_weight = num_packages * weight_per_package
@@ -278,27 +295,38 @@ def send_pickup_request(
     # --- Send to pickup webhook (ShippyPro processing) ---
     pickup_ok = False
     pickup_msg = ""
+    pickup_result: Optional[dict] = None
     pickup_url = get_secret("pickup", "webhook_url")
     pickup_secret = get_secret("pickup", "webhook_secret")
     if pickup_url:
         try:
             headers = {"X-Webhook-Secret": pickup_secret} if pickup_secret else {}
-            resp = requests.post(pickup_url, json=payload["pickup_webhook"], headers=headers, timeout=10)
-            if resp.status_code == 200:
+            resp = requests.post(pickup_url, json=payload["pickup_webhook"], headers=headers, timeout=40)
+            if 200 <= resp.status_code < 300:
                 pickup_ok = True
+                try:
+                    pickup_result = resp.json()
+                except ValueError:
+                    pass
             else:
-                pickup_msg = f"Pickup webhook HTTP {resp.status_code}"
+                # Try to extract error detail from response body
+                try:
+                    body = resp.json()
+                    detail = body.get("detail", body.get("error", ""))
+                    pickup_msg = f"Pickup: {detail}" if detail else f"Pickup HTTP {resp.status_code}"
+                except ValueError:
+                    pickup_msg = f"Pickup HTTP {resp.status_code}"
         except requests.exceptions.Timeout:
-            pickup_msg = "Pickup webhook timeout"
+            pickup_msg = "Pickup webhook timeout (>40s)"
         except requests.exceptions.RequestException as e:
             pickup_msg = f"Pickup webhook: {e}"
 
     # --- Result ---
     if not zapier_url and not pickup_url:
-        return False, "Nessun webhook configurato. Aggiungi ZAPIER_WEBHOOK_URL o PICKUP_WEBHOOK_URL."
+        return False, "Nessun webhook configurato. Aggiungi ZAPIER_WEBHOOK_URL o PICKUP_WEBHOOK_URL.", None
 
     errors = [m for m in [zapier_msg, pickup_msg] if m]
     if errors:
-        return False, " | ".join(errors)
+        return False, " | ".join(errors), pickup_result
 
-    return True, "Richiesta inviata"
+    return True, "Richiesta inviata", pickup_result

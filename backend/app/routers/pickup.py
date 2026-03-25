@@ -11,7 +11,7 @@ router = APIRouter()
 @router.post("/pickup/request")
 @limiter.limit("30/hour")
 async def create_pickup_request(request: Request, body: PickupRequest):
-    success, message = send_pickup_request(
+    success, message, pickup_response = send_pickup_request(
         carrier=body.carrier,
         pickup_date=body.pickup_date,
         time_start=body.time_start,
@@ -38,6 +38,14 @@ async def create_pickup_request(request: Request, body: PickupRequest):
     )
     if not success:
         raise HTTPException(status_code=502, detail={
-            "ok": False, "error": {"code": "ZAPIER_ERROR", "message": message}
+            "ok": False, "error": {"code": "WEBHOOK_ERROR", "message": message}
         })
-    return {"ok": True, "data": {"message": message}}
+
+    data = {"message": message}
+    if pickup_response:
+        data["pickup_status"] = pickup_response.get("status")
+        data["pickup_id"] = pickup_response.get("id")
+        data["confirmation_id"] = pickup_response.get("confirmation_id")
+        if pickup_response.get("error_message"):
+            data["error_detail"] = pickup_response["error_message"]
+    return {"ok": True, "data": data}

@@ -57,6 +57,7 @@ export default function PickupRequest() {
   const [deliveryBy, setDeliveryBy] = useState("")
   const [selectedAddress, setSelectedAddress] = useState<Address | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
+  const [pickupResult, setPickupResult] = useState<PickupResponse | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
 
   const {
@@ -155,6 +156,7 @@ export default function PickupRequest() {
       api.post<PickupResponse>("/api/v1/pickup/request", data),
     onSuccess: (result) => {
       setSuccessMessage(result.message)
+      setPickupResult(result)
     },
   })
 
@@ -178,14 +180,44 @@ export default function PickupRequest() {
   }
 
   if (successMessage) {
+    const STATUS_LABELS: Record<string, { label: string; color: string }> = {
+      booked: { label: "Confermato", color: "text-emerald-700 bg-emerald-50 border-emerald-200" },
+      pending_review: { label: "In revisione", color: "text-amber-700 bg-amber-50 border-amber-200" },
+      scheduled: { label: "Programmato", color: "text-blue-700 bg-blue-50 border-blue-200" },
+      failed: { label: "Errore", color: "text-red-700 bg-red-50 border-red-200" },
+      rejected: { label: "Rifiutato", color: "text-red-700 bg-red-50 border-red-200" },
+    }
+    const ps = pickupResult?.pickup_status
+    const statusInfo = ps ? STATUS_LABELS[ps] : null
+
     return (
       <PageShell title="Richiesta Ritiro">
         <SuccessBanner message={successMessage} />
+
+        {statusInfo && (
+          <div className={`mt-4 rounded-lg border px-5 py-4 space-y-1 ${statusInfo.color}`}>
+            <p className="text-sm font-semibold">Stato ritiro: {statusInfo.label}</p>
+            {pickupResult?.confirmation_id && (
+              <p className="text-sm">Conferma: #{pickupResult.confirmation_id}</p>
+            )}
+            {ps === "pending_review" && (
+              <p className="text-xs">Il sistema sta correggendo automaticamente — il ritiro verrà inviato a breve.</p>
+            )}
+            {ps === "scheduled" && (
+              <p className="text-xs">La data è troppo in avanti — il ritiro verrà inviato automaticamente 1 giorno lavorativo prima.</p>
+            )}
+            {pickupResult?.error_detail && (
+              <p className="text-xs">Dettaglio: {pickupResult.error_detail}</p>
+            )}
+          </div>
+        )}
+
         <div className="mt-6 text-center">
           <Button
             variant="outline"
             onClick={() => {
               setSuccessMessage(null)
+              setPickupResult(null)
               setForm(DEFAULT_FORM)
               setSelectedAddress(null)
             }}

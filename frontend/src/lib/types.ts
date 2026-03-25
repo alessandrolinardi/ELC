@@ -212,6 +212,10 @@ export interface PickupRequestData {
 
 export interface PickupResponse {
   message: string
+  pickup_status?: "booked" | "pending_review" | "scheduled" | "failed" | "rejected"
+  pickup_id?: string
+  confirmation_id?: string
+  error_detail?: string
 }
 
 // --- Health ---
