@@ -218,6 +218,28 @@ export interface PickupResponse {
   error_detail?: string
 }
 
+// --- Shipments Quotation ---
+
+export interface CarrierQuoteError {
+  row: number
+  error: string
+}
+
+export interface CarrierQuote {
+  total: number
+  total_with_markup: number
+  currency: string
+  rated_count: number
+  error_count: number
+  errors: CarrierQuoteError[]
+}
+
+export interface ShipmentsQuotationResult {
+  shipment_count: number
+  carriers: Record<string, CarrierQuote>
+  processing_time_seconds: number
+}
+
 // --- Health ---
 
 export interface HealthData {

@@ -21,6 +21,8 @@ def get_secret(section: str, key: str):
         ("zapier", "webhook_url"): settings.zapier_webhook_url,
         ("pickup", "webhook_url"): settings.pickup_webhook_url,
         ("pickup", "webhook_secret"): settings.pickup_webhook_secret,
+        ("rates", "webhook_url"): settings.rates_webhook_url,
+        ("rates", "webhook_secret"): settings.rates_webhook_secret,
         ("app", "bypass_pin"): settings.bypass_pin,
     }
     return mapping.get((section, key)) or None

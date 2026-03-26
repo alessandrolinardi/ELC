@@ -8,6 +8,7 @@ const navItems = [
   { to: "/pickup", label: "Ritiro" },
   { to: "/validator", label: "Validator" },
   { to: "/labels", label: "Label Sorter" },
+  { to: "/quotation", label: "Quotazione" },
 ]
 
 export function NavBar() {

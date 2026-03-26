@@ -14,6 +14,14 @@ COLUMN_MAPPINGS = {
     'phone': ['phone', 'telefono', 'tel', 'phone number', 'telephone'],
     'cash_on_delivery': ['cash on delivery', 'cod', 'contrassegno', 'cash_on_delivery'],
     'order_number': ['order number', 'order', 'ordine', 'numero ordine', 'po', 'purchase order'],
+    'company': ['company', 'azienda', 'società', 'societa'],
+    'email': ['email', 'e-mail', 'mail'],
+    'weight': ['weight', 'peso', 'kg'],
+    'length': ['length', 'lunghezza'],
+    'width': ['width', 'larghezza'],
+    'height': ['height', 'altezza'],
+    'parcels': ['parcels', 'colli', 'packages', 'number of parcels'],
+    'content_description': ['content description', 'contenuto', 'description'],
 }
 
 

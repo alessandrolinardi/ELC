@@ -3,6 +3,7 @@ import { NavBar } from "@/components/layout/NavBar"
 import PickupRequest from "@/pages/PickupRequest"
 import AddressValidator from "@/pages/AddressValidator"
 import LabelSorter from "@/pages/LabelSorter"
+import ShipmentsQuotation from "@/pages/ShipmentsQuotation"
 
 export default function App() {
   return (
@@ -13,6 +14,7 @@ export default function App() {
         <Route path="/pickup" element={<PickupRequest />} />
         <Route path="/validator" element={<AddressValidator />} />
         <Route path="/labels" element={<LabelSorter />} />
+        <Route path="/quotation" element={<ShipmentsQuotation />} />
       </Routes>
     </div>
   )

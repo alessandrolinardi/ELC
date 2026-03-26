@@ -20,6 +20,8 @@ class Settings(BaseSettings):
     zapier_webhook_url: str = ""
     pickup_webhook_url: str = ""
     pickup_webhook_secret: str = ""
+    rates_webhook_url: str = ""
+    rates_webhook_secret: str = ""
 
     # App
     bypass_pin: str = ""
