@@ -18,13 +18,22 @@ const CARRIER_DISPLAY: Record<string, string> = {
   FedExv2: "FedEx",
 }
 
+function formatElapsed(seconds: number): string {
+  const m = Math.floor(seconds / 60)
+  const s = seconds % 60
+  return m > 0 ? `${m}m ${s.toString().padStart(2, "0")}s` : `${s}s`
+}
+
 export default function ShipmentsQuotation() {
   const [excelFile, setExcelFile] = useState<File | null>(null)
   const [jobId, setJobId] = useState<string | null>(null)
   const [selectedAddress, setSelectedAddress] = useState<Address | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const [elapsed, setElapsed] = useState(0)
+  const [copied, setCopied] = useState(false)
 
   const progressRef = useRef<HTMLDivElement>(null)
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const {
     addresses,
@@ -41,6 +50,18 @@ export default function ShipmentsQuotation() {
   const quotationResult = jobStatus === "complete" ? (rawResult as ShipmentsQuotationResult) : null
 
   const isProcessing = !!jobId && jobStatus !== "complete" && jobStatus !== "failed"
+
+  // Live elapsed timer during processing
+  useEffect(() => {
+    if (isProcessing) {
+      setElapsed(0)
+      timerRef.current = setInterval(() => setElapsed((prev) => prev + 1), 1000)
+    } else if (timerRef.current) {
+      clearInterval(timerRef.current)
+      timerRef.current = null
+    }
+    return () => { if (timerRef.current) clearInterval(timerRef.current) }
+  }, [isProcessing])
 
   // Auto-scroll to progress
   useEffect(() => {
@@ -103,13 +124,13 @@ export default function ShipmentsQuotation() {
       const formData = new FormData()
       formData.append("file", file)
       formData.append("from_name", selectedAddress.contact_name || selectedAddress.company || selectedAddress.name)
-      formData.append("from_company", selectedAddress.company)
+      if (selectedAddress.company) formData.append("from_company", selectedAddress.company)
       formData.append("from_street1", selectedAddress.street)
       formData.append("from_city", selectedAddress.city)
-      formData.append("from_state", selectedAddress.province)
+      if (selectedAddress.province) formData.append("from_state", selectedAddress.province)
       formData.append("from_zip", selectedAddress.zip)
       formData.append("from_country", "IT")
-      formData.append("from_phone", selectedAddress.phone)
+      formData.append("from_phone", selectedAddress.phone || "0000000000")
       return api.postForm<JobCreatedResponse>("/api/v1/jobs/shipments-quotation", formData)
     },
     onSuccess: (data) => {
@@ -121,9 +142,36 @@ export default function ShipmentsQuotation() {
     if (excelFile) submitMutation.mutate(excelFile)
   }
 
+  // Reset only the job, preserve file + address (#5 — retry keeps form state)
+  const handleRetry = () => {
+    setJobId(null)
+  }
+
+  // Full reset for new quotation
   const handleReset = () => {
     setExcelFile(null)
     setJobId(null)
+  }
+
+  // Estimated shipment count from progress message
+  const shipmentCountMatch = progress?.message?.match(/(\d+) spedizioni/)
+  const estimatedCount = shipmentCountMatch ? parseInt(shipmentCountMatch[1]) : null
+  const estimatedMinutes = estimatedCount ? Math.max(1, Math.round(estimatedCount / 1.8 / 60)) : null
+  const estimatedTotalSeconds = estimatedMinutes ? estimatedMinutes * 60 : null
+  const estimatedRemaining = estimatedTotalSeconds ? Math.max(0, estimatedTotalSeconds - elapsed) : null
+
+  // Copy results to clipboard (#4)
+  const handleCopyResults = () => {
+    if (!quotationResult) return
+    const lines = [`Quotazione: ${quotationResult.shipment_count} spedizioni\n`]
+    for (const [key, data] of Object.entries(quotationResult.carriers)) {
+      const name = CARRIER_DISPLAY[key] || key
+      const total = data.total_with_markup.toLocaleString("it-IT", { minimumFractionDigits: 2 })
+      lines.push(`${name}: €${total} (${data.rated_count}/${quotationResult.shipment_count} quotate${data.error_count ? `, ${data.error_count} errori` : ""})`)
+    }
+    navigator.clipboard.writeText(lines.join("\n"))
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
   }
 
   // Find cheapest carrier
@@ -178,35 +226,46 @@ export default function ShipmentsQuotation() {
               </p>
             )}
 
-            {/* Progress */}
+            {/* Progress with live timer (#1) */}
             {isProcessing && (
               <div ref={progressRef} className="elc-card text-center py-8">
                 <div className="inline-block w-8 h-8 border-4 border-primary/20 border-t-primary rounded-full animate-spin mb-3" />
                 <p className="text-sm font-semibold text-foreground">
                   {progress?.message || "Elaborazione in corso..."}
                 </p>
-                {progress && progress.total > 0 && (
-                  <div className="mt-3 max-w-xs mx-auto">
-                    <div className="w-full bg-muted rounded-full h-2">
-                      <div
-                        className="bg-primary h-2 rounded-full transition-all duration-300"
-                        style={{ width: `${(progress.current / progress.total) * 100}%` }}
-                      />
-                    </div>
+
+                {/* Pulsing progress bar — indeterminate during webhook call */}
+                <div className="mt-3 max-w-xs mx-auto">
+                  <div className="w-full bg-muted rounded-full h-2 overflow-hidden">
+                    <div className="bg-primary h-2 rounded-full animate-pulse" style={{ width: "100%" }} />
                   </div>
-                )}
-                <p className="text-xs text-muted-foreground mt-3">
-                  Potrebbe richiedere alcuni minuti per file grandi
-                </p>
+                </div>
+
+                {/* Live timer + estimated remaining */}
+                <div className="mt-3 space-y-1">
+                  <p className="text-sm font-medium text-foreground tabular-nums">
+                    {formatElapsed(elapsed)} trascorsi
+                  </p>
+                  {estimatedRemaining !== null && estimatedRemaining > 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      ~{formatElapsed(estimatedRemaining)} rimanenti{estimatedCount ? ` per ${estimatedCount} spedizioni` : ""}
+                    </p>
+                  )}
+                  {!estimatedRemaining && (
+                    <p className="text-xs text-muted-foreground">
+                      Potrebbe richiedere alcuni minuti per file grandi
+                    </p>
+                  )}
+                </div>
               </div>
             )}
 
-            {/* Job error */}
+            {/* Job error — retry preserves form state (#5) */}
             {jobStatus === "failed" && (
               <div className="elc-card text-center py-6 space-y-3">
                 <p className="text-sm font-semibold text-destructive">Errore</p>
                 <p className="text-sm text-muted-foreground">{jobError || "Errore sconosciuto"}</p>
-                <Button variant="outline" onClick={handleReset}>Riprova</Button>
+                <Button variant="outline" onClick={handleRetry}>Riprova</Button>
               </div>
             )}
           </>
@@ -236,8 +295,11 @@ export default function ShipmentsQuotation() {
               ))}
             </div>
 
-            {/* Reset */}
-            <div className="text-center">
+            {/* Actions (#4 — copy results) */}
+            <div className="flex justify-center gap-3">
+              <Button variant="outline" onClick={handleCopyResults}>
+                {copied ? "Copiato!" : "Copia risultati"}
+              </Button>
               <Button variant="outline" onClick={handleReset}>Nuova quotazione</Button>
             </div>
           </div>

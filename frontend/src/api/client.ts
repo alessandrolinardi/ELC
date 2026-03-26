@@ -60,10 +60,21 @@ async function request<T>(
     return response as unknown as T
   }
 
-  const json: ApiResponse<T> = await response.json()
+  const json = await response.json()
 
-  if (!json.ok) {
-    const err = json.error
+  // Handle FastAPI validation errors (422 with detail array)
+  if (!response.ok && json.detail) {
+    const detail = Array.isArray(json.detail)
+      ? json.detail.map((d: { msg?: string; loc?: string[] }) =>
+          `${d.loc?.slice(-1)[0] || "field"}: ${d.msg || "invalid"}`
+        ).join(", ")
+      : typeof json.detail === "string" ? json.detail : JSON.stringify(json.detail)
+    throw new ApiRequestError("VALIDATION_ERROR", detail, response.status)
+  }
+
+  const typed = json as ApiResponse<T>
+  if (!typed.ok) {
+    const err = typed.error
     throw new ApiRequestError(
       err?.code || "UNKNOWN",
       err?.message || "Unknown error",
@@ -71,7 +82,7 @@ async function request<T>(
     )
   }
 
-  return json.data
+  return typed.data
 }
 
 // --- Public API methods ---
