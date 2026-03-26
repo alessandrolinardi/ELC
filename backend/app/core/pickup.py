@@ -300,11 +300,12 @@ def send_pickup_request(
             zapier_msg = f"Zapier: {e}"
 
     # --- Send to pickup webhook (ShippyPro processing) ---
+    # DISABLED: pickup webhook is on hold until further notice.
+    # The payload is still built (pickup_webhook key in payload) for when we re-enable.
     pickup_msg = ""
     pickup_result: Optional[dict] = None
-    pickup_url = get_secret("pickup", "webhook_url")
+    pickup_url = None  # was: get_secret("pickup", "webhook_url")
     pickup_secret = get_secret("pickup", "webhook_secret")
-    logger.info("Pickup webhook URL: %s (secret set: %s)", pickup_url, bool(pickup_secret))
     if pickup_url:
         try:
             headers = {"X-Webhook-Secret": pickup_secret} if pickup_secret else {}
@@ -331,18 +332,15 @@ def send_pickup_request(
             pickup_msg = f"Pickup webhook: {e}"
 
     # --- Result ---
-    # Pickup webhook is the primary business path; Zapier is secondary (notifications).
     if not zapier_url and not pickup_url:
-        return False, "Nessun webhook configurato. Aggiungi ZAPIER_WEBHOOK_URL o PICKUP_WEBHOOK_URL.", None
+        return False, "Nessun webhook configurato. Aggiungi ZAPIER_WEBHOOK_URL.", None
 
     # If the pickup webhook failed, that's a hard failure
     if pickup_url and pickup_msg:
         return False, pickup_msg, pickup_result
 
-    # Pickup succeeded (or not configured). Zapier failure is a warning, not a blocker.
-    message = "Richiesta inviata"
+    # Zapier is the active path
     if zapier_msg:
-        logger.warning("Zapier webhook failed: %s", zapier_msg)
-        message += f" (avviso: notifica Zapier fallita)"
+        return False, zapier_msg, None
 
-    return True, message, pickup_result
+    return True, "Richiesta inviata", pickup_result
