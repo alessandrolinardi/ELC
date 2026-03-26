@@ -51,7 +51,7 @@ def _get_current_period() -> Tuple[str, str, datetime]:
 def _get_period_usage(client, period_id: str) -> int:
     """Get total usage for the current 12-hour period (global)."""
     try:
-        response = client.table("rate_limits").select("request_count").eq(
+        response = client.table("elc_rate_limits").select("request_count").eq(
             "hour", period_id
         ).execute()
 
@@ -70,7 +70,7 @@ def _get_or_create_record(client, period_id: str) -> dict:
     today = period_id.rsplit("-", 1)[0]  # Extract date from period_id
 
     try:
-        response = client.table("rate_limits").select("*").eq(
+        response = client.table("elc_rate_limits").select("*").eq(
             "ip_hash", global_id
         ).eq("hour", period_id).execute()
 
@@ -88,7 +88,7 @@ def _get_or_create_record(client, period_id: str) -> dict:
             "last_request": None
         }
 
-        insert_response = client.table("rate_limits").insert(new_record).execute()
+        insert_response = client.table("elc_rate_limits").insert(new_record).execute()
         if insert_response.data:
             return insert_response.data[0]
 
@@ -168,7 +168,7 @@ def record_usage(ip: str, rows_validated: int):
 
         new_count = record.get("request_count", 0) + rows_validated
 
-        client.table("rate_limits").update({
+        client.table("elc_rate_limits").update({
             "request_count": new_count,
             "last_request": datetime.now(timezone.utc).isoformat()
         }).eq("ip_hash", "global").eq("hour", period_id).execute()
@@ -268,7 +268,7 @@ def cleanup_old_records():
 
     try:
         cutoff_date = (datetime.now(timezone.utc) - timedelta(days=7)).strftime("%Y-%m-%d")
-        client.table("rate_limits").delete().lt("date", cutoff_date).execute()
+        client.table("elc_rate_limits").delete().lt("date", cutoff_date).execute()
         logger.info(f"Cleaned up records older than {cutoff_date}")
     except Exception as e:
         logger.error(f"Error cleaning up old records: {e}")
@@ -296,7 +296,7 @@ def get_debug_info(ip: str) -> dict:
         debug_info["current_usage"] = current_usage
 
         # Get raw record for debugging
-        response = client.table("rate_limits").select("*").eq(
+        response = client.table("elc_rate_limits").select("*").eq(
             "hour", period_id
         ).execute()
 
