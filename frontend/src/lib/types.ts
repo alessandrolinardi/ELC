@@ -218,6 +218,46 @@ export interface PickupResponse {
   error_detail?: string
 }
 
+// --- Pickup History ---
+
+export interface PickupRecord {
+  id: string
+  carrier: string
+  pickup_date: string
+  time_start: string
+  time_end: string
+  company: string
+  contact_name: string
+  address: string
+  zip_code: string
+  city: string
+  province: string
+  phone: string
+  reference: string
+  num_packages: number
+  weight_per_package: number
+  length: number
+  width: number
+  height: number
+  use_pallet: boolean
+  num_pallets: number
+  pallet_length: number
+  pallet_width: number
+  pallet_height: number
+  notes: string
+  pickup_status: string | null
+  pickup_id: string | null
+  confirmation_id: string | null
+  created_at: string
+}
+
+export interface PickupListResponse {
+  pickups: PickupRecord[]
+  total: number
+  limit: number
+  offset: number
+}
+
 // --- Shipments Quotation ---
 
 export interface CarrierQuoteError {

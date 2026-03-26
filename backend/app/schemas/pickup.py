@@ -1,6 +1,7 @@
 """Pydantic schemas for Pickup Request endpoints."""
 from pydantic import BaseModel, field_validator, model_validator
 from datetime import date, time
+from typing import Optional, List
 
 
 class PickupRequest(BaseModel):
@@ -47,3 +48,43 @@ class PickupRequest(BaseModel):
         if self.time_end <= self.time_start:
             raise ValueError("L'orario di fine deve essere successivo all'orario di inizio")
         return self
+
+
+class PickupRecord(BaseModel):
+    """A stored pickup record from Supabase."""
+    id: str
+    carrier: str
+    pickup_date: str
+    time_start: str
+    time_end: str
+    company: str
+    contact_name: str
+    address: str
+    zip_code: str
+    city: str
+    province: str
+    phone: str
+    reference: str
+    num_packages: int
+    weight_per_package: float
+    length: float
+    width: float
+    height: float
+    use_pallet: bool
+    num_pallets: int
+    pallet_length: float
+    pallet_width: float
+    pallet_height: float
+    notes: str
+    pickup_status: Optional[str] = None
+    pickup_id: Optional[str] = None
+    confirmation_id: Optional[str] = None
+    created_at: str
+
+
+class PickupListResponse(BaseModel):
+    """Response for the pickup history endpoint."""
+    pickups: List[PickupRecord]
+    total: int
+    limit: int
+    offset: int
