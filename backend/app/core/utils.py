@@ -7,14 +7,14 @@ COLUMN_MAPPINGS = {
     'name': ['name', 'nome', 'customer name', 'recipient', 'destinatario'],
     'street': ['street 1', 'street1', 'street', 'address', 'indirizzo', 'via'],
     'street2': ['street 2', 'street2', 'address 2', 'indirizzo 2'],
-    'city': ['city', 'città', 'citta'],
+    'city': ['city', 'citt\u00e0', 'citta'],
     'state': ['state', 'province', 'provincia', 'regione'],
     'zip': ['zip', 'cap', 'postal code', 'postcode', 'zip code', 'postal'],
     'country': ['country', 'paese', 'nazione'],
     'phone': ['phone', 'telefono', 'tel', 'phone number', 'telephone'],
     'cash_on_delivery': ['cash on delivery', 'cod', 'contrassegno', 'cash_on_delivery'],
     'order_number': ['order number', 'order', 'ordine', 'numero ordine', 'po', 'purchase order'],
-    'company': ['company', 'azienda', 'società', 'societa'],
+    'company': ['company', 'azienda', 'societ\u00e0', 'societa'],
     'email': ['email', 'e-mail', 'mail'],
     'weight': ['weight', 'peso', 'kg'],
     'length': ['length', 'lunghezza'],
@@ -31,26 +31,34 @@ def map_columns(df: pd.DataFrame) -> dict[str, str]:
     Returns a dict like {"street": "Street 1", "city": "City", "zip": "Zip"}
     mapping canonical field names to actual column names found in the DataFrame.
 
-    Matching strategy: exact match first (case-insensitive), then startsWith fallback.
+    Two-pass matching: exact matches first (all fields), then startsWith
+    only for unresolved fields on unclaimed columns.
     """
     col_map = {}
     columns_lower = {c.lower().strip(): c for c in df.columns}
+    claimed: set[str] = set()  # lowercased column names already matched
 
+    # Pass 1: exact match (case-insensitive) for all fields
     for field, possible_names in COLUMN_MAPPINGS.items():
-        # 1. Exact match (case-insensitive)
         for name in possible_names:
-            if name in columns_lower:
+            if name in columns_lower and name not in claimed:
                 col_map[field] = columns_lower[name]
+                claimed.add(name)
                 break
-        else:
-            # 2. startsWith fallback
-            for name in possible_names:
-                for col_lower, col_original in columns_lower.items():
-                    if col_lower.startswith(name):
-                        col_map[field] = col_original
-                        break
-                if field in col_map:
+
+    # Pass 2: startsWith fallback for unresolved fields, skip claimed columns
+    for field, possible_names in COLUMN_MAPPINGS.items():
+        if field in col_map:
+            continue
+        for name in possible_names:
+            alias = name.lower()
+            for col_lower, col_original in columns_lower.items():
+                if col_lower not in claimed and col_lower.startswith(alias):
+                    col_map[field] = col_original
+                    claimed.add(col_lower)
                     break
+            if field in col_map:
+                break
 
     return col_map
 
