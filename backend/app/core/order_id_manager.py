@@ -14,6 +14,8 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
+TABLE = "elc_processed_orders"
+
 # PO numbers are exactly 10 digits starting with 350
 _PO_PATTERN = re.compile(r"^350\d{7}$")
 
@@ -118,7 +120,7 @@ def generate_order_ids(
     """Generate canonical Order IDs for a list of rows.
 
     Each row gets a sequential number starting at 1.
-    po_numbers is a parallel list — one PO per row.
+    po_numbers is a parallel list \u2014 one PO per row.
 
     Returns a list of formatted Order ID strings in the same order.
     """
@@ -138,9 +140,9 @@ def generate_order_ids(
 def bump_version(current_version: Optional[int]) -> int:
     """Return the next version number.
 
-    None  → 2
-    2     → 3
-    N     → N+1
+    None  \u2192 2
+    2     \u2192 3
+    N     \u2192 N+1
     """
     if current_version is None:
         return 2
@@ -176,7 +178,7 @@ def find_cross_file_duplicates(
     """Check order_numbers against the processed_orders Supabase table.
 
     Returns a dict mapping each matching order number to its stored record
-    (processed_at, campaign, job_id, …).
+    (processed_at, campaign, job_id, \u2026).
     Returns {} if supabase_client is None, order_numbers is empty, or on error.
     """
     if supabase_client is None or not order_numbers:
@@ -190,7 +192,7 @@ def find_cross_file_duplicates(
     try:
         response = (
             supabase_client
-            .table("processed_orders")
+            .table(TABLE)
             .select("*")
             .in_("order_number", filtered)
             .execute()
@@ -240,7 +242,7 @@ def record_processed_orders(
     try:
         response = (
             supabase_client
-            .table("processed_orders")
+            .table(TABLE)
             .upsert(records)
             .execute()
         )

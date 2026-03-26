@@ -13,6 +13,8 @@ from .config_compat import get_supabase_client
 # Logger per questo modulo
 logger = get_logger(__name__)
 
+TABLE = "elc_addresses"
+
 
 @dataclass
 class Address:
@@ -87,7 +89,7 @@ def load_addresses() -> list[Address]:
             logger.error("Supabase client is None - check secrets configuration")
             return []
 
-        response = client.table("addresses").select("*").order("name").execute()
+        response = client.table(TABLE).select("*").order("name").execute()
 
         if not response.data:
             logger.info("No addresses found in Supabase (empty table)")
@@ -119,14 +121,14 @@ def save_addresses(addresses: list[Address]) -> bool:
 
         # Upsert all addresses (insert or update, no data loss on failure)
         for addr in addresses:
-            client.table("addresses").upsert(addr.to_dict(), on_conflict="id").execute()
+            client.table(TABLE).upsert(addr.to_dict(), on_conflict="id").execute()
 
         # Remove addresses no longer in the list
         current_ids = {addr.id for addr in addresses}
-        existing = client.table("addresses").select("id").execute()
+        existing = client.table(TABLE).select("id").execute()
         for row in (existing.data or []):
             if row["id"] not in current_ids:
-                client.table("addresses").delete().eq("id", row["id"]).execute()
+                client.table(TABLE).delete().eq("id", row["id"]).execute()
 
 
         return True
@@ -214,7 +216,7 @@ def add_address(
 
         # If setting as default, clear other defaults
         if is_default:
-            client.table("addresses").update({"is_default": False}).eq("is_default", True).execute()
+            client.table(TABLE).update({"is_default": False}).eq("is_default", True).execute()
 
         # If this is the first address, make it default
         if not addresses:
@@ -236,7 +238,7 @@ def add_address(
             updated_at=now
         )
 
-        client.table("addresses").insert(new_address.to_dict()).execute()
+        client.table(TABLE).insert(new_address.to_dict()).execute()
 
 
         return new_id
@@ -281,7 +283,7 @@ def update_address(address_id: str, **kwargs) -> bool:
 
         # Handle default flag
         if kwargs.get("is_default", False):
-            client.table("addresses").update({"is_default": False}).eq("is_default", True).execute()
+            client.table(TABLE).update({"is_default": False}).eq("is_default", True).execute()
 
         # Add updated_at
         kwargs["updated_at"] = datetime.now().isoformat() + "Z"
@@ -290,7 +292,7 @@ def update_address(address_id: str, **kwargs) -> bool:
         kwargs.pop("id", None)
         kwargs.pop("created_at", None)
 
-        client.table("addresses").update(kwargs).eq("id", address_id).execute()
+        client.table(TABLE).update(kwargs).eq("id", address_id).execute()
 
 
         return True
@@ -327,13 +329,13 @@ def delete_address(address_id: str) -> bool:
                 break
 
         # Delete the address
-        client.table("addresses").delete().eq("id", address_id).execute()
+        client.table(TABLE).delete().eq("id", address_id).execute()
 
         # If deleted address was default, make first remaining address default
         if was_default:
             remaining = [a for a in addresses if a.id != address_id]
             if remaining:
-                client.table("addresses").update({"is_default": True}).eq("id", remaining[0].id).execute()
+                client.table(TABLE).update({"is_default": True}).eq("id", remaining[0].id).execute()
 
 
         return True
@@ -357,10 +359,10 @@ def set_default_address(address_id: str) -> bool:
             return False
 
         # Clear all defaults
-        client.table("addresses").update({"is_default": False}).eq("is_default", True).execute()
+        client.table(TABLE).update({"is_default": False}).eq("is_default", True).execute()
 
         # Set new default
-        client.table("addresses").update({"is_default": True}).eq("id", address_id).execute()
+        client.table(TABLE).update({"is_default": True}).eq("id", address_id).execute()
 
 
         return True
@@ -378,7 +380,7 @@ def get_address_display_name(address: Address) -> str:
     Returns:
         Formatted display string
     """
-    prefix = "⭐ " if address.is_default else "📍 "
+    prefix = "\u2b50 " if address.is_default else "\ud83d\udccd "
     suffix = " (predefinito)" if address.is_default else ""
     return f"{prefix}{address.name}{suffix}"
 
