@@ -304,10 +304,13 @@ def send_pickup_request(
     pickup_result: Optional[dict] = None
     pickup_url = get_secret("pickup", "webhook_url")
     pickup_secret = get_secret("pickup", "webhook_secret")
+    logger.info("Pickup webhook URL: %s (secret set: %s)", pickup_url, bool(pickup_secret))
     if pickup_url:
         try:
             headers = {"X-Webhook-Secret": pickup_secret} if pickup_secret else {}
+            logger.info("Sending pickup webhook to %s with payload keys: %s", pickup_url, list(payload["pickup_webhook"].keys()))
             resp = requests.post(pickup_url, json=payload["pickup_webhook"], headers=headers, timeout=40)
+            logger.info("Pickup webhook response: HTTP %s, body: %s", resp.status_code, resp.text[:500])
             if 200 <= resp.status_code < 300:
                 try:
                     pickup_result = resp.json()
@@ -324,6 +327,7 @@ def send_pickup_request(
         except requests.exceptions.Timeout:
             pickup_msg = "Pickup webhook timeout (>40s)"
         except requests.exceptions.RequestException as e:
+            logger.error("Pickup webhook exception: %s", e)
             pickup_msg = f"Pickup webhook: {e}"
 
     # --- Result ---
