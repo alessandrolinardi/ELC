@@ -1,5 +1,6 @@
 """Pickup request business logic -- sends to Zapier webhook + pickup webhook."""
 import hashlib
+import uuid
 import requests
 from datetime import datetime, date, time
 from typing import Optional
@@ -192,8 +193,14 @@ def send_pickup_request(
     package_dimensions_str = f"{length} x {width} x {height} cm"
     pallet_dimensions_str = f"{pallet_length} x {pallet_width} x {pallet_height} cm" if use_pallet else "-"
 
+    # Unique request ID for deduplication
+    request_id = str(uuid.uuid4())
+
     # Prepare payload for Zapier - all fields exposed individually
     payload = {
+        # === Dedup ===
+        "request_id": request_id,
+
         # === Email/Meta fields ===
         "subject": subject,
         "timestamp": timestamp,
