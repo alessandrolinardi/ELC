@@ -248,10 +248,13 @@ export default function ShipmentsQuotation() {
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
         addresses={addresses}
-        onAdd={createAddress}
-        onUpdate={updateAddress}
-        onDelete={deleteAddress}
-        onSetDefault={setDefault}
+        onAdd={async (data) => { await createAddress(data) }}
+        onUpdate={async (id, data) => { await updateAddress({ id, data }) }}
+        onDelete={async (id) => {
+          await deleteAddress(id)
+          if (selectedAddress?.id === id) setSelectedAddress(null)
+        }}
+        onSetDefault={async (id) => { await setDefault(id) }}
       />
     </PageShell>
   )
