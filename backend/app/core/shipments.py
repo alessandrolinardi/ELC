@@ -1,8 +1,9 @@
 """Shipments quotation — parse Excel, call rates webhook."""
 import io
 import math
+import time
 import requests
-from typing import Optional
+from typing import Optional, Callable
 
 import pandas as pd
 
@@ -11,6 +12,8 @@ from .logging_config import get_logger
 from .utils import map_columns
 
 logger = get_logger(__name__)
+
+POLL_INTERVAL = 15  # seconds between polls
 
 
 def _clean(val) -> Optional[str]:
@@ -129,36 +132,101 @@ def build_from_address(
     return addr
 
 
-def send_rates_request(payload: dict) -> tuple[bool, str, Optional[dict]]:
-    """POST to the rates webhook. Returns (success, message, response_data)."""
-    url = get_secret("rates", "webhook_url")
+def send_rates_request(
+    payload: dict,
+    on_progress: Optional[Callable[[str], None]] = None,
+) -> tuple[bool, str, Optional[dict]]:
+    """Submit a rates job and poll until complete.
+
+    The rates API is async: POST returns a job_id instantly,
+    then GET /api/webhook/rates/{job_id} is polled every 15s.
+
+    on_progress is called with a status message on each poll cycle.
+    """
+    base_url = get_secret("rates", "webhook_url")
     secret = get_secret("rates", "webhook_secret")
 
-    if not url:
+    if not base_url:
         return False, "RATES_WEBHOOK_URL non configurato.", None
+
+    # Strip trailing path segments — we need the base URL
+    # Config should be set to: https://shipments-backend.onrender.com/api/webhook/rates
+    submit_url = base_url.rstrip("/")
 
     headers = {"Content-Type": "application/json"}
     if secret:
         headers["X-Webhook-Secret"] = secret
 
+    # --- Step 1: Submit job ---
     try:
-        resp = requests.post(url, json=payload, headers=headers, timeout=600)
-
-        if 200 <= resp.status_code < 300:
-            try:
-                return True, "Quotazione completata", resp.json()
-            except ValueError:
-                return True, "Quotazione completata (risposta non JSON)", None
-        else:
-            try:
-                body = resp.json()
-                detail = body.get("detail", body.get("error", ""))
-                msg = f"Errore webhook: {detail}" if detail else f"Errore HTTP {resp.status_code}"
-            except ValueError:
-                msg = f"Errore HTTP {resp.status_code}"
-            return False, msg, None
-
-    except requests.exceptions.Timeout:
-        return False, "Timeout webhook (>600s). Riprova.", None
+        resp = requests.post(submit_url, json=payload, headers=headers, timeout=30)
     except requests.exceptions.RequestException as e:
         return False, f"Errore connessione: {e}", None
+
+    if resp.status_code == 409:
+        return False, "Un altro job è già in corso. Riprova tra qualche minuto.", None
+
+    if resp.status_code not in (200, 201, 202):
+        try:
+            body = resp.json()
+            detail = body.get("detail", body.get("error", ""))
+            msg = f"Errore: {detail}" if detail else f"Errore HTTP {resp.status_code}"
+        except ValueError:
+            msg = f"Errore HTTP {resp.status_code}"
+        return False, msg, None
+
+    try:
+        job_data = resp.json()
+        remote_job_id = job_data.get("job_id")
+    except ValueError:
+        return False, "Risposta non valida dal server.", None
+
+    if not remote_job_id:
+        return False, "Il server non ha restituito un job_id.", None
+
+    poll_url = f"{submit_url}/{remote_job_id}"
+    logger.info("Rates job submitted: %s — polling %s", remote_job_id, poll_url)
+
+    # --- Step 2: Poll for results ---
+    start_time = time.time()
+    max_poll_time = 900  # 15 minutes max
+
+    while True:
+        time.sleep(POLL_INTERVAL)
+        elapsed = int(time.time() - start_time)
+
+        if on_progress:
+            minutes = elapsed // 60
+            seconds = elapsed % 60
+            on_progress(f"Elaborazione tariffe in corso... ({minutes}m {seconds:02d}s)")
+
+        if elapsed > max_poll_time:
+            return False, f"Timeout: il job non è terminato dopo {max_poll_time // 60} minuti.", None
+
+        try:
+            resp = requests.get(poll_url, headers=headers, timeout=30)
+        except requests.exceptions.RequestException as e:
+            logger.warning("Poll error (will retry): %s", e)
+            continue
+
+        if resp.status_code == 404:
+            return False, "Job non trovato o scaduto sul server remoto.", None
+        if resp.status_code == 401:
+            return False, "Autenticazione fallita (X-Webhook-Secret).", None
+        if resp.status_code != 200:
+            continue  # Transient error, retry
+
+        try:
+            status_data = resp.json()
+        except ValueError:
+            continue
+
+        job_status = status_data.get("status")
+
+        if job_status == "completed":
+            result = status_data.get("result")
+            return True, "Quotazione completata", result
+
+        if job_status == "failed":
+            error = status_data.get("error", "Errore sconosciuto")
+            return False, f"Job fallito: {error}", None

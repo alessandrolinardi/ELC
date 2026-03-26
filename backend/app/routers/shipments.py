@@ -31,9 +31,12 @@ def _process_quotation(
             f"{count} spedizioni trovate. Richiesta tariffe in corso... (~{est_minutes} min)"
         )
 
-        # Phase 2: Call rates webhook
+        # Phase 2: Call rates webhook (async job — POST then poll)
+        def on_progress(msg: str):
+            job_store.update_progress(job_id, 50, 100, msg)
+
         payload = {"from_address": from_address, "shipments": shipments}
-        success, message, result = send_rates_request(payload)
+        success, message, result = send_rates_request(payload, on_progress=on_progress)
 
         if not success:
             job_store.update_status(job_id, "failed", error=message)
