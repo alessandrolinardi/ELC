@@ -1,9 +1,10 @@
-"""Shipments quotation — parse Excel, call rates webhook."""
+"""Shipments — parse Excel, call rates webhook, create shipments."""
 import io
 import math
 import time
 import requests
 from typing import Optional, Callable
+from urllib.parse import urlparse, urlunparse
 
 import pandas as pd
 
@@ -14,6 +15,13 @@ from .utils import map_columns
 logger = get_logger(__name__)
 
 POLL_INTERVAL = 15  # seconds between polls
+
+# Carrier name/ID constants (must match ShippyPro account)
+CARRIER_IDS = {
+    "MyDHL": 9536,
+    "UPSv2": 7743,
+    "FedExv2": 3699,
+}
 
 
 def _clean(val) -> Optional[str]:
@@ -230,3 +238,91 @@ def send_rates_request(
         if job_status == "failed":
             error = status_data.get("error", "Errore sconosciuto")
             return False, f"Job fallito: {error}", None
+
+
+def _derive_ship_url(rates_url: str) -> str:
+    """Derive the /api/webhook/ship URL from the rates webhook URL.
+
+    rates_url is typically: https://host/api/webhook/rates
+    We replace the last path segment: .../rates → .../ship
+    """
+    parsed = urlparse(rates_url.rstrip("/"))
+    path_parts = parsed.path.rsplit("/", 1)
+    ship_path = path_parts[0] + "/ship" if len(path_parts) > 1 else "/api/webhook/ship"
+    return urlunparse(parsed._replace(path=ship_path))
+
+
+def send_ship_request(ship_data: dict) -> dict:
+    """Call the Ship webhook endpoint to create a shipment with carrier label.
+
+    Uses the same base URL and secret as the rates webhook.
+
+    Args:
+        ship_data: Dict with carrier_name, carrier_id, carrier_service,
+                   from_address, to_address, parcels, and optional fields.
+
+    Returns:
+        Dict with keys: status, tracking_number, label_url, sp_order_id,
+        error_message, and the full response data.
+    """
+    rates_url = get_secret("rates", "webhook_url")
+    secret = get_secret("rates", "webhook_secret")
+
+    if not rates_url:
+        return {
+            "status": "failed",
+            "error_message": "RATES_WEBHOOK_URL non configurato.",
+        }
+
+    ship_url = _derive_ship_url(rates_url)
+
+    headers = {"Content-Type": "application/json"}
+    if secret:
+        headers["X-Webhook-Secret"] = secret
+
+    logger.info("Ship request to %s — carrier=%s service=%s",
+                ship_url, ship_data.get("carrier_name"), ship_data.get("carrier_service"))
+
+    try:
+        resp = requests.post(ship_url, json=ship_data, headers=headers, timeout=30)
+    except requests.exceptions.RequestException as e:
+        logger.error("Ship request failed: %s", e)
+        return {
+            "status": "failed",
+            "error_message": f"Errore connessione: {e}",
+        }
+
+    try:
+        result = resp.json()
+    except ValueError:
+        return {
+            "status": "failed",
+            "error_message": f"Risposta non valida (HTTP {resp.status_code})",
+        }
+
+    # Check status field (not HTTP code) per Shipments platform spec
+    status = result.get("status", "")
+
+    if status == "shipped":
+        return {
+            "status": "shipped",
+            "sp_order_id": result.get("sp_order_id"),
+            "tracking_number": result.get("tracking_number") or "",
+            "tracking_carrier": result.get("tracking_carrier") or "",
+            "label_url": result.get("label_url") or "",
+            "error_message": None,
+            "data": result,
+        }
+    elif status == "failed":
+        return {
+            "status": "failed",
+            "error_message": result.get("error_message", "Errore sconosciuto dal server spedizioni."),
+            "sp_order_id": result.get("sp_order_id"),
+            "data": result,
+        }
+    else:
+        # Unexpected status
+        return {
+            "status": "failed",
+            "error_message": f"Stato imprevisto: {status}. Risposta: {result}",
+        }

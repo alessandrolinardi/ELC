@@ -1,10 +1,11 @@
-"""Shipments Quotation endpoints."""
+"""Shipments endpoints — quotation + ship."""
 import asyncio
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request
 
 from ..limiter import limiter
 from ..services.job_store import job_store
-from ..core.shipments import parse_shipments_excel, build_from_address, send_rates_request
+from ..core.shipments import parse_shipments_excel, build_from_address, send_rates_request, send_ship_request
+from ..schemas.shipments import ShipRequest
 
 router = APIRouter()
 
@@ -86,5 +87,57 @@ async def create_shipments_quotation(
 
     loop = asyncio.get_running_loop()
     loop.run_in_executor(None, _process_quotation, job_id, content, from_address)
+
+    return {"ok": True, "data": {"job_id": job_id}}
+
+
+# --- Ship endpoint ---
+
+def _process_ship(job_id: str, ship_data: dict):
+    """Background task: call ship webhook → store result."""
+    try:
+        job_store.update_progress(job_id, 0, 100, "Creazione spedizione in corso...")
+        result = send_ship_request(ship_data)
+
+        job_store.update_progress(job_id, 90, 100, "Elaborazione risposta...")
+
+        if result["status"] == "shipped":
+            job_store.update_status(job_id, "complete", result=result)
+        else:
+            job_store.update_status(job_id, "failed", error=result.get("error_message", "Errore sconosciuto"))
+
+    except Exception as e:
+        job_store.update_status(job_id, "failed", error=str(e))
+
+
+@router.post("/jobs/ship")
+@limiter.limit("10/hour")
+async def create_shipment(request: Request, body: ShipRequest):
+    """Create a shipment with carrier label via the Ship webhook.
+
+    Returns a job_id for polling — the ship call takes ~6-8s (Ship + GetOrder).
+    """
+    # Build the payload matching the webhook spec
+    ship_data = {
+        "carrier_name": body.carrier_name.value,
+        "carrier_id": body.carrier_id,
+        "carrier_service": body.carrier_service,
+        "from_address": body.from_address.model_dump(),
+        "to_address": body.to_address.model_dump(),
+        "parcels": [p.model_dump() for p in body.parcels],
+        "content_description": body.content_description,
+        "insurance": body.insurance,
+        "cash_on_delivery": body.cash_on_delivery,
+        "incoterm": body.incoterm,
+    }
+    if body.total_value is not None:
+        ship_data["total_value"] = body.total_value
+    if body.transaction_id:
+        ship_data["transaction_id"] = body.transaction_id
+
+    job_id = job_store.create_job("ship")
+
+    loop = asyncio.get_running_loop()
+    loop.run_in_executor(None, _process_ship, job_id, ship_data)
 
     return {"ok": True, "data": {"job_id": job_id}}
