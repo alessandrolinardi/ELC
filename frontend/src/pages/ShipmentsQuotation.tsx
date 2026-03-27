@@ -91,7 +91,7 @@ export default function ShipmentsQuotation() {
   // Pre-load corrected file from Address Validator
   useEffect(() => {
     const validatorJobId = (location.state as { validatorJobId?: string } | null)?.validatorJobId
-    if (!validatorJobId || excelFile) return
+    if (!validatorJobId) return
 
     let cancelled = false
     setIsLoadingPreloadedFile(true)
@@ -229,7 +229,7 @@ export default function ShipmentsQuotation() {
           <>
             {isLoadingPreloadedFile && (
               <div className="elc-card text-center py-6">
-                <div className="inline-block w-6 h-6 border-3 border-primary/20 border-t-primary rounded-full animate-spin mb-2" />
+                <div className="inline-block w-6 h-6 border-2 border-primary/20 border-t-primary rounded-full animate-spin mb-2" />
                 <p className="text-sm text-muted-foreground">Caricamento file dal validatore...</p>
               </div>
             )}
@@ -262,7 +262,7 @@ export default function ShipmentsQuotation() {
               subtitle="Excel con indirizzi e dimensioni colli"
               accept=".xlsx,.xls"
               icon="📦"
-              onFilesSelected={(files) => setExcelFile(files[0] || null)}
+              onFilesSelected={(files) => { setExcelFile(files[0] || null); setFromValidator(false) }}
               selectedFiles={excelFile ? [excelFile] : []}
             />
 
