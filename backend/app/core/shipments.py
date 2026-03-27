@@ -16,13 +16,6 @@ logger = get_logger(__name__)
 
 POLL_INTERVAL = 15  # seconds between polls
 
-# Carrier name/ID constants (must match ShippyPro account)
-CARRIER_IDS = {
-    "MyDHL": 9536,
-    "UPSv2": 7743,
-    "FedExv2": 3699,
-}
-
 
 def _clean(val) -> Optional[str]:
     """Return None if val is empty, 'None', NaN, or whitespace."""
@@ -292,15 +285,28 @@ def send_ship_request(ship_data: dict) -> dict:
             "error_message": f"Errore connessione: {e}",
         }
 
+    # Non-200 responses indicate infrastructure errors (rate limit, auth, gateway)
+    if resp.status_code != 200:
+        try:
+            body = resp.json()
+            detail = body.get("detail", body.get("error", body.get("message", "")))
+        except ValueError:
+            detail = resp.text[:200]
+        logger.error("Ship webhook HTTP %d: %s", resp.status_code, detail)
+        return {
+            "status": "failed",
+            "error_message": f"Errore HTTP {resp.status_code}: {detail}" if detail else f"Errore HTTP {resp.status_code}",
+        }
+
     try:
         result = resp.json()
     except ValueError:
         return {
             "status": "failed",
-            "error_message": f"Risposta non valida (HTTP {resp.status_code})",
+            "error_message": "Risposta non valida dal server spedizioni.",
         }
 
-    # Check status field (not HTTP code) per Shipments platform spec
+    # Check status field per Shipments platform spec
     status = result.get("status", "")
 
     if status == "shipped":

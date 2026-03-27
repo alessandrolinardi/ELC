@@ -1,6 +1,6 @@
 """Pydantic schemas for Shipments endpoints (quotation + ship)."""
 from enum import Enum
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Optional
 
 
@@ -62,6 +62,13 @@ class ShipParcel(BaseModel):
     weight: float = Field(..., gt=0)
 
 
+_CARRIER_ID_MAP = {
+    CarrierName.MyDHL: 9536,
+    CarrierName.UPSv2: 7743,
+    CarrierName.FedExv2: 3699,
+}
+
+
 class ShipRequest(BaseModel):
     """Request body for creating a shipment via the Ship webhook."""
     carrier_name: CarrierName
@@ -77,14 +84,11 @@ class ShipRequest(BaseModel):
     incoterm: str = Field(default="DAP", pattern=r"^(DAP|DDP|EXW)$")
     transaction_id: Optional[str] = None
 
-
-class ShipResult(BaseModel):
-    """Result shape for a completed ship job."""
-    status: str  # "shipped" or "failed"
-    sp_order_id: Optional[str] = None
-    tracking_number: Optional[str] = None
-    tracking_carrier: Optional[str] = None
-    label_url: Optional[str] = None
-    carrier_name: str
-    carrier_service: str
-    error_message: Optional[str] = None
+    @model_validator(mode="after")
+    def validate_carrier_id_matches_name(self):
+        expected = _CARRIER_ID_MAP.get(self.carrier_name)
+        if expected and self.carrier_id != expected:
+            raise ValueError(
+                f"carrier_id {self.carrier_id} does not match {self.carrier_name.value} (expected {expected})"
+            )
+        return self
