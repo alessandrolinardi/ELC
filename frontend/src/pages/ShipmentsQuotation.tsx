@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react"
+import { useLocation, useNavigate } from "react-router-dom"
 import { useMutation } from "@tanstack/react-query"
 import { api } from "@/api/client"
 import { PageShell } from "@/components/layout/PageShell"
@@ -25,12 +26,17 @@ function formatElapsed(seconds: number): string {
 }
 
 export default function ShipmentsQuotation() {
+  const location = useLocation()
+  const navigate = useNavigate()
   const [excelFile, setExcelFile] = useState<File | null>(null)
   const [jobId, setJobId] = useState<string | null>(null)
   const [selectedAddress, setSelectedAddress] = useState<Address | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [elapsed, setElapsed] = useState(0)
   const [copied, setCopied] = useState(false)
+  const [fromValidator, setFromValidator] = useState(false)
+  const [isLoadingPreloadedFile, setIsLoadingPreloadedFile] = useState(false)
+  const [preloadError, setPreloadError] = useState<string | null>(null)
 
   const progressRef = useRef<HTMLDivElement>(null)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -81,6 +87,39 @@ export default function ShipmentsQuotation() {
       selectAddress(defaultAddr)
     }
   }, [addresses, selectedAddress, selectAddress])
+
+  // Pre-load corrected file from Address Validator
+  useEffect(() => {
+    const validatorJobId = (location.state as { validatorJobId?: string } | null)?.validatorJobId
+    if (!validatorJobId || excelFile) return
+
+    let cancelled = false
+    setIsLoadingPreloadedFile(true)
+    setPreloadError(null)
+
+    fetch(api.fileUrl(validatorJobId, "corrected.xlsx"))
+      .then((res) => {
+        if (!res.ok) throw new Error("File non disponibile. Il job potrebbe essere scaduto.")
+        return res.blob()
+      })
+      .then((blob) => {
+        if (cancelled) return
+        const file = new File([blob], "corrected.xlsx", {
+          type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        })
+        setExcelFile(file)
+        setFromValidator(true)
+        setIsLoadingPreloadedFile(false)
+        navigate("/quotation", { replace: true, state: null })
+      })
+      .catch((err) => {
+        if (cancelled) return
+        setPreloadError(err instanceof Error ? err.message : "Errore durante il caricamento del file")
+        setIsLoadingPreloadedFile(false)
+      })
+
+    return () => { cancelled = true }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleManualEntry = (data: ManualAddressData) => {
     setSelectedAddress({
@@ -188,6 +227,36 @@ export default function ShipmentsQuotation() {
         {/* Upload + Address */}
         {!quotationResult && (
           <>
+            {isLoadingPreloadedFile && (
+              <div className="elc-card text-center py-6">
+                <div className="inline-block w-6 h-6 border-3 border-primary/20 border-t-primary rounded-full animate-spin mb-2" />
+                <p className="text-sm text-muted-foreground">Caricamento file dal validatore...</p>
+              </div>
+            )}
+
+            {preloadError && (
+              <div className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3">
+                <p className="text-sm text-amber-800">{preloadError}</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Puoi comunque caricare un file manualmente.
+                </p>
+              </div>
+            )}
+
+            {fromValidator && excelFile && (
+              <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3 flex items-center gap-3">
+                <span className="text-lg">&#9989;</span>
+                <div>
+                  <p className="text-sm font-medium text-emerald-800">
+                    File caricato dal Validator
+                  </p>
+                  <p className="text-xs text-emerald-600">
+                    Seleziona un indirizzo mittente e avvia la quotazione.
+                  </p>
+                </div>
+              </div>
+            )}
+
             <FileDropZone
               label="File spedizioni"
               subtitle="Excel con indirizzi e dimensioni colli"

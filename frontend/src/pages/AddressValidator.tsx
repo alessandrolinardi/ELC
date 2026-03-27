@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react"
+import { useNavigate } from "react-router-dom"
 import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { api } from "@/api/client"
 import { confirmValidation, fetchBrands, createBrand } from "@/api/client"
@@ -31,6 +32,7 @@ const STEPS = [
 
 export default function AddressValidator() {
   const queryClient = useQueryClient()
+  const navigate = useNavigate()
   const [isDevMode] = useDevMode()
   const [currentStep, setCurrentStep] = useState(0)
   const [excelFile, setExcelFile] = useState<File | null>(null)
@@ -716,6 +718,28 @@ export default function AddressValidator() {
                   variant={validatorResult.review_count > 0 ? "secondary" : "disabled"}
                   icon={"\uD83D\uDCCB"}
                 />
+              </div>
+            )}
+
+            {/* Quotation CTA */}
+            {filesReady && (
+              <div className="elc-card text-center py-6 space-y-3">
+                <p className="text-sm font-semibold text-foreground">
+                  Vuoi anche una quotazione?
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  Usa il file corretto per ottenere tariffe da DHL, UPS e FedEx.
+                </p>
+                <Button
+                  onClick={() =>
+                    navigate("/quotation", {
+                      state: { validatorJobId: jobId },
+                    })
+                  }
+                  className="bg-primary hover:bg-primary/90 text-white"
+                >
+                  Vai alla Quotazione
+                </Button>
               </div>
             )}
 
