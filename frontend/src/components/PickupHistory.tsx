@@ -186,10 +186,10 @@ function PickupRow({
                 {/* Right: Details */}
                 <div className="space-y-1">
                   <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Dettagli</p>
-                  <p>Fascia oraria: {formatTime(p.time_start)} \u2013 {formatTime(p.time_end)}</p>
-                  <p>{p.num_packages} colli \u00d7 {p.weight_per_package} kg \u2014 {p.length}\u00d7{p.width}\u00d7{p.height} cm</p>
+                  <p>Fascia oraria: {formatTime(p.time_start)} – {formatTime(p.time_end)}</p>
+                  <p>{p.num_packages} colli × {p.weight_per_package} kg — {p.length}×{p.width}×{p.height} cm</p>
                   {p.use_pallet && (
-                    <p>{p.num_pallets} pallet \u2014 {p.pallet_length}\u00d7{p.pallet_width}\u00d7{p.pallet_height} cm</p>
+                    <p>{p.num_pallets} pallet — {p.pallet_length}×{p.pallet_width}×{p.pallet_height} cm</p>
                   )}
                   {p.notes && (
                     <p className="text-muted-foreground mt-1">Note: {p.notes}</p>
