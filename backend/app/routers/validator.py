@@ -464,6 +464,7 @@ def _process_validate(
             "street_verified_count": report.street_verified_count,
             "street_corrected_count": report.street_corrected_count,
             "po_invalid_count": report.po_invalid_count,
+            "pin_valid": pin_valid,
             "results": row_results,
             "files": {
                 "corrected": f"/api/v1/jobs/{job_id}/files/corrected.xlsx",

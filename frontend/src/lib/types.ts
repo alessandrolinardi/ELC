@@ -132,6 +132,7 @@ export interface ValidatorJobResult {
   street_verified_count: number
   street_corrected_count: number
   po_invalid_count: number
+  pin_valid: boolean
   results: ValidatorResultRow[]
   files: {
     corrected: string

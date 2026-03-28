@@ -677,7 +677,9 @@ export default function AddressValidator() {
                   Attenzione: {validatorResult.po_invalid_count} PO non validi trovati
                 </p>
                 <p className="text-sm text-red-700 mt-1">
-                  Correggi i PO nel file originale oppure inserisci il PIN per scaricare comunque.
+                  {validatorResult.pin_valid
+                    ? "Download consentito grazie al PIN di override."
+                    : "Correggi i PO nel file originale oppure inserisci il PIN per scaricare comunque."}
                 </p>
               </div>
             )}
@@ -701,28 +703,40 @@ export default function AddressValidator() {
               </p>
             )}
 
-            {/* Download cards — only after user confirms */}
-            {filesReady && (
-              <div className="grid grid-cols-2 gap-4">
-                <DownloadCard
-                  label="File corretto"
-                  subtitle="Excel con correzioni applicate"
-                  href={api.fileUrl(jobId!, "corrected.xlsx")}
-                  variant="primary"
-                  icon={"\uD83D\uDCCA"}
-                />
-                <DownloadCard
-                  label="Report revisione"
-                  subtitle="Dettaglio righe da verificare"
-                  href={api.fileUrl(jobId!, "review.xlsx")}
-                  variant={validatorResult.review_count > 0 ? "secondary" : "disabled"}
-                  icon={"\uD83D\uDCCB"}
-                />
-              </div>
-            )}
+            {/* Download cards — blocked if PO invalid and no PIN override */}
+            {(() => {
+              const downloadAllowed = validatorResult.po_invalid_count === 0 || validatorResult.pin_valid
+              return filesReady && (
+                <>
+                  {!downloadAllowed && (
+                    <div className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3 text-center">
+                      <p className="text-sm text-amber-800">
+                        Download bloccato: correggi i PO non validi oppure riavvia con il PIN di override.
+                      </p>
+                    </div>
+                  )}
+                  <div className="grid grid-cols-2 gap-4">
+                    <DownloadCard
+                      label="File corretto"
+                      subtitle="Excel con correzioni applicate"
+                      href={api.fileUrl(jobId!, "corrected.xlsx")}
+                      variant={downloadAllowed ? "primary" : "disabled"}
+                      icon={"\uD83D\uDCCA"}
+                    />
+                    <DownloadCard
+                      label="Report revisione"
+                      subtitle="Dettaglio righe da verificare"
+                      href={api.fileUrl(jobId!, "review.xlsx")}
+                      variant={downloadAllowed && validatorResult.review_count > 0 ? "secondary" : "disabled"}
+                      icon={"\uD83D\uDCCB"}
+                    />
+                  </div>
+                </>
+              )
+            })()}
 
-            {/* Quotation CTA */}
-            {filesReady && (
+            {/* Quotation CTA — also gated by PO validity */}
+            {filesReady && (validatorResult.po_invalid_count === 0 || validatorResult.pin_valid) && (
               <div className="elc-card text-center py-6 space-y-3">
                 <p className="text-sm font-semibold text-foreground">
                   Vuoi anche una quotazione?
