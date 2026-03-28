@@ -719,14 +719,14 @@ export default function AddressValidator() {
                     <DownloadCard
                       label="File corretto"
                       subtitle="Excel con correzioni applicate"
-                      href={validatorResult.files.corrected}
+                      href={api.fileUrl(jobId!, validatorResult.files.corrected.split("/").pop()!)}
                       variant={downloadAllowed ? "primary" : "disabled"}
                       icon={"\uD83D\uDCCA"}
                     />
                     <DownloadCard
                       label="Report revisione"
                       subtitle="Dettaglio righe da verificare"
-                      href={validatorResult.files.review}
+                      href={api.fileUrl(jobId!, "review.xlsx")}
                       variant={downloadAllowed && validatorResult.review_count > 0 ? "secondary" : "disabled"}
                       icon={"\uD83D\uDCCB"}
                     />

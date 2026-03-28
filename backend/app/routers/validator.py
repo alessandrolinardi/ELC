@@ -2,13 +2,14 @@
 import asyncio
 import io
 import math
+import re
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request
 
 import pandas as pd
 
 from ..config import get_settings
 from ..services.job_store import job_store
-from ..core.zip_validator import ZipValidator
+from ..core.zip_validator import ZipValidator, format_excel_output
 from ..core.address_parser import AddressParser
 from ..core.models import ParsedAddress
 from ..core.utils import map_columns, sanitize_cell
@@ -27,6 +28,17 @@ router = APIRouter()
 
 # Shared regex-only parser for re-parsing user edits (no API key needed)
 _regex_parser = AddressParser()
+
+
+def _resolve_po(po_override: str, order_numbers: list[str]) -> str:
+    """Resolve PO number from override or first parseable order ID."""
+    if po_override:
+        return po_override
+    for on in order_numbers:
+        parsed = parse_order_id(on)
+        if parsed:
+            return parsed.po
+    return ""
 
 # ZIP-like column names (lowercase) — read as string to preserve leading zeros
 _ZIP_COLUMN_NAMES = {'zip', 'cap', 'postal code', 'postcode', 'zip code'}
@@ -393,26 +405,22 @@ def _process_validate(
 
         report, preprocessed_df = validator._validate_addresses(df, parsed_addresses, progress_callback)
 
-        # Resolve PO number for the corrected Excel
-        _po = po_override
-        if not _po and order_numbers:
-            for _on in order_numbers:
-                _parsed = parse_order_id(_on)
-                if _parsed:
-                    _po = _parsed.po
-                    break
+        # Resolve PO number (shared by corrected Excel and order recording)
+        _po = _resolve_po(po_override, order_numbers or [])
 
         # Generate output files
         corrected_excel = validator.generate_corrected_excel(
-            preprocessed_df, report, brand=brand, campaign=campaign, po_number=_po or "",
+            preprocessed_df, report, brand=brand, campaign=campaign, po_number=_po,
         )
         review_excel = validator.generate_review_report(report)
 
         # Build corrected filename from original: "orders.xlsx" → "orders_corrected.xlsx"
+        # Replace spaces with underscores to keep URLs safe
         corrected_name = "corrected.xlsx"
         if original_filename:
             stem = original_filename.rsplit(".", 1)[0] if "." in original_filename else original_filename
-            corrected_name = f"{stem}_corrected.xlsx"
+            safe_stem = re.sub(r'\s+', '_', stem)
+            corrected_name = f"{safe_stem}_corrected.xlsx"
 
         job_store.save_file(job_id, corrected_name, corrected_excel)
         job_store.save_file(job_id, "review.xlsx", review_excel)
@@ -457,20 +465,12 @@ def _process_validate(
         # "complete" job always has its orders recorded).
         _order_numbers = order_numbers or []
         if _order_numbers:
-            # Use user-provided PO override, or extract from first parseable Order ID
-            _po = po_override
-            if not _po:
-                for _on in _order_numbers:
-                    _parsed = parse_order_id(_on)
-                    if _parsed:
-                        _po = _parsed.po
-                        break
             record_processed_orders(
                 order_numbers=_order_numbers,
                 job_id=job_id,
                 brand=brand,
                 campaign=campaign,
-                po_number=_po or "",
+                po_number=_po,
                 supabase_client=_get_supabase_for_dedup(),
             )
 
@@ -668,9 +668,8 @@ async def apply_corrections(job_id: str, body: ApplyCorrectionsRequest):
             df.at[idx, zip_col] = zip_val
         applied += 1
 
-    # Write back
-    output = io.BytesIO()
-    df.to_excel(output, index=False, engine='openpyxl')
-    job_store.save_file(job_id, corrected_filename, output.getvalue())
+    # Write back with ZIP formatting preserved
+    excel_bytes = format_excel_output(df, col_map)
+    job_store.save_file(job_id, corrected_filename, excel_bytes)
 
     return {"ok": True, "data": {"applied": applied}}

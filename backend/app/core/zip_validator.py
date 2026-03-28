@@ -29,6 +29,55 @@ from .utils import map_columns, sanitize_cell
 logger = get_logger(__name__)
 
 
+def format_excel_output(df: pd.DataFrame, col_map: dict) -> bytes:
+    """Write DataFrame to Excel with ZIP text formatting and auto-fit columns.
+
+    Shared by generate_corrected_excel and apply-corrections to ensure
+    consistent output formatting (ZIP as text with leading zeros, column widths).
+    """
+    from openpyxl.utils import get_column_letter
+
+    zip_col = col_map.get('zip')
+    country_col = col_map.get('country')
+
+    output = BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Corrected')
+        worksheet = writer.sheets['Corrected']
+
+        # Format ZIP column as text with leading zeros preserved (IT only)
+        if zip_col and zip_col in df.columns:
+            zip_col_idx = list(df.columns).index(zip_col) + 1
+            country_col_idx = list(df.columns).index(country_col) + 1 if country_col and country_col in df.columns else None
+            for row in range(2, len(df) + 2):
+                cell = worksheet.cell(row=row, column=zip_col_idx)
+                cell.number_format = '@'
+                raw = cell.value
+                if raw is not None:
+                    is_it = True
+                    if country_col_idx:
+                        country_cell = worksheet.cell(row=row, column=country_col_idx)
+                        is_it = str(country_cell.value).upper().strip() in ('IT', 'ITALY', 'ITALIA', '')
+                    if is_it:
+                        try:
+                            cell.value = str(int(float(str(raw)))).zfill(5)
+                        except (ValueError, TypeError):
+                            cell.value = str(raw)
+                    else:
+                        cell.value = str(raw)
+
+        # Auto-fit column widths
+        for col_idx, col in enumerate(df.columns):
+            max_length = max(
+                df[col].astype(str).map(len).max() if len(df) > 0 else 0,
+                len(str(col))
+            ) + 2
+            column_width = min(max_length, 50)
+            worksheet.column_dimensions[get_column_letter(col_idx + 1)].width = column_width
+
+    return output.getvalue()
+
+
 @dataclass
 class ValidationResult:
     """Result of a single address validation."""
@@ -673,8 +722,6 @@ class ZipValidator:
         po_number: str = "",
     ) -> bytes:
         """Generate corrected Excel with auto-corrections applied."""
-        from openpyxl.utils import get_column_letter
-
         logger.info(f"Generating corrected Excel with {len(report.results)} rows")
 
         df = original_df.copy()
@@ -734,44 +781,7 @@ class ZipValidator:
                 lambda x: sanitize_cell(x) if isinstance(x, str) else x
             )
 
-        output = BytesIO()
-
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
-            df.to_excel(writer, index=False, sheet_name='Corrected')
-            worksheet = writer.sheets['Corrected']
-
-            # Format ZIP column as text with leading zeros preserved (IT only)
-            if zip_col:
-                zip_col_idx = list(df.columns).index(zip_col) + 1
-                country_col_idx = list(df.columns).index(country_col) + 1 if country_col else None
-                for row in range(2, len(df) + 2):
-                    cell = worksheet.cell(row=row, column=zip_col_idx)
-                    cell.number_format = '@'
-                    raw = cell.value
-                    if raw is not None:
-                        # Only pad to 5 digits for Italian addresses
-                        is_it = True
-                        if country_col_idx:
-                            country_cell = worksheet.cell(row=row, column=country_col_idx)
-                            is_it = str(country_cell.value).upper().strip() in ('IT', 'ITALY', 'ITALIA', '')
-                        if is_it:
-                            try:
-                                cell.value = str(int(float(str(raw)))).zfill(5)
-                            except (ValueError, TypeError):
-                                cell.value = str(raw)
-                        else:
-                            cell.value = str(raw)
-
-            # Auto-fit column widths
-            for col_idx, col in enumerate(df.columns):
-                max_length = max(
-                    df[col].astype(str).map(len).max() if len(df) > 0 else 0,
-                    len(str(col))
-                ) + 2
-                column_width = min(max_length, 50)
-                worksheet.column_dimensions[get_column_letter(col_idx + 1)].width = column_width
-
-        return output.getvalue()
+        return format_excel_output(df, col_map)
 
     def generate_review_report(self, report: ValidationReport) -> bytes:
         """Generate Excel report for items needing manual review."""
