@@ -150,3 +150,25 @@ class ShipBatchResult(BaseModel):
     status: str  # "processing" | "completed"
     progress: dict  # {"queued": N, "shipped": N, "failed": N}
     shipments: list[ShipBatchShipmentResult] = []
+
+
+# --- POD schemas ---
+
+class PodRequest(BaseModel):
+    """Request body for single POD lookup."""
+    identifier: str = Field(..., min_length=1, max_length=100, description="Tracking number or transaction ID.")
+
+
+class PodBatchRequest(BaseModel):
+    """Request body for bulk POD lookup."""
+    identifiers: list[str] = Field(..., min_length=1, max_length=500)
+
+    @field_validator("identifiers")
+    @classmethod
+    def validate_identifiers(cls, v):
+        for i, ident in enumerate(v):
+            if not ident or not ident.strip():
+                raise ValueError(f"Identifier at index {i} is empty")
+            if len(ident) > 100:
+                raise ValueError(f"Identifier at index {i} exceeds 100 chars")
+        return [x.strip() for x in v]

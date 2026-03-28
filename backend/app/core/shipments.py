@@ -518,3 +518,192 @@ def send_batch_ship_request(
         if batch_status == "failed":
             error = status_data.get("error", "Errore sconosciuto")
             return False, f"Batch fallito: {error}", status_data
+
+
+# ---------------------------------------------------------------------------
+# POD (Proof of Delivery)
+# ---------------------------------------------------------------------------
+
+POD_POLL_INTERVAL = 3  # seconds between POD job polls
+
+
+def _derive_pod_url(rates_url: str) -> str:
+    """Derive /api/webhook/pod from the rates webhook URL."""
+    parsed = urlparse(rates_url.rstrip("/"))
+    path_parts = parsed.path.rsplit("/", 1)
+    pod_path = path_parts[0] + "/pod" if len(path_parts) > 1 else "/api/webhook/pod"
+    return urlunparse(parsed._replace(path=pod_path))
+
+
+def _derive_pod_batch_url(rates_url: str) -> str:
+    """Derive /api/webhook/pod-batch from the rates webhook URL."""
+    parsed = urlparse(rates_url.rstrip("/"))
+    path_parts = parsed.path.rsplit("/", 1)
+    pod_path = path_parts[0] + "/pod-batch" if len(path_parts) > 1 else "/api/webhook/pod-batch"
+    return urlunparse(parsed._replace(path=pod_path))
+
+
+def _derive_pod_jobs_url(rates_url: str, job_id: str) -> str:
+    """Derive /api/webhook/pod-jobs/{job_id} from the rates webhook URL."""
+    parsed = urlparse(rates_url.rstrip("/"))
+    path_parts = parsed.path.rsplit("/", 1)
+    base = path_parts[0] if len(path_parts) > 1 else "/api/webhook"
+    return urlunparse(parsed._replace(path=f"{base}/pod-jobs/{job_id}"))
+
+
+def fetch_single_pod(identifier: str) -> dict:
+    """Fetch a single POD by tracking number or transaction ID.
+
+    Returns:
+        Dict with keys: status ("found"|"not_found"|"error"),
+        pod_base64, tracking_number, carrier, file_type, error_message.
+    """
+    rates_url = get_secret("rates", "webhook_url")
+    if not rates_url:
+        return {"status": "error", "error_message": "RATES_WEBHOOK_URL non configurato."}
+
+    pod_url = _derive_pod_url(rates_url)
+    headers = _get_webhook_headers()
+
+    logger.info("POD request for: %s", identifier)
+
+    try:
+        resp = requests.post(pod_url, json={"identifier": identifier}, headers=headers, timeout=30)
+    except requests.exceptions.RequestException as e:
+        return {"status": "error", "error_message": f"Errore connessione: {e}"}
+
+    if resp.status_code == 200:
+        result = resp.json()
+        return {
+            "status": "found",
+            "pod_base64": result.get("pod_base64", ""),
+            "tracking_number": result.get("tracking_number", ""),
+            "carrier": result.get("carrier", ""),
+            "file_type": result.get("file_type", "application/pdf"),
+        }
+
+    # Error responses
+    try:
+        body = resp.json()
+        detail = body.get("detail", body.get("error", body.get("message", "")))
+    except ValueError:
+        detail = resp.text[:200]
+
+    if resp.status_code == 404:
+        return {"status": "not_found", "error_message": detail or "Spedizione non trovata o POD non ancora disponibile."}
+    elif resp.status_code == 409:
+        return {"status": "ambiguous", "error_message": detail or "Identificativo corrisponde a più spedizioni."}
+    elif resp.status_code == 429:
+        return {"status": "error", "error_message": "Rate limit raggiunto. Riprova tra qualche secondo."}
+    else:
+        return {"status": "error", "error_message": f"Errore HTTP {resp.status_code}: {detail}"}
+
+
+def send_batch_pod_request(
+    identifiers: list[str],
+    on_progress: Optional[Callable[[str, dict], None]] = None,
+) -> tuple[bool, str, Optional[dict]]:
+    """Submit a bulk POD job and poll until complete.
+
+    Returns:
+        (success, message, result_dict)
+        result_dict contains: job_id, status, summary, results[]
+    """
+    rates_url = get_secret("rates", "webhook_url")
+    if not rates_url:
+        return False, "RATES_WEBHOOK_URL non configurato.", None
+
+    batch_url = _derive_pod_batch_url(rates_url)
+    headers = _get_webhook_headers()
+
+    logger.info("Bulk POD request — %d identifiers", len(identifiers))
+
+    # --- Step 1: Submit ---
+    try:
+        resp = requests.post(batch_url, json={"identifiers": identifiers}, headers=headers, timeout=30)
+    except requests.exceptions.RequestException as e:
+        return False, f"Errore connessione: {e}", None
+
+    if resp.status_code == 409:
+        return False, "Un altro job POD è già in corso. Riprova tra qualche minuto.", None
+
+    if resp.status_code == 422:
+        try:
+            detail = resp.json().get("detail", "Input non valido")
+        except ValueError:
+            detail = "Input non valido"
+        return False, f"Validazione fallita: {detail}", None
+
+    if resp.status_code != 200:
+        try:
+            detail = resp.json().get("detail", "")
+        except ValueError:
+            detail = ""
+        return False, f"Errore HTTP {resp.status_code}: {detail}", None
+
+    try:
+        submit_data = resp.json()
+        remote_job_id = submit_data.get("job_id")
+    except ValueError:
+        return False, "Risposta non valida.", None
+
+    if not remote_job_id:
+        return False, "Il server non ha restituito un job_id.", None
+
+    poll_url = _derive_pod_jobs_url(rates_url, remote_job_id)
+    total = submit_data.get("total", len(identifiers))
+    logger.info("POD job %s submitted — polling %s", remote_job_id, poll_url)
+
+    if on_progress:
+        on_progress(f"Job POD avviato: {total} identificativi in elaborazione...", {
+            "job_id": remote_job_id, "total": total, "status": "processing",
+        })
+
+    # --- Step 2: Poll ---
+    start_time = time.time()
+    max_poll_time = 300  # 5 minutes (POD is faster than ship)
+
+    while True:
+        time.sleep(POD_POLL_INTERVAL)
+        elapsed = int(time.time() - start_time)
+
+        if elapsed > max_poll_time:
+            return False, f"Timeout: il job POD non è terminato dopo {max_poll_time // 60} minuti.", {
+                "job_id": remote_job_id, "status": "timeout",
+            }
+
+        try:
+            resp = requests.get(poll_url, headers=headers, timeout=30)
+        except requests.exceptions.RequestException as e:
+            logger.warning("POD poll error (will retry): %s", e)
+            continue
+
+        if resp.status_code == 404:
+            return False, "Job POD non trovato o scaduto.", None
+        if resp.status_code != 200:
+            continue
+
+        try:
+            status_data = resp.json()
+        except ValueError:
+            continue
+
+        job_status = status_data.get("status")
+        progress = status_data.get("progress", {})
+
+        if on_progress:
+            fetched = progress.get("fetched", 0)
+            found = progress.get("found", 0)
+            total_p = progress.get("total", total)
+            on_progress(
+                f"POD: {fetched}/{total_p} elaborati ({found} trovati)",
+                {"job_id": remote_job_id, "progress": progress, "status": job_status},
+            )
+
+        if job_status == "completed":
+            logger.info("POD job %s completed: %s", remote_job_id, status_data.get("summary"))
+            return True, "Job POD completato", status_data
+
+        if job_status == "failed":
+            error = status_data.get("error", "Errore sconosciuto")
+            return False, f"Job POD fallito: {error}", status_data

@@ -7,8 +7,9 @@ from ..services.job_store import job_store
 from ..core.shipments import (
     parse_shipments_excel, build_from_address, send_rates_request,
     send_ship_request, build_batch_shipments, send_batch_ship_request,
+    fetch_single_pod, send_batch_pod_request,
 )
-from ..schemas.shipments import ShipRequest, ShipBatchRequest
+from ..schemas.shipments import ShipRequest, ShipBatchRequest, PodRequest, PodBatchRequest
 
 router = APIRouter()
 
@@ -207,3 +208,66 @@ async def create_batch_shipment(request: Request, body: ShipBatchRequest):
     loop.run_in_executor(None, _process_batch_ship, job_id, batch_key, batch_shipments)
 
     return {"ok": True, "data": {"job_id": job_id, "batch_key": batch_key, "total": len(batch_shipments)}}
+
+
+# --- POD endpoints ---
+
+@router.post("/jobs/pod")
+@limiter.limit("30/hour")
+async def get_pod(request: Request, body: PodRequest):
+    """Fetch a single Proof of Delivery by tracking number or transaction ID.
+
+    Returns the POD as base64-encoded PDF in the response.
+    Synchronous — no job polling needed (~2-5s).
+    """
+    result = await asyncio.get_running_loop().run_in_executor(
+        None, fetch_single_pod, body.identifier,
+    )
+
+    if result["status"] == "found":
+        return {"ok": True, "data": result}
+    else:
+        return {"ok": False, "error": {
+            "code": result["status"].upper(),
+            "message": result.get("error_message", "POD non disponibile"),
+        }}
+
+
+def _process_batch_pod(job_id: str, identifiers: list[str]):
+    """Background task: submit bulk POD job → poll → store result."""
+    try:
+        def on_progress(message: str, data: dict):
+            progress = data.get("progress", {})
+            fetched = progress.get("fetched", 0)
+            total = progress.get("total", len(identifiers))
+            pct = int(fetched / total * 100) if total > 0 else 0
+            job_store.update_progress(job_id, pct, 100, message)
+
+        success, message, result = send_batch_pod_request(
+            identifiers=identifiers,
+            on_progress=on_progress,
+        )
+
+        if not success:
+            job_store.update_status(job_id, "failed", error=message)
+            return
+
+        job_store.update_status(job_id, "complete", result=result or {"message": message})
+
+    except Exception as e:
+        job_store.update_status(job_id, "failed", error=str(e))
+
+
+@router.post("/jobs/pod-batch")
+@limiter.limit("10/hour")
+async def get_pod_batch(request: Request, body: PodBatchRequest):
+    """Fetch PODs for up to 500 tracking numbers / transaction IDs.
+
+    Returns a job_id for polling. Processing takes ~1-3 min depending on count.
+    """
+    job_id = job_store.create_job("pod_batch")
+
+    loop = asyncio.get_running_loop()
+    loop.run_in_executor(None, _process_batch_pod, job_id, body.identifiers)
+
+    return {"ok": True, "data": {"job_id": job_id, "total": len(body.identifiers)}}
