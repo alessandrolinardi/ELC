@@ -1,13 +1,14 @@
-"""Shipments endpoints — quotation + ship."""
+"""Shipments endpoints — quotation + ship + POD."""
 import asyncio
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request
+from fastapi.responses import Response
 
 from ..limiter import limiter
 from ..services.job_store import job_store
 from ..core.shipments import (
     parse_shipments_excel, build_from_address, send_rates_request,
     send_ship_request, build_batch_shipments, send_batch_ship_request,
-    fetch_single_pod, send_batch_pod_request,
+    fetch_single_pod, send_batch_pod_request, download_pod_file, download_pod_zip,
 )
 from ..schemas.shipments import ShipRequest, ShipBatchRequest, PodRequest, PodBatchRequest
 
@@ -271,3 +272,29 @@ async def get_pod_batch(request: Request, body: PodBatchRequest):
     loop.run_in_executor(None, _process_batch_pod, job_id, body.identifiers)
 
     return {"ok": True, "data": {"job_id": job_id, "total": len(body.identifiers)}}
+
+
+@router.post("/jobs/pod-download")
+@limiter.limit("30/hour")
+async def download_single_pod_file(request: Request, remote_job_id: str = Form(...), file_key: str = Form(...)):
+    """Download a single POD PDF from a completed bulk job on the Shipments platform."""
+    success, error, pdf_bytes = await asyncio.get_running_loop().run_in_executor(
+        None, download_pod_file, remote_job_id, file_key,
+    )
+    if not success:
+        raise HTTPException(status_code=502, detail=error)
+    return Response(content=pdf_bytes, media_type="application/pdf",
+                    headers={"Content-Disposition": f'attachment; filename="pod_{file_key}.pdf"'})
+
+
+@router.post("/jobs/pod-download-zip")
+@limiter.limit("10/hour")
+async def download_pod_zip_file(request: Request, remote_job_id: str = Form(...)):
+    """Download all PODs from a completed bulk job as a ZIP archive."""
+    success, error, zip_bytes = await asyncio.get_running_loop().run_in_executor(
+        None, download_pod_zip, remote_job_id,
+    )
+    if not success:
+        raise HTTPException(status_code=502, detail=error)
+    return Response(content=zip_bytes, media_type="application/zip",
+                    headers={"Content-Disposition": f'attachment; filename="pods_{remote_job_id[:8]}.zip"'})

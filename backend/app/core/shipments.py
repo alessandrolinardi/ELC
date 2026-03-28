@@ -707,3 +707,61 @@ def send_batch_pod_request(
         if job_status == "failed":
             error = status_data.get("error", "Errore sconosciuto")
             return False, f"Job POD fallito: {error}", status_data
+
+
+def download_pod_file(remote_job_id: str, file_key: str) -> tuple[bool, str, Optional[bytes]]:
+    """Download a single POD PDF from a completed bulk job.
+
+    Returns:
+        (success, error_message, pdf_bytes)
+    """
+    rates_url = get_secret("rates", "webhook_url")
+    if not rates_url:
+        return False, "RATES_WEBHOOK_URL non configurato.", None
+
+    url = _derive_pod_jobs_url(rates_url, remote_job_id) + f"/files/{file_key}"
+    headers = _get_webhook_headers()
+
+    try:
+        resp = requests.get(url, headers=headers, timeout=30)
+    except requests.exceptions.RequestException as e:
+        return False, f"Errore connessione: {e}", None
+
+    if resp.status_code == 200:
+        return True, "", resp.content
+
+    try:
+        detail = resp.json().get("detail", "")
+    except ValueError:
+        detail = resp.text[:200]
+    return False, f"Errore HTTP {resp.status_code}: {detail}", None
+
+
+def download_pod_zip(remote_job_id: str) -> tuple[bool, str, Optional[bytes]]:
+    """Download all PODs from a completed bulk job as a ZIP archive.
+
+    Returns:
+        (success, error_message, zip_bytes)
+    """
+    rates_url = get_secret("rates", "webhook_url")
+    if not rates_url:
+        return False, "RATES_WEBHOOK_URL non configurato.", None
+
+    url = _derive_pod_jobs_url(rates_url, remote_job_id) + "/zip"
+    headers = _get_webhook_headers()
+
+    try:
+        resp = requests.get(url, headers=headers, timeout=60)
+    except requests.exceptions.RequestException as e:
+        return False, f"Errore connessione: {e}", None
+
+    if resp.status_code == 200:
+        return True, "", resp.content
+    if resp.status_code == 409:
+        return False, "Il job è ancora in elaborazione.", None
+
+    try:
+        detail = resp.json().get("detail", "")
+    except ValueError:
+        detail = resp.text[:200]
+    return False, f"Errore HTTP {resp.status_code}: {detail}", None
