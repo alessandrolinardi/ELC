@@ -4,6 +4,7 @@ import PickupRequest from "@/pages/PickupRequest"
 import AddressValidator from "@/pages/AddressValidator"
 import LabelSorter from "@/pages/LabelSorter"
 import ShipmentsQuotation from "@/pages/ShipmentsQuotation"
+import ProofOfDelivery from "@/pages/ProofOfDelivery"
 
 export default function App() {
   return (
@@ -15,6 +16,7 @@ export default function App() {
         <Route path="/validator" element={<AddressValidator />} />
         <Route path="/labels" element={<LabelSorter />} />
         <Route path="/quotation" element={<ShipmentsQuotation />} />
+        <Route path="/pod" element={<ProofOfDelivery />} />
       </Routes>
     </div>
   )

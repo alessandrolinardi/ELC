@@ -9,6 +9,7 @@ const navItems = [
   { to: "/validator", label: "Validator" },
   { to: "/labels", label: "Label Sorter" },
   { to: "/quotation", label: "Quotazione" },
+  { to: "/pod", label: "POD" },
 ]
 
 export function NavBar() {
