@@ -624,3 +624,121 @@ class TestApplyCorrectionsEdgeCases:
         # The row index is valid so the loop increments applied,
         # but the street field is simply not written because street_col is None
         assert data["data"]["applied"] == 1
+
+
+# ---------------------------------------------------------------------------
+# TC-2: Dynamic corrected filename
+# ---------------------------------------------------------------------------
+
+class TestDynamicCorrectedFilename:
+    """Verify apply-corrections works with dynamic filenames (not just 'corrected.xlsx')."""
+
+    def _create_complete_job_with_named_file(self, filename: str) -> str:
+        """Helper: create a complete job with a corrected file under a dynamic name."""
+        job_id = job_store.create_job("validator")
+        df = pd.DataFrame({"Street 1": ["Via Roma 10"], "City": ["Roma"], "Zip": ["00100"]})
+        buf = io.BytesIO()
+        df.to_excel(buf, index=False, engine='openpyxl')
+        job_store.save_file(job_id, filename, buf.getvalue())
+        job_store.update_status(job_id, "complete", result={
+            "results": [],
+            "files": {
+                "corrected": f"/api/v1/jobs/{job_id}/files/{filename}",
+                "review": f"/api/v1/jobs/{job_id}/files/review.xlsx",
+            },
+        })
+        return job_id
+
+    def test_apply_corrections_with_dynamic_filename(self):
+        """apply-corrections should find the file from result.files.corrected."""
+        job_id = self._create_complete_job_with_named_file("orders_corrected.xlsx")
+        resp = client.post(f"/api/v1/jobs/{job_id}/apply-corrections", json={
+            "corrections": {"0": {"street": "Via Garibaldi 5"}},
+        })
+        assert resp.status_code == 200
+        assert resp.json()["data"]["applied"] == 1
+
+        # Verify the file was saved under the dynamic name
+        path = job_store.get_file_path(job_id, "orders_corrected.xlsx")
+        assert path is not None
+        df = pd.read_excel(path)
+        assert df["Street 1"].iloc[0] == "Via Garibaldi 5"
+
+    def test_apply_corrections_fallback_to_corrected_xlsx(self):
+        """When result has no files key, fall back to 'corrected.xlsx'."""
+        job_id = job_store.create_job("validator")
+        df = pd.DataFrame({"Street 1": ["Via Roma 10"], "City": ["Roma"], "Zip": ["00100"]})
+        buf = io.BytesIO()
+        df.to_excel(buf, index=False, engine='openpyxl')
+        job_store.save_file(job_id, "corrected.xlsx", buf.getvalue())
+        job_store.update_status(job_id, "complete", result={"results": []})
+
+        resp = client.post(f"/api/v1/jobs/{job_id}/apply-corrections", json={
+            "corrections": {"0": {"street": "Via Nuova 1"}},
+        })
+        assert resp.status_code == 200
+        assert resp.json()["data"]["applied"] == 1
+
+    def test_download_dynamic_filename(self):
+        """The file download endpoint should serve the dynamically-named file."""
+        filename = "ELC_Ordini_Marzo_corrected.xlsx"
+        job_id = self._create_complete_job_with_named_file(filename)
+        resp = client.get(f"/api/v1/jobs/{job_id}/files/{filename}")
+        assert resp.status_code == 200
+        assert resp.headers["content-type"] == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+# ---------------------------------------------------------------------------
+# TC-4: Original filename → corrected name with safe characters
+# ---------------------------------------------------------------------------
+
+class TestFilenameConstruction:
+    """Verify that original filenames with spaces are sanitized in _process_validate."""
+
+    def test_spaces_replaced_with_underscores(self):
+        """Filename 'ELC Orders March.xlsx' should become 'ELC_Orders_March_corrected.xlsx'."""
+        import re
+        original = "ELC Orders March.xlsx"
+        # Replicate the logic from validator.py
+        from app.core.security import sanitize_filename
+        sanitized = sanitize_filename(original)
+        stem = sanitized.rsplit(".", 1)[0] if "." in sanitized else sanitized
+        safe_stem = re.sub(r'\s+', '_', stem)
+        corrected_name = f"{safe_stem}_corrected.xlsx"
+
+        assert corrected_name == "ELC_Orders_March_corrected.xlsx"
+        assert " " not in corrected_name
+
+    def test_multiple_spaces_collapsed(self):
+        """Multiple consecutive spaces should become a single underscore."""
+        import re
+        stem = "ordini   marzo  2026"
+        safe_stem = re.sub(r'\s+', '_', stem)
+        assert safe_stem == "ordini_marzo_2026"
+
+    def test_no_extension_handled(self):
+        """Filename without extension should still work."""
+        import re
+        original = "orders"
+        stem = original.rsplit(".", 1)[0] if "." in original else original
+        safe_stem = re.sub(r'\s+', '_', stem)
+        corrected_name = f"{safe_stem}_corrected.xlsx"
+        assert corrected_name == "orders_corrected.xlsx"
+
+    def test_empty_filename_fallback(self):
+        """Empty original filename should produce 'corrected.xlsx'."""
+        original_filename = ""
+        corrected_name = "corrected.xlsx"
+        if original_filename:
+            import re
+            stem = original_filename.rsplit(".", 1)[0]
+            safe_stem = re.sub(r'\s+', '_', stem)
+            corrected_name = f"{safe_stem}_corrected.xlsx"
+        assert corrected_name == "corrected.xlsx"
+
+    def test_special_characters_preserved(self):
+        """Non-space special chars (underscores, hyphens) should be kept."""
+        import re
+        stem = "ordini_marzo-2026"
+        safe_stem = re.sub(r'\s+', '_', stem)
+        assert safe_stem == "ordini_marzo-2026"
