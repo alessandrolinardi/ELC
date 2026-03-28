@@ -92,3 +92,61 @@ class ShipRequest(BaseModel):
                 f"carrier_id {self.carrier_id} does not match {self.carrier_name.value} (expected {expected})"
             )
         return self
+
+
+# --- Batch Ship schemas ---
+
+class ShipBatchRequest(BaseModel):
+    """Request body for batch shipment creation via the ship-batch webhook."""
+    batch_key: str = Field(..., min_length=1, description="Unique key for idempotency. Same key within 24h returns cached result.")
+    carrier_name: CarrierName
+    carrier_id: int
+    carrier_service: str = Field(..., min_length=1, description="Exact service name from GetRates.")
+    from_address: ShipFromAddress
+    shipments: list  # Pre-parsed shipment dicts from parse_shipments_excel or raw list
+    content_description: str = "Goods"
+    total_value: Optional[float] = Field(None, ge=0)
+    insurance: float = Field(default=0, ge=0)
+    cash_on_delivery: float = Field(default=0, ge=0)
+    incoterm: str = Field(default="DAP", pattern=r"^(DAP|DDP|EXW)$")
+    transaction_id_prefix: Optional[str] = Field(None, description="Prefix for per-row transaction IDs.")
+
+    @model_validator(mode="after")
+    def validate_carrier_id_matches_name(self):
+        expected = _CARRIER_ID_MAP.get(self.carrier_name)
+        if expected and self.carrier_id != expected:
+            raise ValueError(
+                f"carrier_id {self.carrier_id} does not match {self.carrier_name.value} (expected {expected})"
+            )
+        return self
+
+    @field_validator("shipments")
+    @classmethod
+    def validate_shipments_not_empty(cls, v):
+        if not v:
+            raise ValueError("At least 1 shipment required")
+        if len(v) > 500:
+            raise ValueError("Maximum 500 shipments per batch")
+        return v
+
+
+class ShipBatchShipmentResult(BaseModel):
+    """Per-shipment result from a batch."""
+    row: Optional[int] = None
+    id: Optional[str] = None
+    status: str
+    tracking_number: Optional[str] = None
+    label_url: Optional[str] = None
+    sp_order_id: Optional[str] = None
+    error_message: Optional[str] = None
+    error_details: Optional[dict] = None
+    transaction_id: Optional[str] = None
+
+
+class ShipBatchResult(BaseModel):
+    """Result shape for a completed batch ship job."""
+    batch_id: str
+    total: int
+    status: str  # "processing" | "completed"
+    progress: dict  # {"queued": N, "shipped": N, "failed": N}
+    shipments: list[ShipBatchShipmentResult] = []

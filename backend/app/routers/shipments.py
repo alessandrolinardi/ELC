@@ -4,8 +4,11 @@ from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request
 
 from ..limiter import limiter
 from ..services.job_store import job_store
-from ..core.shipments import parse_shipments_excel, build_from_address, send_rates_request, send_ship_request
-from ..schemas.shipments import ShipRequest
+from ..core.shipments import (
+    parse_shipments_excel, build_from_address, send_rates_request,
+    send_ship_request, build_batch_shipments, send_batch_ship_request,
+)
+from ..schemas.shipments import ShipRequest, ShipBatchRequest
 
 router = APIRouter()
 
@@ -141,3 +144,66 @@ async def create_shipment(request: Request, body: ShipRequest):
     loop.run_in_executor(None, _process_ship, job_id, ship_data)
 
     return {"ok": True, "data": {"job_id": job_id}}
+
+
+# --- Batch Ship endpoint ---
+
+def _process_batch_ship(
+    job_id: str,
+    batch_key: str,
+    shipments: list[dict],
+):
+    """Background task: submit batch to ship-batch webhook → poll → store result."""
+    try:
+        def on_progress(message: str, data: dict):
+            progress = data.get("progress", {})
+            shipped = progress.get("shipped", 0)
+            total_done = shipped + progress.get("failed", 0)
+            total = data.get("total", len(shipments))
+            pct = int(total_done / total * 100) if total > 0 else 0
+            job_store.update_progress(job_id, pct, 100, message)
+
+        success, message, result = send_batch_ship_request(
+            batch_key=batch_key,
+            shipments=shipments,
+            on_progress=on_progress,
+        )
+
+        if not success:
+            # Attach validation errors if present
+            error_result = None
+            if result and result.get("validation_errors"):
+                error_result = {"validation_errors": result["validation_errors"]}
+            job_store.update_status(job_id, "failed", error=message, result=error_result)
+            return
+
+        job_store.update_status(job_id, "complete", result=result or {"message": message})
+
+    except Exception as e:
+        job_store.update_status(job_id, "failed", error=str(e))
+
+
+@router.post("/jobs/ship-batch")
+@limiter.limit("5/hour")
+async def create_batch_shipment(request: Request, body: ShipBatchRequest):
+    """Create a batch of shipments with carrier labels via the ship-batch webhook.
+
+    Accepts pre-parsed shipments (from quotation flow) enriched with carrier selection.
+    Returns a job_id for polling — batch processing takes ~8 min for 400 shipments.
+    """
+    batch_shipments = build_batch_shipments(
+        parsed_shipments=body.shipments,
+        carrier_name=body.carrier_name.value,
+        carrier_id=body.carrier_id,
+        carrier_service=body.carrier_service,
+        from_address=body.from_address.model_dump(),
+        transaction_id_prefix=body.transaction_id_prefix or "",
+    )
+
+    job_id = job_store.create_job("ship_batch")
+    batch_key = body.batch_key
+
+    loop = asyncio.get_running_loop()
+    loop.run_in_executor(None, _process_batch_ship, job_id, batch_key, batch_shipments)
+
+    return {"ok": True, "data": {"job_id": job_id, "batch_key": batch_key, "total": len(batch_shipments)}}

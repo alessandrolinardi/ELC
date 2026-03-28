@@ -63,7 +63,7 @@ def parse_shipments_excel(excel_bytes: bytes) -> list[dict]:
         city = get("city") or ""
         zip_code = get("zip") or ""
         country = get("country") or "IT"
-        phone = get("phone") or "0000000000"
+        phone = get("phone") or ""  # Platform fills fallback contacts server-side
 
         to_address = {
             "name": name,
@@ -323,6 +323,7 @@ def send_ship_request(ship_data: dict) -> dict:
         return {
             "status": "failed",
             "error_message": result.get("error_message", "Errore sconosciuto dal server spedizioni."),
+            "error_details": result.get("error_details"),
             "sp_order_id": result.get("sp_order_id"),
             "data": result,
         }
@@ -332,3 +333,188 @@ def send_ship_request(ship_data: dict) -> dict:
             "status": "failed",
             "error_message": f"Stato imprevisto: {status}. Risposta: {result}",
         }
+
+
+# ---------------------------------------------------------------------------
+# Batch Ship
+# ---------------------------------------------------------------------------
+
+BATCH_POLL_INTERVAL = 10  # seconds between batch status polls
+
+
+def _derive_batch_ship_url(rates_url: str) -> str:
+    """Derive /api/webhook/ship-batch from the rates webhook URL."""
+    parsed = urlparse(rates_url.rstrip("/"))
+    path_parts = parsed.path.rsplit("/", 1)
+    batch_path = path_parts[0] + "/ship-batch" if len(path_parts) > 1 else "/api/webhook/ship-batch"
+    return urlunparse(parsed._replace(path=batch_path))
+
+
+def _get_webhook_headers() -> dict:
+    """Build common headers for webhook calls."""
+    secret = get_secret("rates", "webhook_secret")
+    headers = {"Content-Type": "application/json"}
+    if secret:
+        headers["X-Webhook-Secret"] = secret
+    return headers
+
+
+def build_batch_shipments(
+    parsed_shipments: list[dict],
+    carrier_name: str,
+    carrier_id: int,
+    carrier_service: str,
+    from_address: dict,
+    transaction_id_prefix: str = "",
+) -> list[dict]:
+    """Enrich parsed shipment dicts with carrier selection and from_address.
+
+    Takes the output of parse_shipments_excel() and adds the fields
+    required by the ship-batch webhook.
+    """
+    batch = []
+    for i, shipment in enumerate(parsed_shipments):
+        row = {
+            "carrier_name": carrier_name,
+            "carrier_id": carrier_id,
+            "carrier_service": carrier_service,
+            "from_address": from_address,
+            "to_address": shipment["to_address"],
+            "parcels": shipment["parcels"],
+        }
+        if shipment.get("content_description"):
+            row["content_description"] = shipment["content_description"]
+        if transaction_id_prefix:
+            row["transaction_id"] = f"{transaction_id_prefix}-{i + 1}"
+        batch.append(row)
+    return batch
+
+
+def send_batch_ship_request(
+    batch_key: str,
+    shipments: list[dict],
+    on_progress: Optional[Callable[[str, dict], None]] = None,
+) -> tuple[bool, str, Optional[dict]]:
+    """Submit a batch ship job and poll until complete.
+
+    The batch API is async: POST returns a batch_id instantly,
+    then GET /api/webhook/ship-batch/{batch_id} is polled.
+
+    on_progress is called with (message, progress_dict) on each poll cycle.
+
+    Returns:
+        (success, message, result_dict)
+        result_dict contains: batch_id, total, status, progress, shipments[]
+    """
+    rates_url = get_secret("rates", "webhook_url")
+    if not rates_url:
+        return False, "RATES_WEBHOOK_URL non configurato.", None
+
+    batch_url = _derive_batch_ship_url(rates_url)
+    headers = _get_webhook_headers()
+
+    payload = {
+        "batch_key": batch_key,
+        "shipments": shipments,
+    }
+
+    logger.info("Batch ship request to %s — %d shipments, key=%s",
+                batch_url, len(shipments), batch_key)
+
+    # --- Step 1: Submit batch ---
+    try:
+        resp = requests.post(batch_url, json=payload, headers=headers, timeout=30)
+    except requests.exceptions.RequestException as e:
+        return False, f"Errore connessione: {e}", None
+
+    # Handle 422 validation errors (row-level)
+    if resp.status_code == 422:
+        try:
+            body = resp.json()
+            detail = body.get("detail", {})
+            if isinstance(detail, dict) and "errors" in detail:
+                return False, "Validazione fallita", {
+                    "validation_errors": detail["errors"],
+                    "message": detail.get("message", "Validation failed"),
+                }
+            return False, f"Validazione fallita: {detail}", None
+        except ValueError:
+            return False, f"Errore validazione (HTTP 422)", None
+
+    if resp.status_code not in (200, 201, 202):
+        try:
+            body = resp.json()
+            detail = body.get("detail", body.get("error", ""))
+            msg = f"Errore: {detail}" if detail else f"Errore HTTP {resp.status_code}"
+        except ValueError:
+            msg = f"Errore HTTP {resp.status_code}"
+        return False, msg, None
+
+    try:
+        submit_data = resp.json()
+        batch_id = submit_data.get("batch_id")
+    except ValueError:
+        return False, "Risposta non valida dal server.", None
+
+    if not batch_id:
+        return False, "Il server non ha restituito un batch_id.", None
+
+    poll_url = f"{batch_url}/{batch_id}"
+    logger.info("Batch %s submitted — polling %s", batch_id, poll_url)
+
+    if on_progress:
+        total = submit_data.get("total", len(shipments))
+        on_progress(f"Batch avviato: {total} spedizioni in elaborazione...", {
+            "batch_id": batch_id, "total": total, "status": "processing",
+        })
+
+    # --- Step 2: Poll for results ---
+    start_time = time.time()
+    max_poll_time = 900  # 15 minutes
+
+    while True:
+        time.sleep(BATCH_POLL_INTERVAL)
+        elapsed = int(time.time() - start_time)
+
+        if elapsed > max_poll_time:
+            return False, f"Timeout: il batch non è terminato dopo {max_poll_time // 60} minuti.", {
+                "batch_id": batch_id, "status": "timeout",
+            }
+
+        try:
+            resp = requests.get(poll_url, headers=headers, timeout=30)
+        except requests.exceptions.RequestException as e:
+            logger.warning("Batch poll error (will retry): %s", e)
+            continue
+
+        if resp.status_code == 404:
+            return False, "Batch non trovato o scaduto sul server remoto.", None
+        if resp.status_code != 200:
+            continue  # Transient error, retry
+
+        try:
+            status_data = resp.json()
+        except ValueError:
+            continue
+
+        batch_status = status_data.get("status")
+        progress = status_data.get("progress", {})
+
+        if on_progress:
+            shipped = progress.get("shipped", 0)
+            failed = progress.get("failed", 0)
+            queued = progress.get("queued", 0)
+            total = status_data.get("total", 0)
+            done = shipped + failed
+            on_progress(
+                f"Elaborazione: {done}/{total} completate ({shipped} OK, {failed} errori, {queued} in coda)",
+                {"batch_id": batch_id, "progress": progress, "status": batch_status},
+            )
+
+        if batch_status == "completed":
+            logger.info("Batch %s completed: %s", batch_id, progress)
+            return True, "Batch completato", status_data
+
+        if batch_status == "failed":
+            error = status_data.get("error", "Errore sconosciuto")
+            return False, f"Batch fallito: {error}", status_data
