@@ -59,6 +59,7 @@ def _process_parse(
     client_ip: str,
     brand: str = "",
     campaign: str = "",
+    original_filename: str = "",
 ):
     """Run AI address parsing in background thread (Phase 1)."""
     settings = get_settings()
@@ -267,6 +268,7 @@ def _process_parse(
                 "brand": brand,
                 "campaign": campaign,
                 "order_numbers": order_numbers,
+                "original_filename": original_filename,
             },
         }
 
@@ -291,6 +293,7 @@ def _process_validate(
     campaign: str = "",
     order_numbers: list | None = None,
     po_override: str = "",
+    original_filename: str = "",
 ):
     """Run Google validation in background thread (Phase 2)."""
     settings = get_settings()
@@ -390,11 +393,28 @@ def _process_validate(
 
         report, preprocessed_df = validator._validate_addresses(df, parsed_addresses, progress_callback)
 
+        # Resolve PO number for the corrected Excel
+        _po = po_override
+        if not _po and order_numbers:
+            for _on in order_numbers:
+                _parsed = parse_order_id(_on)
+                if _parsed:
+                    _po = _parsed.po
+                    break
+
         # Generate output files
-        corrected_excel = validator.generate_corrected_excel(preprocessed_df, report)
+        corrected_excel = validator.generate_corrected_excel(
+            preprocessed_df, report, brand=brand, campaign=campaign, po_number=_po or "",
+        )
         review_excel = validator.generate_review_report(report)
 
-        job_store.save_file(job_id, "corrected.xlsx", corrected_excel)
+        # Build corrected filename from original: "orders.xlsx" → "orders_corrected.xlsx"
+        corrected_name = "corrected.xlsx"
+        if original_filename:
+            stem = original_filename.rsplit(".", 1)[0] if "." in original_filename else original_filename
+            corrected_name = f"{stem}_corrected.xlsx"
+
+        job_store.save_file(job_id, corrected_name, corrected_excel)
         job_store.save_file(job_id, "review.xlsx", review_excel)
 
         # Record usage
@@ -467,7 +487,7 @@ def _process_validate(
             "pin_valid": pin_valid,
             "results": row_results,
             "files": {
-                "corrected": f"/api/v1/jobs/{job_id}/files/corrected.xlsx",
+                "corrected": f"/api/v1/jobs/{job_id}/files/{corrected_name}",
                 "review": f"/api/v1/jobs/{job_id}/files/review.xlsx",
             },
         })
@@ -518,12 +538,13 @@ async def create_validator_job(
     pin_valid = bool(settings.bypass_pin) and bypass_pin == settings.bypass_pin
 
     # Create job and run Phase 1 in background
+    original_filename = sanitize_filename(excel_file.filename or "upload.xlsx")
     job_id = job_store.create_job("validator")
     loop = asyncio.get_running_loop()
     loop.run_in_executor(
         None, _process_parse, job_id, content,
         confidence_threshold, street_confidence_threshold, pin_valid, client_ip,
-        brand, campaign,
+        brand, campaign, original_filename,
     )
 
     return {"ok": True, "data": {"job_id": job_id}}
@@ -584,6 +605,7 @@ async def confirm_validation(job_id: str, body: ConfirmRequest):
         config.get("brand", ""), campaign,
         config.get("order_numbers", []),
         body.po_override or "",
+        config.get("original_filename", ""),
     )
 
     return {"ok": True, "data": {"status": "processing_validate"}}
@@ -610,8 +632,11 @@ async def apply_corrections(job_id: str, body: ApplyCorrectionsRequest):
     if not body.corrections:
         return {"ok": True, "data": {"applied": 0}}
 
-    # Load the corrected Excel
-    corrected_path = job_store.get_file_path(job_id, "corrected.xlsx")
+    # Load the corrected Excel (filename may include original name)
+    result_files = status.get("result", {}).get("files", {})
+    corrected_url = result_files.get("corrected", "")
+    corrected_filename = corrected_url.rsplit("/", 1)[-1] if corrected_url else "corrected.xlsx"
+    corrected_path = job_store.get_file_path(job_id, corrected_filename)
     if not corrected_path:
         raise HTTPException(status_code=404, detail={
             "ok": False, "error": {"code": "FILE_NOT_FOUND", "message": "Corrected file not found"}
@@ -646,6 +671,6 @@ async def apply_corrections(job_id: str, body: ApplyCorrectionsRequest):
     # Write back
     output = io.BytesIO()
     df.to_excel(output, index=False, engine='openpyxl')
-    job_store.save_file(job_id, "corrected.xlsx", output.getvalue())
+    job_store.save_file(job_id, corrected_filename, output.getvalue())
 
     return {"ok": True, "data": {"applied": applied}}

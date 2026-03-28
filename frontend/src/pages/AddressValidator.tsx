@@ -719,14 +719,14 @@ export default function AddressValidator() {
                     <DownloadCard
                       label="File corretto"
                       subtitle="Excel con correzioni applicate"
-                      href={api.fileUrl(jobId!, "corrected.xlsx")}
+                      href={validatorResult.files.corrected}
                       variant={downloadAllowed ? "primary" : "disabled"}
                       icon={"\uD83D\uDCCA"}
                     />
                     <DownloadCard
                       label="Report revisione"
                       subtitle="Dettaglio righe da verificare"
-                      href={api.fileUrl(jobId!, "review.xlsx")}
+                      href={validatorResult.files.review}
                       variant={downloadAllowed && validatorResult.review_count > 0 ? "secondary" : "disabled"}
                       icon={"\uD83D\uDCCB"}
                     />
@@ -747,7 +747,10 @@ export default function AddressValidator() {
                 <Button
                   onClick={() =>
                     navigate("/quotation", {
-                      state: { validatorJobId: jobId },
+                      state: {
+                        validatorJobId: jobId,
+                        correctedFile: validatorResult.files.corrected.split("/").pop(),
+                      },
                     })
                   }
                   className="bg-primary hover:bg-primary/90 text-white"

@@ -90,21 +90,24 @@ export default function ShipmentsQuotation() {
 
   // Pre-load corrected file from Address Validator
   useEffect(() => {
-    const validatorJobId = (location.state as { validatorJobId?: string } | null)?.validatorJobId
+    const state = location.state as { validatorJobId?: string; correctedFile?: string } | null
+    const validatorJobId = state?.validatorJobId
     if (!validatorJobId) return
+
+    const filename = state?.correctedFile || "corrected.xlsx"
 
     let cancelled = false
     setIsLoadingPreloadedFile(true)
     setPreloadError(null)
 
-    fetch(api.fileUrl(validatorJobId, "corrected.xlsx"))
+    fetch(api.fileUrl(validatorJobId, filename))
       .then((res) => {
         if (!res.ok) throw new Error("File non disponibile. Il job potrebbe essere scaduto.")
         return res.blob()
       })
       .then((blob) => {
         if (cancelled) return
-        const file = new File([blob], "corrected.xlsx", {
+        const file = new File([blob], filename, {
           type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         })
         setExcelFile(file)

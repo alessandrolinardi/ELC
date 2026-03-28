@@ -667,7 +667,10 @@ class ZipValidator:
     def generate_corrected_excel(
         self,
         original_df: pd.DataFrame,
-        report: ValidationReport
+        report: ValidationReport,
+        brand: str = "",
+        campaign: str = "",
+        po_number: str = "",
     ) -> bytes:
         """Generate corrected Excel with auto-corrections applied."""
         from openpyxl.utils import get_column_letter
@@ -716,6 +719,14 @@ class ZipValidator:
             # Set Cash on Delivery to 0 always (IT addresses only)
             if cod_col and result.country_code == 'IT':
                 df.at[result.row_index, cod_col] = 0
+
+        # Add Brand / Campaign / PO columns if provided
+        if brand:
+            df["Brand"] = brand
+        if campaign:
+            df["Campaign"] = campaign
+        if po_number:
+            df["PO Number"] = po_number
 
         # Sanitize string cells to prevent Excel formula injection
         for col in df.columns:
