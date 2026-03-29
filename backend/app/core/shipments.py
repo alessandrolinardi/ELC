@@ -18,52 +18,148 @@ logger = get_logger(__name__)
 POLL_INTERVAL = 15  # seconds between polls
 
 
-def extract_tracking_from_excel(excel_bytes: bytes, filename: str = "upload.xls") -> list[str]:
-    """Extract tracking numbers from an Excel file with auto-detected columns.
+# Columns to search for identifiers (priority order — ShippyPro order number is most reliable)
+_POD_IDENTIFIER_COLUMNS = [
+    # ShippyPro order numbers — always present, works even for external shipments
+    ("numero ordine shippypro", "shippypro_order"),
+    ("shippypro order", "shippypro_order"),
+    ("numero ordine", "shippypro_order"),
+    # Tracking numbers
+    ("tracking", "tracking"),
+    ("tracking number", "tracking"),
+    ("trackingnumber", "tracking"),
+    ("tracking_number", "tracking"),
+    ("codice tracking", "tracking"),
+    ("n. tracking", "tracking"),
+    ("numero tracking", "tracking"),
+    # Marketplace order IDs
+    ("id ordine marketplace", "marketplace_id"),
+    ("marketplace order id", "marketplace_id"),
+    ("order id", "marketplace_id"),
+]
 
-    Uses ExcelParser for robust file reading (handles ShippyPro HTML-as-XLS,
-    calamine engine fallback, etc.) and column detection.
+SMALL_BATCH_THRESHOLD = 50  # Below this, use sequential single calls
 
-    Only requires a tracking column — does not require order_id or carrier
-    (unlike parse_excel which needs all three). This makes it suitable for
-    POD lookup where the user may upload any file with a tracking column.
 
-    Returns a deduplicated list of non-empty tracking numbers.
+def extract_identifiers_from_excel(excel_bytes: bytes, filename: str = "upload.xls") -> list[str]:
+    """Extract POD identifiers from an Excel file.
+
+    Searches for multiple column types in priority order:
+    1. Numero ordine ShippyPro (most reliable — always present, works as direct OrderID)
+    2. Tracking numbers
+    3. ID Ordine Marketplace
+
+    Uses the best available column. Falls back to ExcelParser's tracking
+    column detection for non-ShippyPro files.
+
+    Returns a deduplicated list of non-empty identifiers.
     """
     parser = ExcelParser()
 
-    # Use ExcelParser's file reader (handles format detection, encoding, etc.)
     try:
         df = parser._try_read_excel(io.BytesIO(excel_bytes), filename)
     except Exception as e:
         raise ValueError(f"Impossibile leggere il file: {e}")
 
     df.columns = [str(col).strip().replace('\n', ' ') for col in df.columns]
+    col_lower_map = {col.lower().strip(): col for col in df.columns}
 
-    # Use ExcelParser's column finder (case-insensitive, handles aliases)
-    tracking_col = parser._find_column(df, 'tracking')
+    # Find the best identifier column
+    found_col = None
+    found_type = None
+    for alias, col_type in _POD_IDENTIFIER_COLUMNS:
+        if alias in col_lower_map:
+            found_col = col_lower_map[alias]
+            found_type = col_type
+            break
 
-    if not tracking_col:
+    # Fallback: use ExcelParser's tracking column finder
+    if not found_col:
+        found_col = parser._find_column(df, 'tracking')
+        found_type = "tracking"
+
+    if not found_col:
         raise ValueError(
-            f"Colonna tracking non trovata. Colonne disponibili: {', '.join(df.columns.tolist())}"
+            f"Nessuna colonna identificativo trovata. "
+            f"Servono: Tracking, Numero ordine ShippyPro, o ID Ordine Marketplace. "
+            f"Colonne trovate: {', '.join(df.columns.tolist())}"
         )
 
-    logger.info("Tracking column found: '%s' in %d rows", tracking_col, len(df))
+    logger.info("POD identifier column: '%s' (type: %s) in %d rows", found_col, found_type, len(df))
 
     identifiers = []
     seen: set[str] = set()
-    for val in df[tracking_col]:
+    for val in df[found_col]:
         if pd.isna(val):
             continue
-        s = str(val).strip()
+        # For numeric ShippyPro order IDs, convert float to int string
+        if isinstance(val, float) and val == int(val):
+            s = str(int(val))
+        else:
+            s = str(val).strip()
         if not s or s.lower() == 'nan':
             continue
-        normalized = ExcelParser.normalize_tracking(s)
+        normalized = s.upper().replace(' ', '')
         if normalized and normalized not in seen:
             seen.add(normalized)
-            identifiers.append(normalized)
+            identifiers.append(s.strip())  # Keep original casing for marketplace IDs
 
     return identifiers
+
+
+def send_sequential_pod_requests(
+    identifiers: list[str],
+    on_progress: Optional[Callable[[str, dict], None]] = None,
+) -> dict:
+    """Fetch PODs sequentially using single calls (for small batches <50).
+
+    Uses the single POD endpoint with a small delay between calls.
+    Returns a result dict matching the bulk format for consistency.
+    """
+    results = []
+    summary = {"found": 0, "no_pod": 0, "unmatched": 0, "ambiguous": 0, "error": 0}
+    total = len(identifiers)
+
+    for i, identifier in enumerate(identifiers):
+        result = fetch_single_pod(identifier)
+
+        status = result["status"]
+        item: dict = {"input_value": identifier, "status": status}
+
+        if status == "found":
+            item["tracking_number"] = result.get("tracking_number", "")
+            item["carrier"] = result.get("carrier", "")
+            item["pod_base64"] = result.get("pod_base64", "")
+            summary["found"] += 1
+        elif status == "not_found":
+            item["status"] = "unmatched"
+            item["message"] = result.get("error_message", "")
+            summary["unmatched"] += 1
+        elif status == "ambiguous":
+            item["message"] = result.get("error_message", "")
+            summary["ambiguous"] += 1
+        else:
+            item["status"] = "error"
+            item["message"] = result.get("error_message", "")
+            summary["error"] += 1
+
+        results.append(item)
+
+        if on_progress:
+            on_progress(
+                f"POD: {i + 1}/{total} elaborati ({summary['found']} trovati)",
+                {"progress": {"total": total, "fetched": i + 1, "found": summary["found"]}, "status": "processing"},
+            )
+
+        # Small delay to respect rate limits (not needed for last item)
+        if i < total - 1:
+            time.sleep(1)
+
+    return {
+        "status": "completed",
+        "summary": {**summary, "total_input": total, "duplicates_removed": 0},
+        "results": results,
+    }
 
 
 def _clean(val) -> Optional[str]:

@@ -8,8 +8,9 @@ from ..services.job_store import job_store
 from ..core.shipments import (
     parse_shipments_excel, build_from_address, send_rates_request,
     send_ship_request, build_batch_shipments, send_batch_ship_request,
-    fetch_single_pod, send_batch_pod_request, download_pod_file, download_pod_zip,
-    extract_tracking_from_excel,
+    fetch_single_pod, send_batch_pod_request, send_sequential_pod_requests,
+    download_pod_file, download_pod_zip,
+    extract_identifiers_from_excel, SMALL_BATCH_THRESHOLD,
 )
 from ..schemas.shipments import ShipRequest, ShipBatchRequest, PodRequest, PodBatchRequest
 
@@ -235,8 +236,8 @@ async def get_pod(request: Request, body: PodRequest):
         }}
 
 
-def _process_batch_pod(job_id: str, identifiers: list[str]):
-    """Background task: submit bulk POD job → poll → store result."""
+def _process_pod_job(job_id: str, identifiers: list[str]):
+    """Background task: fetch PODs via sequential singles or bulk endpoint."""
     try:
         def on_progress(message: str, data: dict):
             progress = data.get("progress", {})
@@ -245,16 +246,20 @@ def _process_batch_pod(job_id: str, identifiers: list[str]):
             pct = int(fetched / total * 100) if total > 0 else 0
             job_store.update_progress(job_id, pct, 100, message)
 
-        success, message, result = send_batch_pod_request(
-            identifiers=identifiers,
-            on_progress=on_progress,
-        )
-
-        if not success:
-            job_store.update_status(job_id, "failed", error=message)
-            return
-
-        job_store.update_status(job_id, "complete", result=result or {"message": message})
+        if len(identifiers) < SMALL_BATCH_THRESHOLD:
+            # Small batch: sequential single calls (faster, no job overhead)
+            result = send_sequential_pod_requests(identifiers, on_progress=on_progress)
+            job_store.update_status(job_id, "complete", result=result)
+        else:
+            # Large batch: use bulk endpoint (handles rate limiting internally)
+            success, message, result = send_batch_pod_request(
+                identifiers=identifiers,
+                on_progress=on_progress,
+            )
+            if not success:
+                job_store.update_status(job_id, "failed", error=message)
+                return
+            job_store.update_status(job_id, "complete", result=result or {"message": message})
 
     except Exception as e:
         job_store.update_status(job_id, "failed", error=str(e))
@@ -263,14 +268,16 @@ def _process_batch_pod(job_id: str, identifiers: list[str]):
 @router.post("/jobs/pod-batch")
 @limiter.limit("10/hour")
 async def get_pod_batch(request: Request, body: PodBatchRequest):
-    """Fetch PODs for up to 500 tracking numbers / transaction IDs.
+    """Fetch PODs for up to 500 identifiers (tracking numbers, order IDs, ShippyPro order numbers).
 
-    Returns a job_id for polling. Processing takes ~1-3 min depending on count.
+    <50 items: sequential single calls (~1s each).
+    50+ items: bulk endpoint with polling (~5 min for 500).
+    Returns a job_id for polling in both cases.
     """
     job_id = job_store.create_job("pod_batch")
 
     loop = asyncio.get_running_loop()
-    loop.run_in_executor(None, _process_batch_pod, job_id, body.identifiers)
+    loop.run_in_executor(None, _process_pod_job, job_id, body.identifiers)
 
     return {"ok": True, "data": {"job_id": job_id, "total": len(body.identifiers)}}
 
@@ -281,10 +288,14 @@ async def get_pod_from_excel(
     request: Request,
     file: UploadFile = File(...),
 ):
-    """Extract tracking numbers from an Excel file and start a bulk POD job.
+    """Extract identifiers from an Excel file and fetch PODs.
 
-    Handles ShippyPro exports (HTML-as-XLS), standard XLSX, and various
-    column names (Tracking, Tracking Number, Codice Tracking, etc.).
+    Handles ShippyPro exports (HTML-as-XLS), standard XLSX. Searches for
+    columns in priority order: Numero ordine ShippyPro (most reliable),
+    Tracking, ID Ordine Marketplace.
+
+    Routing: 1 item → instant single POD. 2+ items → async job (sequential
+    singles for <50, bulk endpoint for 50+).
     """
     content = await file.read()
     if len(content) > 50 * 1024 * 1024:
@@ -292,7 +303,7 @@ async def get_pod_from_excel(
 
     try:
         identifiers = await asyncio.get_running_loop().run_in_executor(
-            None, extract_tracking_from_excel, content, file.filename or "upload.xls",
+            None, extract_identifiers_from_excel, content, file.filename or "upload.xls",
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -300,20 +311,20 @@ async def get_pod_from_excel(
         raise HTTPException(status_code=400, detail=f"Errore lettura file: {e}")
 
     if not identifiers:
-        raise HTTPException(status_code=400, detail="Nessun tracking trovato nel file.")
+        raise HTTPException(status_code=400, detail="Nessun identificativo trovato nel file.")
 
-    # If only 1 tracking, use single POD (instant)
+    # Single identifier → instant result
     if len(identifiers) == 1:
         result = await asyncio.get_running_loop().run_in_executor(
             None, fetch_single_pod, identifiers[0],
         )
         return {"ok": True, "data": {"mode": "single", "identifiers": identifiers, "result": result}}
 
-    # Multiple → start bulk job
+    # Multiple → async job (routing handled by _process_pod_job)
     job_id = job_store.create_job("pod_batch")
 
     loop = asyncio.get_running_loop()
-    loop.run_in_executor(None, _process_batch_pod, job_id, identifiers)
+    loop.run_in_executor(None, _process_pod_job, job_id, identifiers)
 
     return {"ok": True, "data": {
         "mode": "batch",
