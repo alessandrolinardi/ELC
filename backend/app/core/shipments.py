@@ -21,24 +21,27 @@ POLL_INTERVAL = 15  # seconds between polls
 def extract_tracking_from_excel(excel_bytes: bytes, filename: str = "upload.xls") -> list[str]:
     """Extract tracking numbers from an Excel file with auto-detected columns.
 
-    Uses ExcelParser's robust column detection (handles ShippyPro HTML-as-XLS,
-    various column names in Italian/English, etc.).
+    Uses ExcelParser for robust file reading (handles ShippyPro HTML-as-XLS,
+    calamine engine fallback, etc.) and column detection.
+
+    Only requires a tracking column — does not require order_id or carrier
+    (unlike parse_excel which needs all three). This makes it suitable for
+    POD lookup where the user may upload any file with a tracking column.
 
     Returns a deduplicated list of non-empty tracking numbers.
     """
     parser = ExcelParser()
-    df = parser._try_read_excel(io.BytesIO(excel_bytes), filename)
+
+    # Use ExcelParser's file reader (handles format detection, encoding, etc.)
+    try:
+        df = parser._try_read_excel(io.BytesIO(excel_bytes), filename)
+    except Exception as e:
+        raise ValueError(f"Impossibile leggere il file: {e}")
+
     df.columns = [str(col).strip().replace('\n', ' ') for col in df.columns]
 
+    # Use ExcelParser's column finder (case-insensitive, handles aliases)
     tracking_col = parser._find_column(df, 'tracking')
-    if not tracking_col:
-        # Fallback: also try the shipments column mapping for 'tracking_number'
-        for col in df.columns:
-            col_lower = col.lower().strip()
-            if col_lower in ('tracking', 'tracking number', 'trackingnumber', 'tracking_number',
-                             'codice tracking', 'n. tracking', 'numero tracking'):
-                tracking_col = col
-                break
 
     if not tracking_col:
         raise ValueError(
@@ -48,7 +51,7 @@ def extract_tracking_from_excel(excel_bytes: bytes, filename: str = "upload.xls"
     logger.info("Tracking column found: '%s' in %d rows", tracking_col, len(df))
 
     identifiers = []
-    seen = set()
+    seen: set[str] = set()
     for val in df[tracking_col]:
         if pd.isna(val):
             continue

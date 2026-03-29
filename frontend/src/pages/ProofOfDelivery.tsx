@@ -10,6 +10,24 @@ import { Badge } from "@/components/ui/badge"
 
 const BASE_URL = import.meta.env.VITE_API_URL || ""
 
+/** Safely decode base64 to Blob without stack overflow on large PDFs. */
+function base64ToBlob(b64: string, mimeType: string): Blob {
+  const raw = atob(b64)
+  const bytes = new Uint8Array(raw.length)
+  for (let i = 0; i < raw.length; i++) bytes[i] = raw.charCodeAt(i)
+  return new Blob([bytes], { type: mimeType })
+}
+
+/** Trigger a browser download from a Blob. */
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement("a")
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 interface PodSingleResult {
   status: string
   pod_base64: string
@@ -71,7 +89,6 @@ export default function ProofOfDelivery() {
   const [textInput, setTextInput] = useState("")
   const [excelFile, setExcelFile] = useState<File | null>(null)
   const [jobId, setJobId] = useState<string | null>(null)
-  const [remoteJobId, setRemoteJobId] = useState<string | null>(null)
   const [singleResult, setSingleResult] = useState<PodSingleResult | null>(null)
   const [isDownloadingZip, setIsDownloadingZip] = useState(false)
 
@@ -88,24 +105,16 @@ export default function ProofOfDelivery() {
   // Single POD mutation (1 identifier → instant PDF download)
   const singleMutation = useMutation({
     mutationFn: async (identifier: string) => {
-      const resp = await api.post<{ ok: boolean; data: PodSingleResult; error?: { message: string } }>(
-        "/api/v1/jobs/pod",
-        { identifier }
-      )
-      if (!resp.ok) throw new Error(resp.error?.message || "Errore")
-      return resp.data
+      // api.post unwraps {ok, data} → returns data directly
+      return api.post<PodSingleResult>("/api/v1/jobs/pod", { identifier })
     },
     onSuccess: (data) => {
       setSingleResult(data)
       if (data.status === "found" && data.pod_base64) {
-        const bytes = Uint8Array.from(atob(data.pod_base64), (c) => c.charCodeAt(0))
-        const blob = new Blob([bytes], { type: "application/pdf" })
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement("a")
-        a.href = url
-        a.download = `pod_${data.tracking_number || "download"}.pdf`
-        a.click()
-        URL.revokeObjectURL(url)
+        downloadBlob(
+          base64ToBlob(data.pod_base64, "application/pdf"),
+          `pod_${data.tracking_number || "download"}.pdf`,
+        )
       }
     },
   })
@@ -113,13 +122,13 @@ export default function ProofOfDelivery() {
   // Bulk POD mutation (from text input)
   const batchMutation = useMutation({
     mutationFn: async (identifiers: string[]) => {
-      return api.post<{ ok: boolean; data: { job_id: string; total: number } }>(
+      return api.post<{ job_id: string; total: number }>(
         "/api/v1/jobs/pod-batch",
         { identifiers }
       )
     },
     onSuccess: (resp) => {
-      setJobId(resp.data.job_id)
+      setJobId(resp.job_id)
     },
   })
 
@@ -129,30 +138,21 @@ export default function ProofOfDelivery() {
       const formData = new FormData()
       formData.append("file", file)
       return api.postForm<{
-        ok: boolean
-        data: {
-          mode: "single" | "batch"
-          job_id?: string
-          total?: number
-          identifiers?: string[]
-          identifiers_preview?: string[]
-          result?: PodSingleResult
-        }
+        mode: "single" | "batch"
+        job_id?: string
+        total?: number
+        identifiers_preview?: string[]
+        result?: PodSingleResult
       }>("/api/v1/jobs/pod-from-excel", formData)
     },
-    onSuccess: (resp) => {
-      const data = resp.data
+    onSuccess: (data) => {
       if (data.mode === "single" && data.result) {
         setSingleResult(data.result)
         if (data.result.status === "found" && data.result.pod_base64) {
-          const bytes = Uint8Array.from(atob(data.result.pod_base64), (c) => c.charCodeAt(0))
-          const blob = new Blob([bytes], { type: "application/pdf" })
-          const url = URL.createObjectURL(blob)
-          const a = document.createElement("a")
-          a.href = url
-          a.download = `pod_${data.result.tracking_number || "download"}.pdf`
-          a.click()
-          URL.revokeObjectURL(url)
+          downloadBlob(
+            base64ToBlob(data.result.pod_base64, "application/pdf"),
+            `pod_${data.result.tracking_number || "download"}.pdf`,
+          )
         }
       } else if (data.mode === "batch" && data.job_id) {
         setJobId(data.job_id)
@@ -176,15 +176,15 @@ export default function ProofOfDelivery() {
     }
   }
 
-  // Extract remote job_id from batch result for ZIP download
-  const effectiveRemoteJobId = batchResult?.job_id || remoteJobId
+  // Remote job_id from batch result for ZIP download
+  const remoteJobId = batchResult?.job_id || null
 
   const handleDownloadZip = async () => {
-    if (!effectiveRemoteJobId) return
+    if (!remoteJobId) return
     setIsDownloadingZip(true)
     try {
       const formData = new FormData()
-      formData.append("remote_job_id", effectiveRemoteJobId)
+      formData.append("remote_job_id", remoteJobId)
       const resp = await fetch(`${BASE_URL}/api/v1/jobs/pod-download-zip`, {
         method: "POST",
         body: formData,
@@ -194,7 +194,7 @@ export default function ProofOfDelivery() {
       const url = URL.createObjectURL(blob)
       const a = document.createElement("a")
       a.href = url
-      a.download = `pod_${effectiveRemoteJobId.slice(0, 8)}.zip`
+      a.download = `pod_${remoteJobId.slice(0, 8)}.zip`
       a.click()
       URL.revokeObjectURL(url)
     } catch {
@@ -208,7 +208,6 @@ export default function ProofOfDelivery() {
     setTextInput("")
     setExcelFile(null)
     setJobId(null)
-    setRemoteJobId(null)
     setSingleResult(null)
     singleMutation.reset()
     batchMutation.reset()
