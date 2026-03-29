@@ -2,6 +2,7 @@ import { useState, useCallback } from "react"
 import { useMutation } from "@tanstack/react-query"
 import { api } from "@/api/client"
 import { PageShell } from "@/components/layout/PageShell"
+import { FileDropZone } from "@/components/FileDropZone"
 import { useJobPolling } from "@/hooks/useJobPolling"
 import { useDevMode } from "@/hooks/useDevMode"
 import { Button } from "@/components/ui/button"
@@ -68,6 +69,7 @@ function parseIdentifiers(text: string): string[] {
 export default function ProofOfDelivery() {
   const [isDevMode] = useDevMode()
   const [textInput, setTextInput] = useState("")
+  const [excelFile, setExcelFile] = useState<File | null>(null)
   const [jobId, setJobId] = useState<string | null>(null)
   const [remoteJobId, setRemoteJobId] = useState<string | null>(null)
   const [singleResult, setSingleResult] = useState<PodSingleResult | null>(null)
@@ -78,12 +80,9 @@ export default function ProofOfDelivery() {
 
   const batchResult = jobStatus === "complete" ? (rawResult as PodBatchResult) : null
 
-  // Extract identifiers from text or Excel
+  // Extract identifiers from text input
   const getIdentifiers = useCallback((): string[] => {
-    const fromText = parseIdentifiers(textInput)
-    // Excel parsing happens server-side — we'd need a separate endpoint
-    // For now, text input is the primary method
-    return fromText
+    return parseIdentifiers(textInput)
   }, [textInput])
 
   // Single POD mutation (1 identifier → instant PDF download)
@@ -99,7 +98,6 @@ export default function ProofOfDelivery() {
     onSuccess: (data) => {
       setSingleResult(data)
       if (data.status === "found" && data.pod_base64) {
-        // Auto-download the PDF
         const bytes = Uint8Array.from(atob(data.pod_base64), (c) => c.charCodeAt(0))
         const blob = new Blob([bytes], { type: "application/pdf" })
         const url = URL.createObjectURL(blob)
@@ -112,7 +110,7 @@ export default function ProofOfDelivery() {
     },
   })
 
-  // Bulk POD mutation
+  // Bulk POD mutation (from text input)
   const batchMutation = useMutation({
     mutationFn: async (identifiers: string[]) => {
       return api.post<{ ok: boolean; data: { job_id: string; total: number } }>(
@@ -125,7 +123,49 @@ export default function ProofOfDelivery() {
     },
   })
 
+  // Excel upload mutation (server extracts tracking numbers)
+  const excelMutation = useMutation({
+    mutationFn: async (file: File) => {
+      const formData = new FormData()
+      formData.append("file", file)
+      return api.postForm<{
+        ok: boolean
+        data: {
+          mode: "single" | "batch"
+          job_id?: string
+          total?: number
+          identifiers?: string[]
+          identifiers_preview?: string[]
+          result?: PodSingleResult
+        }
+      }>("/api/v1/jobs/pod-from-excel", formData)
+    },
+    onSuccess: (resp) => {
+      const data = resp.data
+      if (data.mode === "single" && data.result) {
+        setSingleResult(data.result)
+        if (data.result.status === "found" && data.result.pod_base64) {
+          const bytes = Uint8Array.from(atob(data.result.pod_base64), (c) => c.charCodeAt(0))
+          const blob = new Blob([bytes], { type: "application/pdf" })
+          const url = URL.createObjectURL(blob)
+          const a = document.createElement("a")
+          a.href = url
+          a.download = `pod_${data.result.tracking_number || "download"}.pdf`
+          a.click()
+          URL.revokeObjectURL(url)
+        }
+      } else if (data.mode === "batch" && data.job_id) {
+        setJobId(data.job_id)
+      }
+    },
+  })
+
   const handleSubmit = () => {
+    // Excel file takes priority
+    if (excelFile) {
+      excelMutation.mutate(excelFile)
+      return
+    }
     const identifiers = getIdentifiers()
     if (identifiers.length === 0) return
 
@@ -166,16 +206,19 @@ export default function ProofOfDelivery() {
 
   const handleReset = () => {
     setTextInput("")
+    setExcelFile(null)
     setJobId(null)
     setRemoteJobId(null)
     setSingleResult(null)
     singleMutation.reset()
     batchMutation.reset()
+    excelMutation.reset()
   }
 
   const identifiers = getIdentifiers()
   const isProcessing = !!jobId && jobStatus !== "complete" && jobStatus !== "failed"
-  const hasInput = identifiers.length > 0
+  const hasInput = identifiers.length > 0 || !!excelFile
+  const isSubmitting = singleMutation.isPending || batchMutation.isPending || excelMutation.isPending
 
   return (
     <PageShell title="Proof of Delivery" subtitle="Cerca e scarica le prove di consegna (POD) per le spedizioni.">
@@ -193,35 +236,59 @@ export default function ProofOfDelivery() {
                 rows={5}
                 placeholder={"Inserisci uno o più tracking number, uno per riga.\nEs: 870045464495\n1Z999AA10123456784\nTESTPLAT-ORDER-123"}
                 value={textInput}
-                onChange={(e) => setTextInput(e.target.value)}
-                disabled={isProcessing}
+                onChange={(e) => { setTextInput(e.target.value); setExcelFile(null) }}
+                disabled={isProcessing || !!excelFile}
               />
-              {hasInput && (
+              {identifiers.length > 0 && !excelFile && (
                 <p className="text-xs text-muted-foreground mt-1">
                   {identifiers.length} identificativ{identifiers.length === 1 ? "o" : "i"} trovat{identifiers.length === 1 ? "o" : "i"}
                 </p>
               )}
             </div>
 
+            {/* Divider */}
+            <div className="flex items-center gap-3">
+              <div className="flex-1 border-t border-border" />
+              <span className="text-xs text-muted-foreground">oppure</span>
+              <div className="flex-1 border-t border-border" />
+            </div>
+
+            {/* Excel upload */}
+            <FileDropZone
+              label="Carica file Excel"
+              subtitle="Excel con colonna tracking (ShippyPro export, XLSX, XLS)"
+              accept=".xlsx,.xls"
+              icon="&#128196;"
+              onFilesSelected={(files) => { setExcelFile(files[0] || null); setTextInput("") }}
+              selectedFiles={excelFile ? [excelFile] : []}
+            />
+
             {/* Submit */}
             <Button
               onClick={handleSubmit}
-              disabled={!hasInput || singleMutation.isPending || batchMutation.isPending || isProcessing}
+              disabled={!hasInput || isSubmitting || isProcessing}
               className="bg-primary hover:bg-primary/90 text-white w-full"
             >
-              {singleMutation.isPending
+              {isSubmitting
                 ? "Ricerca POD..."
-                : batchMutation.isPending || isProcessing
+                : isProcessing
                   ? "Elaborazione..."
-                  : identifiers.length === 1
-                    ? "Cerca POD"
-                    : `Cerca ${identifiers.length} POD`}
+                  : excelFile
+                    ? "Cerca POD da file"
+                    : identifiers.length === 1
+                      ? "Cerca POD"
+                      : `Cerca ${identifiers.length} POD`}
             </Button>
 
             {/* Errors */}
             {singleMutation.error && (
               <p className="text-sm text-destructive text-center">
                 {singleMutation.error instanceof Error ? singleMutation.error.message : "Errore"}
+              </p>
+            )}
+            {excelMutation.error && (
+              <p className="text-sm text-destructive text-center">
+                {excelMutation.error instanceof Error ? excelMutation.error.message : "Errore lettura file"}
               </p>
             )}
             {batchMutation.error && (

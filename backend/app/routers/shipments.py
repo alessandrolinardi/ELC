@@ -9,6 +9,7 @@ from ..core.shipments import (
     parse_shipments_excel, build_from_address, send_rates_request,
     send_ship_request, build_batch_shipments, send_batch_ship_request,
     fetch_single_pod, send_batch_pod_request, download_pod_file, download_pod_zip,
+    extract_tracking_from_excel,
 )
 from ..schemas.shipments import ShipRequest, ShipBatchRequest, PodRequest, PodBatchRequest
 
@@ -272,6 +273,54 @@ async def get_pod_batch(request: Request, body: PodBatchRequest):
     loop.run_in_executor(None, _process_batch_pod, job_id, body.identifiers)
 
     return {"ok": True, "data": {"job_id": job_id, "total": len(body.identifiers)}}
+
+
+@router.post("/jobs/pod-from-excel")
+@limiter.limit("10/hour")
+async def get_pod_from_excel(
+    request: Request,
+    file: UploadFile = File(...),
+):
+    """Extract tracking numbers from an Excel file and start a bulk POD job.
+
+    Handles ShippyPro exports (HTML-as-XLS), standard XLSX, and various
+    column names (Tracking, Tracking Number, Codice Tracking, etc.).
+    """
+    content = await file.read()
+    if len(content) > 50 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="File troppo grande (max 50MB)")
+
+    try:
+        identifiers = await asyncio.get_running_loop().run_in_executor(
+            None, extract_tracking_from_excel, content, file.filename or "upload.xls",
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Errore lettura file: {e}")
+
+    if not identifiers:
+        raise HTTPException(status_code=400, detail="Nessun tracking trovato nel file.")
+
+    # If only 1 tracking, use single POD (instant)
+    if len(identifiers) == 1:
+        result = await asyncio.get_running_loop().run_in_executor(
+            None, fetch_single_pod, identifiers[0],
+        )
+        return {"ok": True, "data": {"mode": "single", "identifiers": identifiers, "result": result}}
+
+    # Multiple → start bulk job
+    job_id = job_store.create_job("pod_batch")
+
+    loop = asyncio.get_running_loop()
+    loop.run_in_executor(None, _process_batch_pod, job_id, identifiers)
+
+    return {"ok": True, "data": {
+        "mode": "batch",
+        "job_id": job_id,
+        "total": len(identifiers),
+        "identifiers_preview": identifiers[:5],
+    }}
 
 
 @router.post("/jobs/pod-download")

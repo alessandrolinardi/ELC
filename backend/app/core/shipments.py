@@ -9,12 +9,58 @@ from urllib.parse import urlparse, urlunparse
 import pandas as pd
 
 from .config_compat import get_secret
+from .excel_parser import ExcelParser
 from .logging_config import get_logger
 from .utils import map_columns
 
 logger = get_logger(__name__)
 
 POLL_INTERVAL = 15  # seconds between polls
+
+
+def extract_tracking_from_excel(excel_bytes: bytes, filename: str = "upload.xls") -> list[str]:
+    """Extract tracking numbers from an Excel file with auto-detected columns.
+
+    Uses ExcelParser's robust column detection (handles ShippyPro HTML-as-XLS,
+    various column names in Italian/English, etc.).
+
+    Returns a deduplicated list of non-empty tracking numbers.
+    """
+    parser = ExcelParser()
+    df = parser._try_read_excel(io.BytesIO(excel_bytes), filename)
+    df.columns = [str(col).strip().replace('\n', ' ') for col in df.columns]
+
+    tracking_col = parser._find_column(df, 'tracking')
+    if not tracking_col:
+        # Fallback: also try the shipments column mapping for 'tracking_number'
+        for col in df.columns:
+            col_lower = col.lower().strip()
+            if col_lower in ('tracking', 'tracking number', 'trackingnumber', 'tracking_number',
+                             'codice tracking', 'n. tracking', 'numero tracking'):
+                tracking_col = col
+                break
+
+    if not tracking_col:
+        raise ValueError(
+            f"Colonna tracking non trovata. Colonne disponibili: {', '.join(df.columns.tolist())}"
+        )
+
+    logger.info("Tracking column found: '%s' in %d rows", tracking_col, len(df))
+
+    identifiers = []
+    seen = set()
+    for val in df[tracking_col]:
+        if pd.isna(val):
+            continue
+        s = str(val).strip()
+        if not s or s.lower() == 'nan':
+            continue
+        normalized = ExcelParser.normalize_tracking(s)
+        if normalized and normalized not in seen:
+            seen.add(normalized)
+            identifiers.append(normalized)
+
+    return identifiers
 
 
 def _clean(val) -> Optional[str]:
