@@ -20,8 +20,19 @@ export function SupportDrawer({ open, onClose }: SupportDrawerProps) {
     if (!open) {
       setMessage("")
       setSent(false)
+      mutation.reset()
     }
-  }, [open])
+  }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Escape key to close
+  useEffect(() => {
+    if (!open) return
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose()
+    }
+    window.addEventListener("keydown", handleKey)
+    return () => window.removeEventListener("keydown", handleKey)
+  }, [open, onClose])
 
   const mutation = useMutation({
     mutationFn: async ({ urgent }: { urgent: boolean }) => {
@@ -105,7 +116,7 @@ export function SupportDrawer({ open, onClose }: SupportDrawerProps) {
                 onChange={(e) => setMessage(e.target.value)}
                 disabled={mutation.isPending}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter" && e.metaKey) handleSend(false)
+                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) handleSend(false)
                 }}
               />
 
@@ -134,7 +145,7 @@ export function SupportDrawer({ open, onClose }: SupportDrawerProps) {
               </div>
 
               <p className="text-[10px] text-muted-foreground text-center">
-                Cmd+Invio per inviare
+                Cmd/Ctrl+Invio per inviare
               </p>
             </div>
           )}

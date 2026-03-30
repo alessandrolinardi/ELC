@@ -1,4 +1,5 @@
 """Support request endpoint — fires Zapier webhook for Trello + Discord."""
+import asyncio
 from datetime import datetime, timezone
 
 import requests
@@ -51,16 +52,17 @@ async def submit_support_request(request: Request, body: SupportRequest):
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
 
-    try:
-        resp = requests.post(
-            settings.support_webhook_url,
-            json=payload,
-            timeout=10,
-        )
+    def _fire_webhook():
+        resp = requests.post(settings.support_webhook_url, json=payload, timeout=10)
         if resp.status_code not in (200, 201, 202):
-            raise HTTPException(status_code=502, detail={
-                "ok": False, "error": {"code": "WEBHOOK_FAILED", "message": "Invio fallito. Riprova."}
-            })
+            raise RuntimeError(f"HTTP {resp.status_code}")
+
+    try:
+        await asyncio.get_running_loop().run_in_executor(None, _fire_webhook)
+    except RuntimeError:
+        raise HTTPException(status_code=502, detail={
+            "ok": False, "error": {"code": "WEBHOOK_FAILED", "message": "Invio fallito. Riprova."}
+        })
     except requests.exceptions.RequestException:
         raise HTTPException(status_code=502, detail={
             "ok": False, "error": {"code": "WEBHOOK_FAILED", "message": "Errore di connessione. Riprova."}
