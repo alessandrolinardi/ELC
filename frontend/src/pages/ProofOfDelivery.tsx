@@ -179,9 +179,15 @@ export default function ProofOfDelivery() {
   // Remote job_id from batch result for ZIP download
   const remoteJobId = batchResult?.job_id || null
 
+  const [zipError, setZipError] = useState<string | null>(null)
+
   const handleDownloadZip = async () => {
-    if (!remoteJobId) return
+    if (!remoteJobId) {
+      setZipError("Job ID non disponibile. Riprova la ricerca.")
+      return
+    }
     setIsDownloadingZip(true)
+    setZipError(null)
     try {
       const formData = new FormData()
       formData.append("remote_job_id", remoteJobId)
@@ -189,16 +195,14 @@ export default function ProofOfDelivery() {
         method: "POST",
         body: formData,
       })
-      if (!resp.ok) throw new Error("Download fallito")
+      if (!resp.ok) {
+        const text = await resp.text().catch(() => "")
+        throw new Error(text || `HTTP ${resp.status}`)
+      }
       const blob = await resp.blob()
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement("a")
-      a.href = url
-      a.download = `pod_${remoteJobId.slice(0, 8)}.zip`
-      a.click()
-      URL.revokeObjectURL(url)
-    } catch {
-      // Silently fail — user can retry
+      downloadBlob(blob, `pod_${remoteJobId.slice(0, 8)}.zip`)
+    } catch (err) {
+      setZipError(err instanceof Error ? err.message : "Download fallito. Riprova.")
     } finally {
       setIsDownloadingZip(false)
     }
@@ -209,6 +213,7 @@ export default function ProofOfDelivery() {
     setExcelFile(null)
     setJobId(null)
     setSingleResult(null)
+    setZipError(null)
     singleMutation.reset()
     batchMutation.reset()
     excelMutation.reset()
@@ -388,6 +393,10 @@ export default function ProofOfDelivery() {
                   ? "Download in corso..."
                   : `Scarica ${batchResult.summary.found} POD (ZIP)`}
               </Button>
+            )}
+
+            {zipError && (
+              <p className="text-sm text-destructive text-center">{zipError}</p>
             )}
 
             {/* Results table */}

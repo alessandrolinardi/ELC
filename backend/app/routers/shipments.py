@@ -8,9 +8,9 @@ from ..services.job_store import job_store
 from ..core.shipments import (
     parse_shipments_excel, build_from_address, send_rates_request,
     send_ship_request, build_batch_shipments, send_batch_ship_request,
-    fetch_single_pod, send_batch_pod_request, send_sequential_pod_requests,
+    fetch_single_pod, send_batch_pod_request,
     download_pod_file, download_pod_zip,
-    extract_identifiers_from_excel, SMALL_BATCH_THRESHOLD,
+    extract_identifiers_from_excel,
 )
 from ..schemas.shipments import ShipRequest, ShipBatchRequest, PodRequest, PodBatchRequest
 
@@ -237,7 +237,13 @@ async def get_pod(request: Request, body: PodRequest):
 
 
 def _process_pod_job(job_id: str, identifiers: list[str]):
-    """Background task: fetch PODs via sequential singles or bulk endpoint."""
+    """Background task: fetch PODs via bulk endpoint.
+
+    Always uses the bulk endpoint (even for small lists) because:
+    - The bulk endpoint creates a remote job with downloadable ZIP
+    - Sequential single calls have no server-side ZIP — breaks the download flow
+    - Performance difference is negligible for small lists
+    """
     try:
         def on_progress(message: str, data: dict):
             progress = data.get("progress", {})
@@ -246,20 +252,16 @@ def _process_pod_job(job_id: str, identifiers: list[str]):
             pct = int(fetched / total * 100) if total > 0 else 0
             job_store.update_progress(job_id, pct, 100, message)
 
-        if len(identifiers) < SMALL_BATCH_THRESHOLD:
-            # Small batch: sequential single calls (faster, no job overhead)
-            result = send_sequential_pod_requests(identifiers, on_progress=on_progress)
-            job_store.update_status(job_id, "complete", result=result)
-        else:
-            # Large batch: use bulk endpoint (handles rate limiting internally)
-            success, message, result = send_batch_pod_request(
-                identifiers=identifiers,
-                on_progress=on_progress,
-            )
-            if not success:
-                job_store.update_status(job_id, "failed", error=message)
-                return
-            job_store.update_status(job_id, "complete", result=result or {"message": message})
+        success, message, result = send_batch_pod_request(
+            identifiers=identifiers,
+            on_progress=on_progress,
+        )
+
+        if not success:
+            job_store.update_status(job_id, "failed", error=message)
+            return
+
+        job_store.update_status(job_id, "complete", result=result or {"message": message})
 
     except Exception as e:
         job_store.update_status(job_id, "failed", error=str(e))
