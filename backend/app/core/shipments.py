@@ -38,9 +38,6 @@ _POD_IDENTIFIER_COLUMNS = [
     ("order id", "marketplace_id"),
 ]
 
-SMALL_BATCH_THRESHOLD = 50  # Below this, use sequential single calls
-
-
 def extract_identifiers_from_excel(excel_bytes: bytes, filename: str = "upload.xls") -> list[str]:
     """Extract POD identifiers from an Excel file.
 
@@ -105,61 +102,6 @@ def extract_identifiers_from_excel(excel_bytes: bytes, filename: str = "upload.x
             identifiers.append(s.strip())  # Keep original casing for marketplace IDs
 
     return identifiers
-
-
-def send_sequential_pod_requests(
-    identifiers: list[str],
-    on_progress: Optional[Callable[[str, dict], None]] = None,
-) -> dict:
-    """Fetch PODs sequentially using single calls (for small batches <50).
-
-    Uses the single POD endpoint with a small delay between calls.
-    Returns a result dict matching the bulk format for consistency.
-    """
-    results = []
-    summary = {"found": 0, "no_pod": 0, "unmatched": 0, "ambiguous": 0, "error": 0}
-    total = len(identifiers)
-
-    for i, identifier in enumerate(identifiers):
-        result = fetch_single_pod(identifier)
-
-        status = result["status"]
-        item: dict = {"input_value": identifier, "status": status}
-
-        if status == "found":
-            item["tracking_number"] = result.get("tracking_number", "")
-            item["carrier"] = result.get("carrier", "")
-            item["pod_base64"] = result.get("pod_base64", "")
-            summary["found"] += 1
-        elif status == "not_found":
-            item["status"] = "unmatched"
-            item["message"] = result.get("error_message", "")
-            summary["unmatched"] += 1
-        elif status == "ambiguous":
-            item["message"] = result.get("error_message", "")
-            summary["ambiguous"] += 1
-        else:
-            item["status"] = "error"
-            item["message"] = result.get("error_message", "")
-            summary["error"] += 1
-
-        results.append(item)
-
-        if on_progress:
-            on_progress(
-                f"POD: {i + 1}/{total} elaborati ({summary['found']} trovati)",
-                {"progress": {"total": total, "fetched": i + 1, "found": summary["found"]}, "status": "processing"},
-            )
-
-        # Small delay to respect rate limits (not needed for last item)
-        if i < total - 1:
-            time.sleep(1)
-
-    return {
-        "status": "completed",
-        "summary": {**summary, "total_input": total, "duplicates_removed": 0},
-        "results": results,
-    }
 
 
 def _clean(val) -> Optional[str]:

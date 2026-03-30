@@ -91,6 +91,7 @@ export default function ProofOfDelivery() {
   const [jobId, setJobId] = useState<string | null>(null)
   const [singleResult, setSingleResult] = useState<PodSingleResult | null>(null)
   const [isDownloadingZip, setIsDownloadingZip] = useState(false)
+  const [zipError, setZipError] = useState<string | null>(null)
 
   const { status: jobStatus, result: rawResult, error: jobError } =
     useJobPolling<PodBatchResult>(jobId)
@@ -178,8 +179,6 @@ export default function ProofOfDelivery() {
 
   // Remote job_id from batch result for ZIP download
   const remoteJobId = batchResult?.job_id || null
-
-  const [zipError, setZipError] = useState<string | null>(null)
 
   const handleDownloadZip = async () => {
     if (!remoteJobId) {
