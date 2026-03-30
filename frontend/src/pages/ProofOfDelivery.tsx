@@ -92,6 +92,7 @@ export default function ProofOfDelivery() {
   const [singleResult, setSingleResult] = useState<PodSingleResult | null>(null)
   const [isDownloadingZip, setIsDownloadingZip] = useState(false)
   const [zipError, setZipError] = useState<string | null>(null)
+  const [rowMetadata, setRowMetadata] = useState<Record<string, { name?: string; street?: string; city?: string; tracking?: string }>>({})
 
   const { status: jobStatus, result: rawResult, error: jobError } =
     useJobPolling<PodBatchResult>(jobId)
@@ -133,7 +134,7 @@ export default function ProofOfDelivery() {
     },
   })
 
-  // Excel upload mutation (server extracts tracking numbers)
+  // Excel upload mutation (server extracts identifiers + recipient metadata)
   const excelMutation = useMutation({
     mutationFn: async (file: File) => {
       const formData = new FormData()
@@ -144,9 +145,11 @@ export default function ProofOfDelivery() {
         total?: number
         identifiers_preview?: string[]
         result?: PodSingleResult
+        metadata?: Record<string, { name?: string; street?: string; city?: string; tracking?: string }>
       }>("/api/v1/jobs/pod-from-excel", formData)
     },
     onSuccess: (data) => {
+      if (data.metadata) setRowMetadata(data.metadata)
       if (data.mode === "single" && data.result) {
         setSingleResult(data.result)
         if (data.result.status === "found" && data.result.pod_base64) {
@@ -213,6 +216,7 @@ export default function ProofOfDelivery() {
     setJobId(null)
     setSingleResult(null)
     setZipError(null)
+    setRowMetadata({})
     singleMutation.reset()
     batchMutation.reset()
     excelMutation.reset()
@@ -403,25 +407,37 @@ export default function ProofOfDelivery() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-border text-left text-muted-foreground">
-                    <th className="pb-2 pr-4">Identificativo</th>
-                    <th className="pb-2 pr-4">Tracking</th>
-                    <th className="pb-2 pr-4">Corriere</th>
+                    <th className="pb-2 pr-3">ID</th>
+                    <th className="pb-2 pr-3">Tracking</th>
+                    <th className="pb-2 pr-3">Destinatario</th>
+                    <th className="pb-2 pr-3">Indirizzo</th>
+                    <th className="pb-2 pr-3">Corriere</th>
                     <th className="pb-2">Stato</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {batchResult.results.map((item, i) => (
-                    <tr key={i} className="border-b border-border/50 last:border-0">
-                      <td className="py-2 pr-4 font-mono text-xs">{item.input_value}</td>
-                      <td className="py-2 pr-4 font-mono text-xs">{item.tracking_number || "—"}</td>
-                      <td className="py-2 pr-4 text-xs">{item.carrier || "—"}</td>
-                      <td className="py-2">
-                        <Badge variant="outline" className={`text-xs ${STATUS_COLORS[item.status] || ""}`}>
-                          {STATUS_LABELS[item.status] || item.status}
-                        </Badge>
-                      </td>
-                    </tr>
-                  ))}
+                  {batchResult.results.map((item, i) => {
+                    const meta = rowMetadata[item.input_value] || {}
+                    const tracking = item.tracking_number || meta.tracking || ""
+                    return (
+                      <tr key={i} className="border-b border-border/50 last:border-0">
+                        <td className="py-2 pr-3 font-mono text-xs">{item.input_value}</td>
+                        <td className="py-2 pr-3 font-mono text-xs">{tracking || "—"}</td>
+                        <td className="py-2 pr-3 text-xs">{meta.name || "—"}</td>
+                        <td className="py-2 pr-3 text-xs truncate max-w-[200px]" title={meta.street && meta.city ? `${meta.street}, ${meta.city}` : ""}>
+                          {meta.street || meta.city
+                            ? `${meta.street || ""}${meta.street && meta.city ? ", " : ""}${meta.city || ""}`
+                            : "—"}
+                        </td>
+                        <td className="py-2 pr-3 text-xs">{item.carrier || "—"}</td>
+                        <td className="py-2">
+                          <Badge variant="outline" className={`text-xs ${STATUS_COLORS[item.status] || ""}`}>
+                            {STATUS_LABELS[item.status] || item.status}
+                          </Badge>
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>

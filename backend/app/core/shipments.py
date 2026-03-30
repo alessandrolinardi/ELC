@@ -38,18 +38,28 @@ _POD_IDENTIFIER_COLUMNS = [
     ("order id", "marketplace_id"),
 ]
 
-def extract_identifiers_from_excel(excel_bytes: bytes, filename: str = "upload.xls") -> list[str]:
-    """Extract POD identifiers from an Excel file.
+# Recipient info columns (case-insensitive aliases)
+_RECIPIENT_COLUMNS = {
+    "name": ["nome", "name", "destinatario", "recipient", "customer name"],
+    "street": ["indirizzo", "address", "street 1", "street1", "via"],
+    "city": ["città", "citta", "city"],
+}
 
-    Searches for multiple column types in priority order:
-    1. Numero ordine ShippyPro (most reliable — always present, works as direct OrderID)
+
+def extract_identifiers_from_excel(
+    excel_bytes: bytes, filename: str = "upload.xls",
+) -> tuple[list[str], dict[str, dict]]:
+    """Extract POD identifiers and recipient metadata from an Excel file.
+
+    Searches for identifier columns in priority order:
+    1. Numero ordine ShippyPro (most reliable)
     2. Tracking numbers
     3. ID Ordine Marketplace
 
-    Uses the best available column. Falls back to ExcelParser's tracking
-    column detection for non-ShippyPro files.
+    Also extracts recipient info (name, street, city) when available.
 
-    Returns a deduplicated list of non-empty identifiers.
+    Returns:
+        (identifiers, metadata) where metadata maps identifier → {name, street, city}
     """
     parser = ExcelParser()
 
@@ -70,7 +80,6 @@ def extract_identifiers_from_excel(excel_bytes: bytes, filename: str = "upload.x
             found_type = col_type
             break
 
-    # Fallback: use ExcelParser's tracking column finder
     if not found_col:
         found_col = parser._find_column(df, 'tracking')
         found_type = "tracking"
@@ -82,14 +91,33 @@ def extract_identifiers_from_excel(excel_bytes: bytes, filename: str = "upload.x
             f"Colonne trovate: {', '.join(df.columns.tolist())}"
         )
 
-    logger.info("POD identifier column: '%s' (type: %s) in %d rows", found_col, found_type, len(df))
+    # Find recipient columns
+    recipient_cols: dict[str, Optional[str]] = {}
+    for field, aliases in _RECIPIENT_COLUMNS.items():
+        for alias in aliases:
+            if alias in col_lower_map:
+                recipient_cols[field] = col_lower_map[alias]
+                break
+        if field not in recipient_cols:
+            recipient_cols[field] = None
+
+    # Also grab tracking column separately (if identifier is ShippyPro order number)
+    tracking_col = None
+    if found_type != "tracking":
+        tracking_col = parser._find_column(df, 'tracking')
+
+    logger.info("POD identifier column: '%s' (type: %s) in %d rows. Recipient cols: %s",
+                found_col, found_type, len(df),
+                {k: v for k, v in recipient_cols.items() if v})
 
     identifiers = []
+    metadata: dict[str, dict] = {}
     seen: set[str] = set()
-    for val in df[found_col]:
+
+    for idx, row in df.iterrows():
+        val = row[found_col]
         if pd.isna(val):
             continue
-        # For numeric ShippyPro order IDs, convert float to int string
         if isinstance(val, float) and val == int(val):
             s = str(int(val))
         else:
@@ -99,9 +127,23 @@ def extract_identifiers_from_excel(excel_bytes: bytes, filename: str = "upload.x
         normalized = s.upper().replace(' ', '')
         if normalized and normalized not in seen:
             seen.add(normalized)
-            identifiers.append(s.strip())  # Keep original casing for marketplace IDs
+            ident = s.strip()
+            identifiers.append(ident)
 
-    return identifiers
+            # Collect recipient metadata
+            meta: dict[str, str] = {}
+            for field, col in recipient_cols.items():
+                if col:
+                    cell = row.get(col)
+                    if pd.notna(cell):
+                        meta[field] = str(cell).strip()
+            if tracking_col:
+                tv = row.get(tracking_col)
+                if pd.notna(tv):
+                    meta["tracking"] = str(tv).strip()
+            metadata[ident] = meta
+
+    return identifiers, metadata
 
 
 def _clean(val) -> Optional[str]:

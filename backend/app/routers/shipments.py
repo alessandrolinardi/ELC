@@ -304,7 +304,7 @@ async def get_pod_from_excel(
         raise HTTPException(status_code=413, detail="File troppo grande (max 50MB)")
 
     try:
-        identifiers = await asyncio.get_running_loop().run_in_executor(
+        identifiers, metadata = await asyncio.get_running_loop().run_in_executor(
             None, extract_identifiers_from_excel, content, file.filename or "upload.xls",
         )
     except ValueError as e:
@@ -320,9 +320,12 @@ async def get_pod_from_excel(
         result = await asyncio.get_running_loop().run_in_executor(
             None, fetch_single_pod, identifiers[0],
         )
-        return {"ok": True, "data": {"mode": "single", "identifiers": identifiers, "result": result}}
+        return {"ok": True, "data": {
+            "mode": "single", "identifiers": identifiers,
+            "result": result, "metadata": metadata,
+        }}
 
-    # Multiple → async job (routing handled by _process_pod_job)
+    # Multiple → async job
     job_id = job_store.create_job("pod_batch")
 
     loop = asyncio.get_running_loop()
@@ -333,6 +336,7 @@ async def get_pod_from_excel(
         "job_id": job_id,
         "total": len(identifiers),
         "identifiers_preview": identifiers[:5],
+        "metadata": metadata,
     }}
 
 
