@@ -52,33 +52,32 @@ export function NavBar() {
             ))}
           </nav>
 
-          {/* Right actions */}
-          <div className="flex items-center gap-1">
-            {/* Support */}
-            <button
-              onClick={() => setSupportOpen(true)}
-              className="p-2 rounded-md text-sm transition-colors text-muted-foreground hover:text-foreground hover:bg-muted"
-              title="Supporto"
-            >
-              <MessageCircle className="h-4 w-4" />
-            </button>
-
-            {/* Dev toggle */}
-            <button
-              onClick={toggleDevMode}
-              className={cn(
-                "p-2 rounded-md text-sm transition-colors",
-                isDevMode
-                  ? "text-warning bg-warning-light"
-                  : "text-muted-foreground hover:text-foreground hover:bg-muted"
-              )}
-              title={isDevMode ? "Disabilita Dev Mode" : "Abilita Dev Mode"}
-            >
-              <Settings className="h-4 w-4" />
-            </button>
-          </div>
+          {/* Dev toggle */}
+          <button
+            onClick={toggleDevMode}
+            className={cn(
+              "p-2 rounded-md text-sm transition-colors",
+              isDevMode
+                ? "text-warning bg-warning-light"
+                : "text-muted-foreground hover:text-foreground hover:bg-muted"
+            )}
+            title={isDevMode ? "Disabilita Dev Mode" : "Abilita Dev Mode"}
+          >
+            <Settings className="h-4 w-4" />
+          </button>
         </div>
       </header>
+
+      {/* Floating support button — fixed bottom-right */}
+      {!supportOpen && (
+        <button
+          onClick={() => setSupportOpen(true)}
+          className="fixed bottom-6 right-6 z-40 w-14 h-14 rounded-full bg-primary text-white shadow-lg hover:bg-primary/90 hover:shadow-xl hover:scale-105 transition-all flex items-center justify-center"
+          title="Supporto"
+        >
+          <MessageCircle className="h-6 w-6" />
+        </button>
+      )}
 
       <SupportDrawer open={supportOpen} onClose={() => setSupportOpen(false)} />
     </>
