@@ -7,6 +7,8 @@ from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Request
 
 import pandas as pd
 
+from ..limiter import limiter
+
 from ..config import get_settings
 from ..services.job_store import job_store
 from ..core.zip_validator import ZipValidator, format_excel_output
@@ -500,6 +502,7 @@ def _process_validate(
 # ---------------------------------------------------------------------------
 
 @router.post("/jobs/validator")
+@limiter.limit("10/hour")
 async def create_validator_job(
     request: Request,
     excel_file: UploadFile = File(...),

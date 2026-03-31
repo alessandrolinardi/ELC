@@ -16,11 +16,21 @@ export function useCrispTicket() {
   const [isDevMode] = useDevMode()
   const ticketedPage = useRef<string | null>(null)
   const [toast, setToast] = useState(false)
+  const toastTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const retryTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Reset dedup flag on page navigation
   useEffect(() => {
     ticketedPage.current = null
   }, [location.pathname])
+
+  // Clean up timeouts on unmount
+  useEffect(() => {
+    return () => {
+      if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current)
+      if (retryTimeoutRef.current) clearTimeout(retryTimeoutRef.current)
+    }
+  }, [])
 
   const postTicket = useCallback(
     async (message: string, attempt: number = 1) => {
@@ -33,13 +43,15 @@ export function useCrispTicket() {
         })
         ticketedPage.current = location.pathname
         setToast(true)
-        setTimeout(() => setToast(false), 5000)
+        if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current)
+        toastTimeoutRef.current = setTimeout(() => setToast(false), 5000)
         if (isDevMode) console.log("Crisp ticket: success")
       } catch (err) {
         if (isDevMode) console.log("Crisp ticket: failed", err)
         // Auto-retry once after 2s
         if (attempt === 1) {
-          setTimeout(() => postTicket(message, 2), 2000)
+          if (retryTimeoutRef.current) clearTimeout(retryTimeoutRef.current)
+          retryTimeoutRef.current = setTimeout(() => postTicket(message, 2), 2000)
         }
       }
     },

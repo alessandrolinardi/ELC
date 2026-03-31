@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useMutation } from "@tanstack/react-query"
 import { api } from "@/api/client"
 import { PageShell } from "@/components/layout/PageShell"
@@ -40,9 +40,11 @@ export default function LabelSorter() {
   } = useJobPolling<LabelJobResult>(jobId)
 
   // Transition to download step when complete
-  if (jobStatus === "complete" && currentStep === 2) {
-    setCurrentStep(3)
-  }
+  useEffect(() => {
+    if (jobStatus === "complete" && currentStep === 2) {
+      setCurrentStep(3)
+    }
+  }, [jobStatus, currentStep])
 
   // Submit mutation
   const submitMutation = useMutation({

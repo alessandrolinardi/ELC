@@ -59,8 +59,8 @@ def _get_period_usage(client, period_id: str) -> int:
         logger.debug(f"Period {period_id} usage: {total}")
         return total
     except Exception as e:
-        logger.error(f"Error getting period usage: {e}")
-        return 0
+        logger.warning(f"Error getting period usage: {e}")
+        return MAX_VALIDATIONS_PER_12H
 
 
 def _get_or_create_record(client, period_id: str) -> dict:

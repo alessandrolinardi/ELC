@@ -1,4 +1,4 @@
-import { Routes, Route, Navigate } from "react-router-dom"
+import { Routes, Route, Navigate, Link } from "react-router-dom"
 import { NavBar } from "@/components/layout/NavBar"
 import { useCrispTicket } from "@/hooks/useCrispTicket"
 import PickupRequest from "@/pages/PickupRequest"
@@ -30,6 +30,13 @@ export default function App() {
         <Route path="/labels" element={<LabelSorter />} />
         <Route path="/quotation" element={<ShipmentsQuotation />} />
         <Route path="/pod" element={<ProofOfDelivery />} />
+        <Route path="*" element={
+          <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
+            <h1 className="text-2xl font-semibold">Pagina non trovata</h1>
+            <p className="text-muted-foreground">L'indirizzo richiesto non esiste.</p>
+            <Link to="/" className="text-primary underline hover:no-underline">Torna alla home</Link>
+          </div>
+        } />
       </Routes>
       <CrispToast />
     </div>

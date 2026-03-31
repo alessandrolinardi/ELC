@@ -1,0 +1,230 @@
+<h2>Section 4: Pickup Request — Form Redesign</h2>
+<p class="subtitle">Current form is a very long scroll with 20+ fields. Proposed: card-based sections with visual grouping.</p>
+
+<div class="split">
+  <!-- CURRENT -->
+  <div class="mockup">
+    <div class="mockup-header">Current — Endless Scroll Form</div>
+    <div class="mockup-body" style="padding: 0;">
+      <div style="background: white; font-family: system-ui; font-size: 10px; color: #222; padding: 12px; height: 100%; overflow-y: auto;">
+        <div style="font-size: 14px; font-weight: 700; margin-bottom: 2px;">🚚 Richiesta Ritiro Corriere</div>
+        <div style="font-size: 9px; color: #888; margin-bottom: 8px;">Richiedi un ritiro merce ai corrieri</div>
+
+        <div style="background: #d1ecf1; border-radius: 4px; padding: 6px; font-size: 8px; margin-bottom: 8px;">
+          Come usare questo strumento...
+        </div>
+
+        <div style="background: #e8e8e8; border-radius: 4px; padding: 6px; font-size: 9px; margin-bottom: 8px;">
+          📒 Gestione Rubrica Indirizzi ▸
+        </div>
+
+        <div style="font-size: 9px; font-weight: 600; margin-bottom: 3px;">📍 Indirizzo Ritiro</div>
+        <div style="background: #f8f8f8; border-radius: 3px; padding: 4px 6px; margin-bottom: 6px; font-size: 9px; color: #666;">
+          ▾ Seleziona indirizzo
+        </div>
+
+        <div style="font-size: 9px; font-weight: 600; margin-bottom: 3px;">🚛 Corriere</div>
+        <div style="display: flex; gap: 4px; margin-bottom: 6px; font-size: 8px;">
+          <div style="background: #e8e8e8; padding: 4px 10px; border-radius: 3px;">FedEx</div>
+          <div style="background: #e8e8e8; padding: 4px 10px; border-radius: 3px;">DHL</div>
+          <div style="background: #e8e8e8; padding: 4px 10px; border-radius: 3px;">UPS</div>
+        </div>
+
+        <div style="font-size: 9px; font-weight: 600; margin-bottom: 3px;">📅 Data e Orario</div>
+        <div style="display: flex; gap: 4px; margin-bottom: 6px;">
+          <div style="flex:1; background: #f8f8f8; padding: 4px 6px; border-radius: 3px; font-size: 8px; color: #666;">Data ritiro</div>
+          <div style="flex:1; background: #f8f8f8; padding: 4px 6px; border-radius: 3px; font-size: 8px; color: #666;">09:00</div>
+          <div style="flex:1; background: #f8f8f8; padding: 4px 6px; border-radius: 3px; font-size: 8px; color: #666;">18:00</div>
+        </div>
+
+        <div style="font-size: 9px; font-weight: 600; margin-bottom: 3px;">📍 Dettagli Indirizzo</div>
+        <div style="background: #f8f8f8; padding: 4px 6px; border-radius: 3px; font-size: 8px; color: #666; margin-bottom: 3px;">Azienda *</div>
+        <div style="background: #f8f8f8; padding: 4px 6px; border-radius: 3px; font-size: 8px; color: #666; margin-bottom: 3px;">Referente</div>
+        <div style="background: #f8f8f8; padding: 4px 6px; border-radius: 3px; font-size: 8px; color: #666; margin-bottom: 3px;">Indirizzo *</div>
+        <div style="display: flex; gap: 3px; margin-bottom: 6px;">
+          <div style="width: 50px; background: #f8f8f8; padding: 4px 6px; border-radius: 3px; font-size: 8px; color: #666;">CAP</div>
+          <div style="flex:1; background: #f8f8f8; padding: 4px 6px; border-radius: 3px; font-size: 8px; color: #666;">Città</div>
+          <div style="width: 40px; background: #f8f8f8; padding: 4px 6px; border-radius: 3px; font-size: 8px; color: #666;">Prov</div>
+        </div>
+
+        <div style="font-size: 9px; font-weight: 600; margin-bottom: 3px;">📦 Dettagli Colli</div>
+        <div style="display: flex; gap: 3px; margin-bottom: 3px;">
+          <div style="flex:1; background: #f8f8f8; padding: 4px 6px; border-radius: 3px; font-size: 8px; color: #666;">N. colli</div>
+          <div style="flex:1; background: #f8f8f8; padding: 4px 6px; border-radius: 3px; font-size: 8px; color: #666;">Peso (kg)</div>
+        </div>
+        <div style="display: flex; gap: 3px; margin-bottom: 6px;">
+          <div style="flex:1; background: #f8f8f8; padding: 4px 6px; border-radius: 3px; font-size: 8px; color: #666;">L</div>
+          <div style="flex:1; background: #f8f8f8; padding: 4px 6px; border-radius: 3px; font-size: 8px; color: #666;">W</div>
+          <div style="flex:1; background: #f8f8f8; padding: 4px 6px; border-radius: 3px; font-size: 8px; color: #666;">H</div>
+        </div>
+
+        <div style="font-size: 9px; font-weight: 600; margin-bottom: 3px;">🎨 Pallet</div>
+        <div style="font-size: 8px; color: #666; margin-bottom: 3px;">☐ Raggruppamento su pallet</div>
+
+        <div style="font-size: 9px; font-weight: 600; margin-bottom: 3px;">📝 Note</div>
+        <div style="background: #f8f8f8; padding: 8px 6px; border-radius: 3px; font-size: 8px; color: #666; margin-bottom: 6px; height: 24px;">Note aggiuntive...</div>
+
+        <div style="font-size: 9px; font-weight: 600; margin-bottom: 3px;">📊 Riepilogo</div>
+        <div style="display: flex; gap: 4px; margin-bottom: 8px;">
+          <div style="flex:1; background: #f8f8f8; padding: 6px; border-radius: 3px; text-align: center;">
+            <div style="font-size: 7px; color: #888;">Peso totale</div>
+            <div style="font-size: 12px; font-weight: 700;">1.0 kg</div>
+          </div>
+          <div style="flex:1; background: #f8f8f8; padding: 6px; border-radius: 3px; text-align: center;">
+            <div style="font-size: 7px; color: #888;">Tipo spedizione</div>
+            <div style="font-size: 12px; font-weight: 700;">NORMAL</div>
+          </div>
+        </div>
+
+        <div style="background: #e8e8e8; padding: 8px; border-radius: 4px; text-align: center; font-size: 10px; font-weight: 600;">📧 Invia Richiesta</div>
+
+        <div style="margin-top: 6px; font-size: 8px; color: #e74c3c; text-align: center; font-style: italic;">
+          ↑ Very long scroll, no visual grouping, all fields feel the same priority
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PROPOSED -->
+  <div class="mockup">
+    <div class="mockup-header">Proposed — Card-Based Sections</div>
+    <div class="mockup-body" style="padding: 0;">
+      <div style="background: #f8f9fc; font-family: system-ui; font-size: 10px; color: #0f172a; padding: 14px;">
+        <!-- Nav -->
+        <div style="background: white; margin: -14px -14px 14px -14px; padding: 8px 14px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid #e8eaf0;">
+          <span style="font-size: 12px; font-weight: 800;">ELC <span style="color: #6366f1;">Tools</span></span>
+          <div style="width: 1px; height: 16px; background: #e5e7eb;"></div>
+          <span style="font-size: 9px; border-bottom: 2px solid #6366f1; font-weight: 600; padding-bottom: 2px;">🚚 Ritiro</span>
+          <span style="font-size: 9px; color: #9ca3af;">📍 Validator</span>
+          <span style="font-size: 9px; color: #9ca3af;">📦 Label Sorter</span>
+        </div>
+
+        <div style="font-size: 16px; font-weight: 700; margin-bottom: 12px;">Richiesta Ritiro</div>
+
+        <!-- CARD 1: Carrier + Date (most important, top) -->
+        <div style="background: white; border-radius: 10px; border: 1px solid #e5e7eb; padding: 14px; margin-bottom: 10px;">
+          <div style="display: flex; gap: 16px;">
+            <!-- Carrier -->
+            <div style="flex: 1;">
+              <div style="font-size: 9px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">Corriere</div>
+              <div style="display: flex; gap: 6px;">
+                <div style="flex:1; background: #eef2ff; border: 2px solid #6366f1; border-radius: 8px; padding: 8px; text-align: center;">
+                  <div style="font-size: 16px;">📦</div>
+                  <div style="font-size: 9px; font-weight: 700; color: #6366f1;">FedEx</div>
+                </div>
+                <div style="flex:1; background: #f8f9fc; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px; text-align: center;">
+                  <div style="font-size: 16px;">📦</div>
+                  <div style="font-size: 9px; color: #94a3b8;">DHL</div>
+                </div>
+                <div style="flex:1; background: #f8f9fc; border: 1px solid #e5e7eb; border-radius: 8px; padding: 8px; text-align: center;">
+                  <div style="font-size: 16px;">📦</div>
+                  <div style="font-size: 9px; color: #94a3b8;">UPS</div>
+                </div>
+              </div>
+            </div>
+            <!-- Date/Time -->
+            <div style="flex: 1;">
+              <div style="font-size: 9px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">Quando</div>
+              <div style="background: #f8f9fc; border: 1px solid #e5e7eb; border-radius: 6px; padding: 8px; font-size: 9px; margin-bottom: 6px;">
+                <span style="color: #64748b;">Data:</span> <span style="font-weight: 600;">20 Mar 2026</span>
+              </div>
+              <div style="display: flex; gap: 6px;">
+                <div style="flex:1; background: #f8f9fc; border: 1px solid #e5e7eb; border-radius: 6px; padding: 6px 8px; font-size: 9px;">
+                  <span style="color: #64748b;">Dalle</span> <span style="font-weight: 600;">09:00</span>
+                </div>
+                <div style="flex:1; background: #f8f9fc; border: 1px solid #e5e7eb; border-radius: 6px; padding: 6px 8px; font-size: 9px;">
+                  <span style="color: #64748b;">Alle</span> <span style="font-weight: 600;">18:00</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- CARD 2: Address (from book) -->
+        <div style="background: white; border-radius: 10px; border: 1px solid #e5e7eb; padding: 14px; margin-bottom: 10px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <div style="font-size: 9px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px;">Indirizzo ritiro</div>
+            <div style="font-size: 8px; color: #6366f1; cursor: pointer;">📒 Gestisci rubrica</div>
+          </div>
+          <!-- Selected address card -->
+          <div style="background: #f8f9fc; border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px; display: flex; align-items: center; gap: 10px;">
+            <div style="width: 32px; height: 32px; background: #eef2ff; border-radius: 6px; display: flex; align-items: center; justify-content: center; font-size: 16px;">📍</div>
+            <div style="flex: 1;">
+              <div style="font-size: 10px; font-weight: 700;">Magazzino Milano ⭐</div>
+              <div style="font-size: 8px; color: #64748b;">Estée Lauder — Via Turati 3, 20121 Milano (MI)</div>
+              <div style="font-size: 8px; color: #94a3b8;">Ref: Mario Rossi • Tel: 02 1234567</div>
+            </div>
+            <div style="font-size: 9px; color: #6366f1; cursor: pointer;">Cambia ▾</div>
+          </div>
+        </div>
+
+        <!-- CARD 3: Package details -->
+        <div style="background: white; border-radius: 10px; border: 1px solid #e5e7eb; padding: 14px; margin-bottom: 10px;">
+          <div style="font-size: 9px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">Colli</div>
+          <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+            <div style="flex:1;">
+              <div style="font-size: 8px; color: #94a3b8; margin-bottom: 2px;">Quantità</div>
+              <div style="background: #f8f9fc; border: 1px solid #e5e7eb; border-radius: 6px; padding: 6px 8px; font-size: 10px; font-weight: 600;">3</div>
+            </div>
+            <div style="flex:1;">
+              <div style="font-size: 8px; color: #94a3b8; margin-bottom: 2px;">Peso cad. (kg)</div>
+              <div style="background: #f8f9fc; border: 1px solid #e5e7eb; border-radius: 6px; padding: 6px 8px; font-size: 10px; font-weight: 600;">5.0</div>
+            </div>
+            <div style="flex:1;">
+              <div style="font-size: 8px; color: #94a3b8; margin-bottom: 2px;">Dim. (L×W×H cm)</div>
+              <div style="background: #f8f9fc; border: 1px solid #e5e7eb; border-radius: 6px; padding: 6px 8px; font-size: 10px; font-weight: 600;">40 × 30 × 20</div>
+            </div>
+          </div>
+          <!-- Pallet toggle -->
+          <div style="display: flex; align-items: center; gap: 6px; padding: 6px 8px; background: #f8f9fc; border-radius: 6px; font-size: 9px;">
+            <div style="width: 28px; height: 16px; background: #e5e7eb; border-radius: 8px; position: relative;">
+              <div style="width: 12px; height: 12px; background: white; border-radius: 50%; position: absolute; top: 2px; left: 2px; box-shadow: 0 1px 2px rgba(0,0,0,0.1);"></div>
+            </div>
+            <span style="color: #94a3b8;">Pallet</span>
+          </div>
+        </div>
+
+        <!-- Sticky footer: Summary + Submit -->
+        <div style="background: white; border-radius: 10px; border: 1px solid #e5e7eb; padding: 12px 14px; display: flex; align-items: center; justify-content: space-between;">
+          <div>
+            <div style="font-size: 9px; color: #64748b;">Riepilogo</div>
+            <div style="font-size: 11px; font-weight: 700;">3 colli • 15.0 kg • <span style="color: #22c55e;">NORMAL</span></div>
+          </div>
+          <div style="background: #6366f1; color: white; padding: 10px 24px; border-radius: 8px; font-weight: 700; font-size: 11px; cursor: pointer;">
+            📧 Invia Richiesta
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 16px;">
+  <h3>Key improvements:</h3>
+  <ul>
+    <li><strong>Card-based grouping</strong> — Carrier+Date, Address, Packages are visually distinct sections instead of one endless scroll</li>
+    <li><strong>Carrier as visual cards</strong> — big clickable tiles instead of tiny radio buttons</li>
+    <li><strong>Address as a summary card</strong> — shows selected address inline with a "Change" dropdown, no separate expander for address book</li>
+    <li><strong>Dimensions on one line</strong> — "40 × 30 × 20" instead of 3 separate number inputs labeled L/W/H</li>
+    <li><strong>Pallet as a toggle</strong> — clean switch instead of a checkbox + conditional section</li>
+    <li><strong>Sticky summary bar</strong> — summary + submit always visible together at the bottom, no separate sections</li>
+    <li><strong>Notes field removed from default view</strong> — available via "+ Aggiungi note" link to reduce form length</li>
+  </ul>
+</div>
+
+<div class="options" style="margin-top: 16px;">
+  <div class="option" data-choice="approve" onclick="toggleSelect(this)">
+    <div class="letter">✓</div>
+    <div class="content">
+      <h3>Looks good — design is complete</h3>
+      <p>All sections approved, ready to write the spec</p>
+    </div>
+  </div>
+  <div class="option" data-choice="revise" onclick="toggleSelect(this)">
+    <div class="letter">✎</div>
+    <div class="content">
+      <h3>Needs changes</h3>
+      <p>I'll describe what to adjust in the terminal</p>
+    </div>
+  </div>
+</div>

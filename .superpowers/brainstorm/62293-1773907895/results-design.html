@@ -1,0 +1,175 @@
+<h2>Section 2: Results & Output Design</h2>
+<p class="subtitle">How results appear after processing. Comparing current (cluttered) vs proposed (clean). Does this feel right?</p>
+
+<div class="split">
+  <!-- CURRENT -->
+  <div class="mockup">
+    <div class="mockup-header">Current — Label Sorter Results</div>
+    <div class="mockup-body" style="padding: 0;">
+      <div style="background: white; font-family: system-ui; font-size: 10px; color: #222; padding: 14px;">
+        <div style="font-size: 14px; font-weight: 700; margin-bottom: 8px;">✅ Risultato</div>
+
+        <!-- Metrics row -->
+        <div style="display: flex; gap: 6px; margin-bottom: 10px;">
+          <div style="flex:1; background: #f8f8f8; padding: 8px; border-radius: 4px; text-align: center;">
+            <div style="font-size: 8px; color: #888;">Etichette elaborate</div>
+            <div style="font-size: 16px; font-weight: 700;">342</div>
+          </div>
+          <div style="flex:1; background: #f8f8f8; padding: 8px; border-radius: 4px; text-align: center;">
+            <div style="font-size: 8px; color: #888;">Matchate</div>
+            <div style="font-size: 16px; font-weight: 700;">338 (98.8%)</div>
+          </div>
+          <div style="flex:1; background: #f8f8f8; padding: 8px; border-radius: 4px; text-align: center;">
+            <div style="font-size: 8px; color: #888;">Non matchate</div>
+            <div style="font-size: 16px; font-weight: 700;">4</div>
+          </div>
+        </div>
+
+        <!-- Downloads -->
+        <div style="font-size: 11px; font-weight: 600; margin-bottom: 6px;">📥 Download</div>
+        <div style="display: flex; gap: 6px; margin-bottom: 10px;">
+          <div style="flex:1; background: #e8e8e8; padding: 8px; border-radius: 4px; text-align: center; font-size: 10px;">📄 Scarica PDF</div>
+          <div style="flex:1; background: #e8e8e8; padding: 8px; border-radius: 4px; text-align: center; font-size: 10px;">📋 Scarica CSV</div>
+        </div>
+
+        <!-- Unmatched table -->
+        <div style="font-size: 11px; font-weight: 600; margin-bottom: 4px;">⚠️ Etichette non matchate</div>
+        <div style="font-size: 9px; color: #888; margin-bottom: 6px;">Queste etichette sono state inserite in fondo al PDF</div>
+        <div style="background: #f8f8f8; border-radius: 4px; padding: 6px; font-size: 9px; margin-bottom: 8px;">
+          <div style="display: flex; border-bottom: 1px solid #ddd; padding: 3px 0; font-weight: 600;">
+            <div style="width: 30px;">Pag.</div><div style="flex:1;">Tracking</div><div style="width: 40px;">Corr.</div><div style="flex:1;">Motivo</div>
+          </div>
+          <div style="display: flex; padding: 3px 0; border-bottom: 1px solid #eee;">
+            <div style="width: 30px;">12</div><div style="flex:1;">1ZFC257768...</div><div style="width: 40px;">UPS</div><div style="flex:1;">Non trovato in Excel</div>
+          </div>
+          <div style="display: flex; padding: 3px 0;">
+            <div style="width: 30px;">87</div><div style="flex:1;">(non riconosciuto)</div><div style="width: 40px;">-</div><div style="flex:1;">Pattern non identificato</div>
+          </div>
+        </div>
+
+        <!-- Debug sections -->
+        <div style="background: #fff3cd; border: 1px solid #ffc107; border-radius: 4px; padding: 6px; font-size: 9px; margin-bottom: 6px;">
+          <div style="font-weight: 600;">🔍 Debug: Testo estratto dalle pagine problematiche ▸</div>
+        </div>
+        <div style="background: #fff3cd; border: 1px solid #ffc107; border-radius: 4px; padding: 6px; font-size: 9px;">
+          <div style="font-weight: 600;">🔍 Debug: Match con confidenza ridotta ▸</div>
+        </div>
+        <div style="margin-top: 8px; font-size: 9px; color: #e74c3c; text-align: center;">
+          ↑ Debug sections always visible, cluttering the results
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PROPOSED -->
+  <div class="mockup">
+    <div class="mockup-header">Proposed — Label Sorter Results</div>
+    <div class="mockup-body" style="padding: 0;">
+      <div style="background: #f8f9fc; font-family: system-ui; font-size: 10px; color: #0f172a; padding: 14px;">
+        <!-- Nav (compact) -->
+        <div style="background: white; margin: -14px -14px 14px -14px; padding: 8px 14px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid #e8eaf0;">
+          <span style="font-size: 12px; font-weight: 800;">ELC <span style="color: #6366f1;">Tools</span></span>
+          <div style="width: 1px; height: 16px; background: #e5e7eb;"></div>
+          <span style="font-size: 9px; color: #9ca3af;">🚚 Ritiro</span>
+          <span style="font-size: 9px; color: #9ca3af;">📍 Validator</span>
+          <span style="font-size: 9px; border-bottom: 2px solid #6366f1; font-weight: 600; padding-bottom: 2px;">📦 Label Sorter</span>
+        </div>
+
+        <!-- Step indicator — completed -->
+        <div style="display: flex; align-items: center; margin-bottom: 14px; padding: 8px 12px; background: white; border-radius: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.04);">
+          <div style="background: #22c55e; color: white; width: 16px; height: 16px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 8px;">✓</div>
+          <span style="font-size: 9px; margin-left: 4px; color: #22c55e;">Carica</span>
+          <div style="flex:1; height: 2px; background: #22c55e; margin: 0 6px;"></div>
+          <div style="background: #22c55e; color: white; width: 16px; height: 16px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 8px;">✓</div>
+          <span style="font-size: 9px; margin-left: 4px; color: #22c55e;">Configura</span>
+          <div style="flex:1; height: 2px; background: #22c55e; margin: 0 6px;"></div>
+          <div style="background: #22c55e; color: white; width: 16px; height: 16px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 8px;">✓</div>
+          <span style="font-size: 9px; margin-left: 4px; color: #22c55e;">Elabora</span>
+          <div style="flex:1; height: 2px; background: #6366f1; margin: 0 6px;"></div>
+          <div style="background: #6366f1; color: white; width: 16px; height: 16px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 8px; font-weight: 700;">4</div>
+          <span style="font-size: 9px; margin-left: 4px; font-weight: 600;">Scarica</span>
+        </div>
+
+        <!-- Success banner -->
+        <div style="background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 10px 14px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+          <div style="font-size: 18px;">✅</div>
+          <div>
+            <div style="font-weight: 700; font-size: 11px;">Elaborazione completata</div>
+            <div style="font-size: 9px; color: #666;">338 di 342 etichette matchate (98.8%) • 4 non matchate in fondo al PDF</div>
+          </div>
+        </div>
+
+        <!-- Download cards — prominent -->
+        <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+          <div style="flex: 1; background: #6366f1; color: white; border-radius: 8px; padding: 12px; text-align: center; cursor: pointer;">
+            <div style="font-size: 16px; margin-bottom: 2px;">📄</div>
+            <div style="font-size: 10px; font-weight: 700;">Scarica PDF Riordinato</div>
+            <div style="font-size: 8px; opacity: 0.8; margin-top: 2px;">etichette_ordinate_20260319.pdf</div>
+          </div>
+          <div style="flex: 1; background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; text-align: center; cursor: pointer;">
+            <div style="font-size: 16px; margin-bottom: 2px;">📋</div>
+            <div style="font-size: 10px; font-weight: 600;">Report Non Matchate</div>
+            <div style="font-size: 8px; color: #999; margin-top: 2px;">4 etichette • CSV</div>
+          </div>
+        </div>
+
+        <!-- Unmatched — clean, collapsible -->
+        <div style="background: white; border-radius: 8px; border: 1px solid #e5e7eb; overflow: hidden;">
+          <div style="padding: 8px 12px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #f1f5f9;">
+            <div style="font-weight: 600; font-size: 10px;">⚠️ 4 etichette non matchate</div>
+            <div style="font-size: 8px; color: #6366f1; cursor: pointer;">Mostra dettagli ▾</div>
+          </div>
+          <div style="padding: 8px 12px; font-size: 9px;">
+            <div style="display: flex; padding: 4px 0; border-bottom: 1px solid #f8f9fc; color: #64748b; font-weight: 600;">
+              <div style="width: 32px;">Pag</div><div style="flex:1;">Tracking</div><div style="flex:1;">Motivo</div>
+            </div>
+            <div style="display: flex; padding: 4px 0; border-bottom: 1px solid #f8f9fc;">
+              <div style="width: 32px;">12</div><div style="flex:1;">1ZFC2577...</div><div style="flex:1; color: #f59e0b;">Non trovato in Excel</div>
+            </div>
+            <div style="display: flex; padding: 4px 0;">
+              <div style="width: 32px;">87</div><div style="flex:1; color: #94a3b8;">(non riconosciuto)</div><div style="flex:1; color: #f59e0b;">Pattern non identificato</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- No debug sections visible! -->
+        <div style="margin-top: 10px; text-align: center;">
+          <div style="display: inline-block; background: white; border: 1px solid #e5e7eb; border-radius: 6px; padding: 6px 16px; font-size: 10px; color: #6366f1; cursor: pointer;">🔄 Nuova elaborazione</div>
+        </div>
+
+        <div style="margin-top: 8px; font-size: 9px; color: #22c55e; text-align: center;">
+          ↑ Debug sections hidden (only visible in Dev Mode)
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 16px;">
+  <h3>What changed:</h3>
+  <ul>
+    <li><strong>Step indicator shows completion</strong> — green checkmarks on steps 1-3, current step highlighted</li>
+    <li><strong>Success banner</strong> — single line with key stats, replaces scattered metrics</li>
+    <li><strong>Download cards are the hero</strong> — primary action (PDF) gets indigo fill, secondary (CSV) gets outline. The most important thing is the most prominent.</li>
+    <li><strong>Unmatched table is cleaner</strong> — collapsible, inside a card, no raw data dump</li>
+    <li><strong>Debug sections completely hidden</strong> — only appear when Dev Mode is toggled on</li>
+    <li><strong>Tab order updated</strong> — Ritiro → Validator → Label Sorter</li>
+  </ul>
+</div>
+
+<div class="options" style="margin-top: 16px;">
+  <div class="option" data-choice="approve" onclick="toggleSelect(this)">
+    <div class="letter">✓</div>
+    <div class="content">
+      <h3>Looks good — continue to next section</h3>
+      <p>The results layout and hierarchy work well</p>
+    </div>
+  </div>
+  <div class="option" data-choice="revise" onclick="toggleSelect(this)">
+    <div class="letter">✎</div>
+    <div class="content">
+      <h3>Needs changes</h3>
+      <p>I'll describe what to adjust in the terminal</p>
+    </div>
+  </div>
+</div>

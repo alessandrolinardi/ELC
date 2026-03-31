@@ -1,4 +1,5 @@
 """Brands CRUD \u2014 manages the short list of brand names for Order IDs."""
+import asyncio
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from ..core.config_compat import get_supabase_client
@@ -19,7 +20,10 @@ async def list_brands():
     if not client:
         return {"ok": True, "data": []}
     try:
-        response = client.table(TABLE).select("*").order("name").execute()
+        loop = asyncio.get_running_loop()
+        response = await loop.run_in_executor(
+            None, lambda: client.table(TABLE).select("*").order("name").execute()
+        )
         return {"ok": True, "data": response.data or []}
     except Exception:
         return {"ok": True, "data": []}
@@ -37,7 +41,10 @@ async def create_brand(body: CreateBrandRequest):
             "ok": False, "error": {"code": "DB_UNAVAILABLE", "message": "Database unavailable"}
         })
     try:
-        client.table(TABLE).upsert({"name": name}, on_conflict="name").execute()
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None, lambda: client.table(TABLE).upsert({"name": name}, on_conflict="name").execute()
+        )
         return {"ok": True, "data": {"name": name}}
     except Exception as e:
         raise HTTPException(status_code=500, detail={

@@ -81,6 +81,9 @@ export function FileDropZone({
     <div>
       <div
         ref={containerRef}
+        role="button"
+        tabIndex={0}
+        aria-label={label}
         className={cn(
           "relative rounded-lg border-2 border-dashed p-8 text-center cursor-pointer transition-colors",
           isDragging && "bg-indigo-light border-primary",
@@ -92,6 +95,12 @@ export function FileDropZone({
         onDragOver={handleDragOver}
         onDragLeave={handleDragLeave}
         onClick={() => inputRef.current?.click()}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault()
+            inputRef.current?.click()
+          }
+        }}
       >
         <input
           ref={inputRef}

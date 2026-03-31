@@ -1,4 +1,5 @@
 """Address Book CRUD endpoints."""
+import asyncio
 from fastapi import APIRouter, HTTPException, Request
 
 from ..limiter import limiter
@@ -14,7 +15,8 @@ router = APIRouter()
 @router.get("/addresses")
 @limiter.limit("100/hour")
 async def list_addresses(request: Request):
-    addresses = load_addresses()
+    loop = asyncio.get_running_loop()
+    addresses = await loop.run_in_executor(None, load_addresses)
     return {"ok": True, "data": [AddressResponse(
         id=a.id, name=a.name, company=a.company, contact_name=a.contact_name,
         street=a.street, zip=a.zip, city=a.city, province=a.province,
@@ -25,12 +27,13 @@ async def list_addresses(request: Request):
 @router.post("/addresses", status_code=201)
 @limiter.limit("100/hour")
 async def create_address(request: Request, body: AddressCreate):
-    result = add_address(
+    loop = asyncio.get_running_loop()
+    result = await loop.run_in_executor(None, lambda: add_address(
         name=body.name, company=body.company, contact_name=body.contact_name,
         street=body.street, zip_code=body.zip_code, city=body.city,
         province=body.province, phone=body.phone, reference=body.reference,
         is_default=body.is_default
-    )
+    ))
     if result is None:
         raise HTTPException(status_code=409, detail={
             "ok": False, "error": {"code": "DUPLICATE_NAME", "message": "Address name already exists"}
@@ -46,7 +49,8 @@ async def update_address_endpoint(request: Request, address_id: str, body: Addre
         raise HTTPException(status_code=400, detail={
             "ok": False, "error": {"code": "NO_FIELDS", "message": "No fields to update"}
         })
-    success = update_address(address_id, **updates)
+    loop = asyncio.get_running_loop()
+    success = await loop.run_in_executor(None, lambda: update_address(address_id, **updates))
     if not success:
         raise HTTPException(status_code=404, detail={
             "ok": False, "error": {"code": "NOT_FOUND", "message": "Address not found"}
@@ -57,17 +61,18 @@ async def update_address_endpoint(request: Request, address_id: str, body: Addre
 @router.delete("/addresses/{address_id}")
 @limiter.limit("100/hour")
 async def delete_address_endpoint(request: Request, address_id: str):
-    addr = get_address_by_id(address_id)
+    loop = asyncio.get_running_loop()
+    addr = await loop.run_in_executor(None, lambda: get_address_by_id(address_id))
     if addr is None:
         raise HTTPException(status_code=404, detail={
             "ok": False, "error": {"code": "NOT_FOUND", "message": "Address not found"}
         })
-    addresses = load_addresses()
+    addresses = await loop.run_in_executor(None, load_addresses)
     if len(addresses) <= 1:
         raise HTTPException(status_code=409, detail={
             "ok": False, "error": {"code": "LAST_ADDRESS", "message": "Cannot delete the last address"}
         })
-    success = delete_address(address_id)
+    success = await loop.run_in_executor(None, lambda: delete_address(address_id))
     if not success:
         raise HTTPException(status_code=500, detail={
             "ok": False, "error": {"code": "DELETE_FAILED", "message": "Failed to delete address"}
@@ -78,12 +83,13 @@ async def delete_address_endpoint(request: Request, address_id: str):
 @router.put("/addresses/{address_id}/default")
 @limiter.limit("100/hour")
 async def set_default(request: Request, address_id: str):
-    addr = get_address_by_id(address_id)
+    loop = asyncio.get_running_loop()
+    addr = await loop.run_in_executor(None, lambda: get_address_by_id(address_id))
     if addr is None:
         raise HTTPException(status_code=404, detail={
             "ok": False, "error": {"code": "NOT_FOUND", "message": "Address not found"}
         })
-    success = set_default_address(address_id)
+    success = await loop.run_in_executor(None, lambda: set_default_address(address_id))
     if not success:
         raise HTTPException(status_code=500, detail={
             "ok": False, "error": {"code": "UPDATE_FAILED", "message": "Failed to set default"}

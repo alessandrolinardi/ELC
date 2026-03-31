@@ -1,6 +1,7 @@
 """Shipments — parse Excel, call rates webhook, create shipments."""
 import io
 import math
+import re
 import time
 import requests
 from typing import Optional, Callable
@@ -655,6 +656,18 @@ def send_batch_ship_request(
 
 POD_POLL_INTERVAL = 3  # seconds between POD job polls
 
+# Pattern for safe URL path segments: alphanumeric, hyphens, underscores, dots.
+_SAFE_URL_SEGMENT_RE = re.compile(r"^[a-zA-Z0-9._-]+$")
+
+
+def _validate_url_segment(value: str, label: str) -> None:
+    """Reject values that could cause path-traversal or injection in URLs."""
+    if not value or not _SAFE_URL_SEGMENT_RE.match(value):
+        raise ValueError(
+            f"Valore non valido per {label}: contiene caratteri non ammessi. "
+            f"Sono consentiti solo caratteri alfanumerici, trattini, underscore e punti."
+        )
+
 
 def _derive_pod_url(rates_url: str) -> str:
     """Derive /api/webhook/pod from the rates webhook URL."""
@@ -674,6 +687,7 @@ def _derive_pod_batch_url(rates_url: str) -> str:
 
 def _derive_pod_jobs_url(rates_url: str, job_id: str) -> str:
     """Derive /api/webhook/pod-jobs/{job_id} from the rates webhook URL."""
+    _validate_url_segment(job_id, "job_id")
     parsed = urlparse(rates_url.rstrip("/"))
     path_parts = parsed.path.rsplit("/", 1)
     base = path_parts[0] if len(path_parts) > 1 else "/api/webhook"
@@ -848,6 +862,7 @@ def download_pod_file(remote_job_id: str, file_key: str) -> tuple[bool, str, Opt
     if not rates_url:
         return False, "RATES_WEBHOOK_URL non configurato.", None
 
+    _validate_url_segment(file_key, "file_key")
     url = _derive_pod_jobs_url(rates_url, remote_job_id) + f"/files/{file_key}"
     headers = _get_webhook_headers()
 

@@ -1,0 +1,130 @@
+<h2>Dimensions Input — Option A</h2>
+<p class="subtitle">Three inline number inputs with × separators, reading as one unified field</p>
+
+<div class="mockup">
+  <div class="mockup-header">Package Dimensions — Inline Triple Input</div>
+  <div class="mockup-body" style="padding: 0;">
+    <div style="background: #f8f9fc; font-family: system-ui; font-size: 11px; color: #0f172a; padding: 24px;">
+
+      <!-- Context: inside the Colli card -->
+      <div style="background: white; border-radius: 12px; border: 1px solid #e5e7eb; padding: 20px; max-width: 520px; margin: 0 auto;">
+        <div style="font-size: 10px; font-weight: 600; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 14px;">Colli</div>
+
+        <!-- Qty + Weight row -->
+        <div style="display: flex; gap: 12px; margin-bottom: 14px;">
+          <div style="flex:1;">
+            <div style="font-size: 10px; color: #64748b; margin-bottom: 4px;">Quantità</div>
+            <div style="background: #f8f9fc; border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px 12px; font-size: 13px; font-weight: 600;">3</div>
+          </div>
+          <div style="flex:1;">
+            <div style="font-size: 10px; color: #64748b; margin-bottom: 4px;">Peso cad. (kg)</div>
+            <div style="background: #f8f9fc; border: 1px solid #e5e7eb; border-radius: 8px; padding: 10px 12px; font-size: 13px; font-weight: 600;">5.0</div>
+          </div>
+        </div>
+
+        <!-- THE DIMENSIONS INPUT -->
+        <div style="margin-bottom: 14px;">
+          <div style="font-size: 10px; color: #64748b; margin-bottom: 4px;">Dimensioni singolo collo (cm)</div>
+          <div style="display: flex; align-items: center; background: #f8f9fc; border: 1px solid #e5e7eb; border-radius: 8px; padding: 4px;">
+            <!-- L -->
+            <div style="flex: 1; text-align: center;">
+              <div style="font-size: 8px; color: #94a3b8; margin-bottom: 2px;">Lunghezza</div>
+              <div style="font-size: 15px; font-weight: 600; padding: 4px 0;">40</div>
+            </div>
+            <!-- × separator -->
+            <div style="color: #cbd5e1; font-size: 16px; font-weight: 300; padding: 0 4px;">×</div>
+            <!-- W -->
+            <div style="flex: 1; text-align: center;">
+              <div style="font-size: 8px; color: #94a3b8; margin-bottom: 2px;">Larghezza</div>
+              <div style="font-size: 15px; font-weight: 600; padding: 4px 0;">30</div>
+            </div>
+            <!-- × separator -->
+            <div style="color: #cbd5e1; font-size: 16px; font-weight: 300; padding: 0 4px;">×</div>
+            <!-- H -->
+            <div style="flex: 1; text-align: center;">
+              <div style="font-size: 8px; color: #94a3b8; margin-bottom: 2px;">Altezza</div>
+              <div style="font-size: 15px; font-weight: 600; padding: 4px 0;">20</div>
+            </div>
+            <!-- Unit -->
+            <div style="color: #94a3b8; font-size: 10px; padding: 0 8px;">cm</div>
+          </div>
+        </div>
+
+        <!-- Also show it empty / placeholder state -->
+        <div style="margin-bottom: 14px;">
+          <div style="font-size: 10px; color: #64748b; margin-bottom: 4px;">Dimensioni — stato vuoto</div>
+          <div style="display: flex; align-items: center; background: #f8f9fc; border: 1px solid #e5e7eb; border-radius: 8px; padding: 4px;">
+            <div style="flex: 1; text-align: center;">
+              <div style="font-size: 8px; color: #94a3b8; margin-bottom: 2px;">Lunghezza</div>
+              <div style="font-size: 15px; font-weight: 600; padding: 4px 0; color: #cbd5e1;">0</div>
+            </div>
+            <div style="color: #e2e8f0; font-size: 16px; font-weight: 300; padding: 0 4px;">×</div>
+            <div style="flex: 1; text-align: center;">
+              <div style="font-size: 8px; color: #94a3b8; margin-bottom: 2px;">Larghezza</div>
+              <div style="font-size: 15px; font-weight: 600; padding: 4px 0; color: #cbd5e1;">0</div>
+            </div>
+            <div style="color: #e2e8f0; font-size: 16px; font-weight: 300; padding: 0 4px;">×</div>
+            <div style="flex: 1; text-align: center;">
+              <div style="font-size: 8px; color: #94a3b8; margin-bottom: 2px;">Altezza</div>
+              <div style="font-size: 15px; font-weight: 600; padding: 4px 0; color: #cbd5e1;">0</div>
+            </div>
+            <div style="color: #cbd5e1; font-size: 10px; padding: 0 8px;">cm</div>
+          </div>
+        </div>
+
+        <!-- Validation error state -->
+        <div>
+          <div style="font-size: 10px; color: #64748b; margin-bottom: 4px;">Dimensioni — errore validazione</div>
+          <div style="display: flex; align-items: center; background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 4px;">
+            <div style="flex: 1; text-align: center;">
+              <div style="font-size: 8px; color: #94a3b8; margin-bottom: 2px;">Lunghezza</div>
+              <div style="font-size: 15px; font-weight: 600; padding: 4px 0;">40</div>
+            </div>
+            <div style="color: #fca5a5; font-size: 16px; font-weight: 300; padding: 0 4px;">×</div>
+            <div style="flex: 1; text-align: center;">
+              <div style="font-size: 8px; color: #dc2626; margin-bottom: 2px;">Larghezza</div>
+              <div style="font-size: 15px; font-weight: 600; padding: 4px 0; color: #dc2626;">0</div>
+            </div>
+            <div style="color: #fca5a5; font-size: 16px; font-weight: 300; padding: 0 4px;">×</div>
+            <div style="flex: 1; text-align: center;">
+              <div style="font-size: 8px; color: #94a3b8; margin-bottom: 2px;">Altezza</div>
+              <div style="font-size: 15px; font-weight: 600; padding: 4px 0;">20</div>
+            </div>
+            <div style="color: #94a3b8; font-size: 10px; padding: 0 8px;">cm</div>
+          </div>
+          <div style="font-size: 9px; color: #dc2626; margin-top: 4px;">Larghezza obbligatoria</div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 16px;">
+  <h3>How it works:</h3>
+  <ul>
+    <li><strong>Single visual container</strong> — looks like one field, but each dimension is an independent number input</li>
+    <li><strong>Labels above each value</strong> — Lunghezza / Larghezza / Altezza, so no ambiguity</li>
+    <li><strong>× separators</strong> — read naturally as "40 × 30 × 20 cm"</li>
+    <li><strong>Unit label at the end</strong> — "cm" shown once, not repeated</li>
+    <li><strong>Per-field validation</strong> — if one dimension is missing, only that sub-field highlights red</li>
+    <li><strong>Tab between fields</strong> — Tab key moves L → W → H naturally</li>
+  </ul>
+</div>
+
+<div class="options" style="margin-top: 16px;">
+  <div class="option" data-choice="approve" onclick="toggleSelect(this)">
+    <div class="letter">✓</div>
+    <div class="content">
+      <h3>This works — approve the full Pickup Request design</h3>
+      <p>Dimensions input + card layout both look good</p>
+    </div>
+  </div>
+  <div class="option" data-choice="revise" onclick="toggleSelect(this)">
+    <div class="letter">✎</div>
+    <div class="content">
+      <h3>Needs changes</h3>
+      <p>I'll describe what to adjust in the terminal</p>
+    </div>
+  </div>
+</div>

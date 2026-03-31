@@ -1,0 +1,141 @@
+<h2>Section 1: Navigation & Page Structure</h2>
+<p class="subtitle">How the top nav, tool switching, and page layout work across the app. Does this feel right?</p>
+
+<!-- Top Nav Bar mockup -->
+<div class="mockup">
+  <div class="mockup-header">Top Navigation Bar</div>
+  <div class="mockup-body" style="padding: 0;">
+    <div style="background: white; font-family: system-ui; font-size: 12px; color: #222;">
+      <!-- Nav bar -->
+      <div style="padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #e8e8e8;">
+        <div style="display: flex; align-items: center; gap: 16px;">
+          <!-- Logo -->
+          <div style="font-size: 15px; font-weight: 800; letter-spacing: -0.5px;">ELC <span style="color: #c4a265;">Tools</span></div>
+          <div style="width: 1px; height: 24px; background: #e5e5e5;"></div>
+          <!-- Tabs -->
+          <div style="display: flex; gap: 0;">
+            <div style="padding: 8px 16px; border-bottom: 2px solid #c4a265; color: #1a1a1a; font-weight: 600; font-size: 12px;">📦 Label Sorter</div>
+            <div style="padding: 8px 16px; color: #999; font-size: 12px;">📍 Address Validator</div>
+            <div style="padding: 8px 16px; color: #999; font-size: 12px;">🚚 Ritiro</div>
+            <div style="padding: 8px 16px; color: #ccc; font-size: 12px; border-left: 1px solid #eee; margin-left: 4px;">▾ Altro</div>
+          </div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 12px; font-size: 11px; color: #aaa;">
+          <span style="cursor: pointer;">⚙️ Dev Mode</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Key decisions in this nav:</h3>
+  <ul>
+    <li><strong>Tab-style switching</strong> — active tool gets gold underline, instant recognition</li>
+    <li><strong>"Altro" overflow dropdown</strong> — when you add tools 4-5-6+, they go into a grouped dropdown menu (categorized by function)</li>
+    <li><strong>Dev Mode toggle</strong> — top-right, unobtrusive. Turns on: log viewer, debug expanders, raw text panels</li>
+    <li><strong>No sidebar at all</strong> — Streamlit sidebar is completely hidden, full width for content</li>
+  </ul>
+</div>
+
+<!-- Page layout mockup -->
+<div class="mockup" style="margin-top: 24px;">
+  <div class="mockup-header">Page Layout — Label Sorter (active tool)</div>
+  <div class="mockup-body" style="padding: 0;">
+    <div style="background: #fafaf8; font-family: system-ui; font-size: 11px; color: #222; min-height: 350px;">
+      <!-- Nav bar (compact repeat) -->
+      <div style="background: white; padding: 10px 24px; display: flex; align-items: center; gap: 16px; border-bottom: 1px solid #e8e8e8;">
+        <div style="font-size: 14px; font-weight: 800;">ELC <span style="color: #c4a265;">Tools</span></div>
+        <div style="width: 1px; height: 20px; background: #e5e5e5;"></div>
+        <div style="display: flex; gap: 0; font-size: 11px;">
+          <div style="padding: 6px 14px; border-bottom: 2px solid #c4a265; font-weight: 600;">📦 Label Sorter</div>
+          <div style="padding: 6px 14px; color: #999;">📍 Address Validator</div>
+          <div style="padding: 6px 14px; color: #999;">🚚 Ritiro</div>
+        </div>
+      </div>
+
+      <!-- Content area -->
+      <div style="max-width: 780px; margin: 0 auto; padding: 24px;">
+        <!-- Title + description -->
+        <div style="margin-bottom: 20px;">
+          <div style="font-size: 20px; font-weight: 700; margin-bottom: 4px;">Label Sorter</div>
+          <div style="font-size: 12px; color: #888;">Riordina le etichette di spedizione secondo l'ordine degli ordini</div>
+        </div>
+
+        <!-- Step indicator -->
+        <div style="display: flex; align-items: center; margin-bottom: 24px; padding: 12px 16px; background: white; border-radius: 10px; box-shadow: 0 1px 3px rgba(0,0,0,0.06);">
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <div style="background: #c4a265; color: white; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 11px;">1</div>
+            <span style="font-weight: 600; font-size: 11px;">Carica file</span>
+          </div>
+          <div style="flex: 1; height: 2px; background: #e5e5e5; margin: 0 12px;"></div>
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <div style="background: #e5e5e5; color: #999; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px;">2</div>
+            <span style="color: #999; font-size: 11px;">Configura</span>
+          </div>
+          <div style="flex: 1; height: 2px; background: #e5e5e5; margin: 0 12px;"></div>
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <div style="background: #e5e5e5; color: #999; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px;">3</div>
+            <span style="color: #999; font-size: 11px;">Elabora</span>
+          </div>
+          <div style="flex: 1; height: 2px; background: #e5e5e5; margin: 0 12px;"></div>
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <div style="background: #e5e5e5; color: #999; width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px;">4</div>
+            <span style="color: #999; font-size: 11px;">Scarica</span>
+          </div>
+        </div>
+
+        <!-- Upload section -->
+        <div style="display: flex; gap: 16px; margin-bottom: 20px;">
+          <div style="flex: 1; background: white; border: 2px dashed #d4c5a0; border-radius: 12px; padding: 28px 16px; text-align: center; transition: all 0.2s;">
+            <div style="font-size: 32px; margin-bottom: 8px;">📄</div>
+            <div style="font-size: 12px; font-weight: 600; margin-bottom: 4px;">PDF Etichette</div>
+            <div style="font-size: 10px; color: #999;">Trascina qui o clicca per caricare</div>
+            <div style="font-size: 9px; color: #bbb; margin-top: 4px;">Max 50MB • DHL, FedEx, UPS</div>
+          </div>
+          <div style="flex: 1; background: white; border: 2px dashed #d4c5a0; border-radius: 12px; padding: 28px 16px; text-align: center;">
+            <div style="font-size: 32px; margin-bottom: 8px;">📊</div>
+            <div style="font-size: 12px; font-weight: 600; margin-bottom: 4px;">Excel Ordini</div>
+            <div style="font-size: 10px; color: #999;">Export da ShippyPro (.xlsx / .xls)</div>
+            <div style="font-size: 9px; color: #bbb; margin-top: 4px;">Max 50MB</div>
+          </div>
+        </div>
+
+        <!-- Help link -->
+        <div style="text-align: center; font-size: 10px; color: #c4a265; cursor: pointer;">
+          📖 Come esportare da ShippyPro?
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 16px;">
+  <h3>Layout principles:</h3>
+  <ul>
+    <li><strong>Centered content</strong> — max-width ~780px, easy to scan, no wall-of-text feel</li>
+    <li><strong>Step indicator</strong> — always visible at top of each tool, highlights current step</li>
+    <li><strong>Clean upload cards</strong> — large drop zones with clear labels and constraints</li>
+    <li><strong>Help as a link, not an expander</strong> — "Come esportare da ShippyPro?" opens inline or as a modal, not a cluttered expander block</li>
+    <li><strong>Warm palette</strong> — gold (#c4a265) as accent, warm whites (#fafaf8), subtle shadows</li>
+  </ul>
+</div>
+
+<p class="subtitle" style="margin-top: 20px;">Does this navigation and layout structure feel right? Let me know, or click to continue to the next section.</p>
+
+<div class="options">
+  <div class="option" data-choice="approve" onclick="toggleSelect(this)">
+    <div class="letter">✓</div>
+    <div class="content">
+      <h3>Looks good — continue to next section</h3>
+      <p>The nav, layout, and step system work well</p>
+    </div>
+  </div>
+  <div class="option" data-choice="revise" onclick="toggleSelect(this)">
+    <div class="letter">✎</div>
+    <div class="content">
+      <h3>Needs changes</h3>
+      <p>I'll describe what to adjust in the terminal</p>
+    </div>
+  </div>
+</div>

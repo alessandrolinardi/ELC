@@ -1,0 +1,192 @@
+<h2>Which design direction feels right for ELC Tools?</h2>
+<p class="subtitle">3 approaches — same features, different navigation & visual identity. Click to select your preference.</p>
+
+<div class="cards">
+  <!-- APPROACH A -->
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding: 0; overflow: hidden;">
+      <div style="background: #1a1a2e; color: white; font-family: system-ui; font-size: 11px; height: 100%; display: flex;">
+        <!-- Sidebar -->
+        <div style="width: 220px; background: #16213e; padding: 16px; flex-shrink: 0;">
+          <div style="font-size: 14px; font-weight: 700; margin-bottom: 4px; color: #e8d5b7;">ELC Tools</div>
+          <div style="font-size: 9px; color: #888; margin-bottom: 16px;">Estée Lauder Logistics</div>
+
+          <div style="font-size: 8px; text-transform: uppercase; color: #666; margin-bottom: 8px; letter-spacing: 1px;">Spedizioni</div>
+          <div style="background: #0f3460; border-radius: 6px; padding: 8px 10px; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
+            <span>📦</span> <span style="font-size: 11px;">Label Sorter</span>
+          </div>
+          <div style="padding: 8px 10px; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; color: #aaa;">
+            <span>📍</span> <span style="font-size: 11px;">Address Validator</span>
+          </div>
+          <div style="padding: 8px 10px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; color: #aaa;">
+            <span>🚚</span> <span style="font-size: 11px;">Richiesta Ritiro</span>
+          </div>
+
+          <div style="font-size: 8px; text-transform: uppercase; color: #666; margin-bottom: 8px; letter-spacing: 1px;">Futuro</div>
+          <div style="padding: 8px 10px; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; color: #555;">
+            <span>📊</span> <span style="font-size: 11px; font-style: italic;">+ Aggiungi tool</span>
+          </div>
+
+          <div style="position: absolute; bottom: 16px; font-size: 9px; color: #555;">v2.0 • Dev Mode ⚙️</div>
+        </div>
+
+        <!-- Main content -->
+        <div style="flex: 1; padding: 20px;">
+          <div style="font-size: 18px; font-weight: 700; margin-bottom: 4px;">📦 Label Sorter</div>
+          <div style="font-size: 10px; color: #888; margin-bottom: 16px;">Riordina le etichette di spedizione</div>
+
+          <!-- Stepper -->
+          <div style="display: flex; gap: 4px; margin-bottom: 16px; font-size: 9px;">
+            <div style="background: #0f3460; padding: 4px 12px; border-radius: 12px; color: #7ec8e3;">① Carica file</div>
+            <div style="background: #222; padding: 4px 12px; border-radius: 12px; color: #666;">② Configura</div>
+            <div style="background: #222; padding: 4px 12px; border-radius: 12px; color: #666;">③ Elabora</div>
+            <div style="background: #222; padding: 4px 12px; border-radius: 12px; color: #666;">④ Scarica</div>
+          </div>
+
+          <!-- Upload area -->
+          <div style="display: flex; gap: 12px;">
+            <div style="flex: 1; border: 2px dashed #333; border-radius: 8px; padding: 20px; text-align: center;">
+              <div style="font-size: 24px; margin-bottom: 4px;">📄</div>
+              <div style="font-size: 10px; color: #aaa;">Trascina il PDF qui</div>
+              <div style="font-size: 9px; color: #666;">o clicca per caricare</div>
+            </div>
+            <div style="flex: 1; border: 2px dashed #333; border-radius: 8px; padding: 20px; text-align: center;">
+              <div style="font-size: 24px; margin-bottom: 4px;">📊</div>
+              <div style="font-size: 10px; color: #aaa;">Trascina l'Excel qui</div>
+              <div style="font-size: 9px; color: #666;">o clicca per caricare</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A — Dark Sidebar + Step Wizard</h3>
+      <p>Persistent left sidebar with categorized tools. Each tool uses a step-by-step wizard (① ② ③ ④) so users always know where they are. Dark theme feels modern and reduces visual noise. Scales well — new tools just slot into sidebar categories.</p>
+      <div class="pros-cons" style="margin-top: 12px;">
+        <div class="pros"><h4>Pros</h4><ul><li>Clear navigation that scales to 10+ tools</li><li>Step wizard eliminates "what do I do next?" confusion</li><li>Modern, distinctive look</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>Dark theme may feel unusual for internal tools</li><li>Sidebar takes horizontal space</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- APPROACH B -->
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding: 0; overflow: hidden;">
+      <div style="background: #fafafa; color: #222; font-family: system-ui; font-size: 11px; height: 100%;">
+        <!-- Top nav bar -->
+        <div style="background: white; border-bottom: 1px solid #e5e5e5; padding: 10px 20px; display: flex; align-items: center; justify-content: space-between;">
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="font-size: 14px; font-weight: 700; color: #1a1a1a;">ELC <span style="color: #c4a265;">Tools</span></div>
+            <div style="width: 1px; height: 20px; background: #e5e5e5;"></div>
+            <div style="display: flex; gap: 2px; font-size: 10px;">
+              <div style="background: #f0ebe3; color: #8b6914; padding: 5px 12px; border-radius: 6px; font-weight: 600;">Label Sorter</div>
+              <div style="padding: 5px 12px; border-radius: 6px; color: #888;">Address Validator</div>
+              <div style="padding: 5px 12px; border-radius: 6px; color: #888;">Ritiro</div>
+              <div style="padding: 5px 12px; border-radius: 6px; color: #bbb;">+ Altro</div>
+            </div>
+          </div>
+          <div style="font-size: 9px; color: #aaa;">⚙️ Dev</div>
+        </div>
+
+        <!-- Main content -->
+        <div style="padding: 20px; max-width: 680px; margin: 0 auto;">
+          <div style="font-size: 16px; font-weight: 700; margin-bottom: 2px;">Label Sorter</div>
+          <div style="font-size: 10px; color: #888; margin-bottom: 16px;">Riordina le etichette di spedizione secondo l'ordine degli ordini</div>
+
+          <!-- Progress breadcrumb -->
+          <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 16px; font-size: 9px;">
+            <div style="background: #c4a265; color: white; width: 18px; height: 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700;">1</div>
+            <span style="font-weight: 600;">Carica</span>
+            <div style="flex: 1; height: 1px; background: #ddd;"></div>
+            <div style="background: #eee; color: #999; width: 18px; height: 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center;">2</div>
+            <span style="color: #999;">Opzioni</span>
+            <div style="flex: 1; height: 1px; background: #ddd;"></div>
+            <div style="background: #eee; color: #999; width: 18px; height: 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center;">3</div>
+            <span style="color: #999;">Risultato</span>
+          </div>
+
+          <!-- Upload cards -->
+          <div style="display: flex; gap: 12px;">
+            <div style="flex: 1; background: white; border: 2px dashed #d4c5a0; border-radius: 10px; padding: 24px; text-align: center;">
+              <div style="font-size: 28px; margin-bottom: 6px;">📄</div>
+              <div style="font-size: 11px; font-weight: 600;">PDF Etichette</div>
+              <div style="font-size: 9px; color: #999; margin-top: 4px;">Trascina o clicca per caricare</div>
+            </div>
+            <div style="flex: 1; background: white; border: 2px dashed #d4c5a0; border-radius: 10px; padding: 24px; text-align: center;">
+              <div style="font-size: 28px; margin-bottom: 6px;">📊</div>
+              <div style="font-size: 11px; font-weight: 600;">Excel Ordini</div>
+              <div style="font-size: 9px; color: #999; margin-top: 4px;">Export da ShippyPro</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B — Light Top-Nav + Warm Accents</h3>
+      <p>Horizontal top navigation with tab-style tool switching. Light, airy design with warm gold accents (subtle ELC nod). Centered content with clear progress breadcrumbs. Feels like a polished SaaS product. Tools overflow into a "More" dropdown as they grow.</p>
+      <div class="pros-cons" style="margin-top: 12px;">
+        <div class="pros"><h4>Pros</h4><ul><li>Familiar SaaS feel — zero learning curve</li><li>Maximum content width (no sidebar eating space)</li><li>Warm gold accents echo ELC brand subtly</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>Top nav gets crowded past 6-7 tools</li><li>Less room for tool categories/grouping</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- APPROACH C -->
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding: 0; overflow: hidden;">
+      <div style="background: #f5f5f0; color: #222; font-family: system-ui; font-size: 11px; height: 100%;">
+        <!-- Compact top bar -->
+        <div style="background: #2c2c2c; padding: 6px 20px; display: flex; align-items: center; justify-content: space-between;">
+          <div style="color: #e8d5b7; font-size: 12px; font-weight: 700;">ELC Tools</div>
+          <div style="display: flex; gap: 8px; font-size: 9px; color: #999;">
+            <span>⚙️</span>
+          </div>
+        </div>
+
+        <!-- Dashboard grid -->
+        <div style="padding: 20px;">
+          <div style="font-size: 14px; font-weight: 700; margin-bottom: 4px;">Buongiorno 👋</div>
+          <div style="font-size: 10px; color: #888; margin-bottom: 16px;">Seleziona uno strumento per iniziare</div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
+            <div style="background: white; border-radius: 10px; padding: 16px; border: 2px solid #c4a265; box-shadow: 0 1px 3px rgba(0,0,0,0.08);">
+              <div style="font-size: 22px; margin-bottom: 6px;">📦</div>
+              <div style="font-size: 11px; font-weight: 700;">Label Sorter</div>
+              <div style="font-size: 9px; color: #888; margin-top: 2px;">Riordina etichette PDF</div>
+            </div>
+            <div style="background: white; border-radius: 10px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.08);">
+              <div style="font-size: 22px; margin-bottom: 6px;">📍</div>
+              <div style="font-size: 11px; font-weight: 700;">Address Validator</div>
+              <div style="font-size: 9px; color: #888; margin-top: 2px;">Valida indirizzi IT</div>
+            </div>
+            <div style="background: white; border-radius: 10px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.08);">
+              <div style="font-size: 22px; margin-bottom: 6px;">🚚</div>
+              <div style="font-size: 11px; font-weight: 700;">Richiesta Ritiro</div>
+              <div style="font-size: 9px; color: #888; margin-top: 2px;">Prenota corriere</div>
+            </div>
+            <div style="background: white; border-radius: 10px; padding: 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); border: 1px dashed #ddd;">
+              <div style="font-size: 22px; margin-bottom: 6px; opacity: 0.4;">➕</div>
+              <div style="font-size: 11px; font-weight: 700; color: #bbb;">Prossimamente</div>
+              <div style="font-size: 9px; color: #ccc; margin-top: 2px;">Nuovi strumenti in arrivo</div>
+            </div>
+          </div>
+
+          <div style="margin-top: 16px; font-size: 9px; color: #aaa; display: flex; gap: 16px;">
+            <span>📊 Ultimo uso: Label Sorter (2h fa)</span>
+            <span>📍 12 validazioni oggi</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C — Dashboard Home + Drill-In</h3>
+      <p>Home screen shows all tools as a card grid (like a launchpad). Click a tool to "drill in" to its dedicated page with a back button. Scales infinitely — just add more cards. Includes usage stats and recent activity on the home screen.</p>
+      <div class="pros-cons" style="margin-top: 12px;">
+        <div class="pros"><h4>Pros</h4><ul><li>Scales to any number of tools effortlessly</li><li>Home dashboard gives overview / quick stats</li><li>Most natural for a growing "toolbox" concept</li></ul></div>
+        <div class="cons"><h4>Cons</h4><ul><li>Extra click to reach a tool (can't jump directly)</li><li>No persistent navigation while inside a tool</li></ul></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<p class="subtitle" style="margin-top: 24px;">💡 We can also mix elements — e.g., Dashboard home (C) with top-nav once inside a tool (B). Click your favorite direction to start.</p>

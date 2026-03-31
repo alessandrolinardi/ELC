@@ -1,0 +1,6 @@
+{"type":"server-started","port":58122,"host":"127.0.0.1","url_host":"localhost","url":"http://localhost:58122","screen_dir":"/Users/alessandrolinardi/Desktop/ELC/.superpowers/brainstorm/70453-1773916926"}
+{"type":"screen-added","file":"/Users/alessandrolinardi/Desktop/ELC/.superpowers/brainstorm/70453-1773916926/address-validator-results.html"}
+{"type":"screen-added","file":"/Users/alessandrolinardi/Desktop/ELC/.superpowers/brainstorm/70453-1773916926/pickup-request.html"}
+{"type":"screen-added","file":"/Users/alessandrolinardi/Desktop/ELC/.superpowers/brainstorm/70453-1773916926/dimensions-input.html"}
+{"type":"screen-added","file":"/Users/alessandrolinardi/Desktop/ELC/.superpowers/brainstorm/70453-1773916926/waiting.html"}
+{"type":"server-stopped","reason":"idle timeout"}

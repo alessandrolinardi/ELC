@@ -1,0 +1,239 @@
+<h2>Section 3: Address Validator — Results Redesign</h2>
+<p class="subtitle">This page currently has the most visual clutter: 7 metrics, PO warnings, two tables, two downloads. Here's the proposed cleanup.</p>
+
+<div class="split">
+  <!-- CURRENT -->
+  <div class="mockup">
+    <div class="mockup-header">Current — Address Validator Results</div>
+    <div class="mockup-body" style="padding: 0;">
+      <div style="background: white; font-family: system-ui; font-size: 10px; color: #222; padding: 12px; overflow-y: auto;">
+        <div style="font-size: 13px; font-weight: 700; margin-bottom: 4px;">✅ Risultato</div>
+        <div style="font-size: 8px; color: #888; margin-bottom: 8px;">Validato con: Google Address Validation + Claude AI</div>
+
+        <!-- ZIP stats -->
+        <div style="font-size: 10px; font-weight: 600; margin-bottom: 4px;">📮 CAP</div>
+        <div style="display: flex; gap: 4px; margin-bottom: 8px;">
+          <div style="flex:1; background: #f8f8f8; padding: 6px; border-radius: 4px; text-align: center;">
+            <div style="font-size: 7px; color: #888;">✓ Validi</div>
+            <div style="font-size: 14px; font-weight: 700;">82</div>
+          </div>
+          <div style="flex:1; background: #f8f8f8; padding: 6px; border-radius: 4px; text-align: center;">
+            <div style="font-size: 7px; color: #888;">🔄 Corretti</div>
+            <div style="font-size: 14px; font-weight: 700;">12</div>
+          </div>
+          <div style="flex:1; background: #f8f8f8; padding: 6px; border-radius: 4px; text-align: center;">
+            <div style="font-size: 7px; color: #888;">⚠️ Rivedere</div>
+            <div style="font-size: 14px; font-weight: 700;">3</div>
+          </div>
+          <div style="flex:1; background: #f8f8f8; padding: 6px; border-radius: 4px; text-align: center;">
+            <div style="font-size: 7px; color: #888;">⏭️ Saltati</div>
+            <div style="font-size: 14px; font-weight: 700;">3</div>
+          </div>
+        </div>
+
+        <!-- Street stats -->
+        <div style="font-size: 10px; font-weight: 600; margin-bottom: 4px;">🛣️ Vie</div>
+        <div style="display: flex; gap: 4px; margin-bottom: 8px;">
+          <div style="flex:1; background: #f8f8f8; padding: 6px; border-radius: 4px; text-align: center;">
+            <div style="font-size: 7px; color: #888;">✓ Verificate</div>
+            <div style="font-size: 14px; font-weight: 700;">78</div>
+          </div>
+          <div style="flex:1; background: #f8f8f8; padding: 6px; border-radius: 4px; text-align: center;">
+            <div style="font-size: 7px; color: #888;">🔄 Corrette</div>
+            <div style="font-size: 14px; font-weight: 700;">8</div>
+          </div>
+          <div style="flex:1; background: #f8f8f8; padding: 6px; border-radius: 4px; text-align: center;">
+            <div style="font-size: 7px; color: #888;">⚠️ Verificare</div>
+            <div style="font-size: 14px; font-weight: 700;">14</div>
+          </div>
+        </div>
+
+        <!-- PO Warning -->
+        <div style="background: #fdecea; border: 1px solid #e74c3c; border-radius: 4px; padding: 6px; margin-bottom: 8px;">
+          <div style="font-weight: 700; font-size: 9px; color: #c0392b;">🚨 Numeri Ordine (PO)</div>
+          <div style="font-size: 8px; color: #c0392b;">2 righe hanno PO non valido. Download disabilitato.</div>
+        </div>
+
+        <!-- Preview table -->
+        <div style="font-size: 10px; font-weight: 600; margin-bottom: 4px;">📋 Dettaglio validazione</div>
+        <div style="background: #f8f8f8; border-radius: 4px; padding: 4px; font-size: 8px; margin-bottom: 6px;">
+          <div style="display: flex; padding: 2px 0; font-weight: 600; border-bottom: 1px solid #ddd;">
+            <div style="width: 20px;">St</div><div style="flex:1;">Città</div><div style="flex:1;">Via</div><div style="width: 35px;">CAP</div><div style="flex:1;">Correzioni</div>
+          </div>
+          <div style="display: flex; padding: 2px 0; border-bottom: 1px solid #eee;">
+            <div style="width: 20px;">✓</div><div style="flex:1;">Roma</div><div style="flex:1;">Via Roma 1</div><div style="width: 35px;">00187</div><div style="flex:1;">-</div>
+          </div>
+          <div style="display: flex; padding: 2px 0; border-bottom: 1px solid #eee;">
+            <div style="width: 20px;">🔄</div><div style="flex:1;">Milano</div><div style="flex:1;">Via Turti</div><div style="width: 35px;">20100</div><div style="flex:1;">Via → Via Turati</div>
+          </div>
+          <div style="display: flex; padding: 2px 0;">
+            <div style="width: 20px;">⚠️</div><div style="flex:1;">Napoli</div><div style="flex:1;">Via 24 Mag</div><div style="width: 35px;">801</div><div style="flex:1;">CAP? • Via?</div>
+          </div>
+        </div>
+        <div style="font-size: 8px; color: #888; margin-bottom: 4px;">Mostrate 3 di 100 righe</div>
+
+        <!-- Full detail expander -->
+        <div style="background: #e8e8e8; border-radius: 4px; padding: 6px; font-size: 9px; margin-bottom: 8px;">
+          📋 Vista completa (100 righe) ▸
+        </div>
+
+        <!-- Downloads -->
+        <div style="display: flex; gap: 4px; margin-bottom: 6px;">
+          <div style="flex:1; background: #e8e8e8; padding: 6px; border-radius: 4px; text-align: center; font-size: 9px; opacity: 0.5;">📄 File Corretto</div>
+          <div style="flex:1; background: #e8e8e8; padding: 6px; border-radius: 4px; text-align: center; font-size: 9px; opacity: 0.5;">📋 Report Revisione</div>
+        </div>
+        <div style="font-size: 8px; color: #e74c3c; text-align: center;">⛔ Download disabilitato per PO non validi</div>
+
+        <div style="margin-top: 6px; font-size: 8px; color: #e74c3c; text-align: center; font-style: italic;">
+          ↑ 7 metric boxes + PO warning + table + expander + disabled downloads = overwhelming
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- PROPOSED -->
+  <div class="mockup">
+    <div class="mockup-header">Proposed — Address Validator Results</div>
+    <div class="mockup-body" style="padding: 0;">
+      <div style="background: #f8f9fc; font-family: system-ui; font-size: 10px; color: #0f172a; padding: 14px;">
+        <!-- Nav (compact) -->
+        <div style="background: white; margin: -14px -14px 14px -14px; padding: 8px 14px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid #e8eaf0;">
+          <span style="font-size: 12px; font-weight: 800;">ELC <span style="color: #6366f1;">Tools</span></span>
+          <div style="width: 1px; height: 16px; background: #e5e7eb;"></div>
+          <span style="font-size: 9px; color: #9ca3af;">🚚 Ritiro</span>
+          <span style="font-size: 9px; border-bottom: 2px solid #6366f1; font-weight: 600; padding-bottom: 2px;">📍 Validator</span>
+          <span style="font-size: 9px; color: #9ca3af;">📦 Label Sorter</span>
+        </div>
+
+        <!-- Step indicator — completed -->
+        <div style="display: flex; align-items: center; margin-bottom: 12px; padding: 8px 12px; background: white; border-radius: 8px; box-shadow: 0 1px 2px rgba(0,0,0,0.04);">
+          <div style="background: #22c55e; color: white; width: 16px; height: 16px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 8px;">✓</div>
+          <span style="font-size: 9px; margin-left: 4px; color: #22c55e;">Carica</span>
+          <div style="flex:1; height: 2px; background: #22c55e; margin: 0 6px;"></div>
+          <div style="background: #22c55e; color: white; width: 16px; height: 16px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 8px;">✓</div>
+          <span style="font-size: 9px; margin-left: 4px; color: #22c55e;">Valida</span>
+          <div style="flex:1; height: 2px; background: #6366f1; margin: 0 6px;"></div>
+          <div style="background: #6366f1; color: white; width: 16px; height: 16px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 8px; font-weight: 700;">3</div>
+          <span style="font-size: 9px; margin-left: 4px; font-weight: 600;">Risultato</span>
+        </div>
+
+        <!-- Consolidated summary banner -->
+        <div style="background: white; border-radius: 10px; border: 1px solid #e5e7eb; padding: 12px 14px; margin-bottom: 12px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+            <div style="font-weight: 700; font-size: 12px;">Validazione completata</div>
+            <div style="font-size: 8px; color: #9ca3af;">Google API + Claude AI</div>
+          </div>
+
+          <!-- Single consolidated progress bar -->
+          <div style="margin-bottom: 10px;">
+            <div style="display: flex; justify-content: space-between; font-size: 8px; color: #64748b; margin-bottom: 3px;">
+              <span>100 indirizzi analizzati</span>
+              <span>82 OK • 20 corretti • 3 da verificare</span>
+            </div>
+            <div style="background: #f1f5f9; border-radius: 4px; height: 8px; overflow: hidden; display: flex;">
+              <div style="background: #22c55e; width: 82%;"></div>
+              <div style="background: #6366f1; width: 15%;"></div>
+              <div style="background: #f59e0b; width: 3%;"></div>
+            </div>
+            <div style="display: flex; gap: 12px; margin-top: 4px; font-size: 8px;">
+              <span><span style="display:inline-block;width:8px;height:8px;background:#22c55e;border-radius:2px;vertical-align:middle;margin-right:2px;"></span> Verificati</span>
+              <span><span style="display:inline-block;width:8px;height:8px;background:#6366f1;border-radius:2px;vertical-align:middle;margin-right:2px;"></span> Auto-corretti</span>
+              <span><span style="display:inline-block;width:8px;height:8px;background:#f59e0b;border-radius:2px;vertical-align:middle;margin-right:2px;"></span> Da verificare</span>
+            </div>
+          </div>
+
+          <!-- Breakdown chips -->
+          <div style="display: flex; gap: 6px; flex-wrap: wrap; font-size: 8px;">
+            <div style="background: #f0fdf4; color: #15803d; padding: 3px 8px; border-radius: 4px;">CAP: 82 ✓ • 12 corretti • 3 ⚠️</div>
+            <div style="background: #f0f0ff; color: #4338ca; padding: 3px 8px; border-radius: 4px;">Vie: 78 ✓ • 8 corrette • 14 ⚠️</div>
+            <div style="background: #f1f5f9; color: #64748b; padding: 3px 8px; border-radius: 4px;">3 non-IT saltati</div>
+          </div>
+        </div>
+
+        <!-- PO Warning — inline, actionable -->
+        <div style="background: #fef2f2; border: 1px solid #fecaca; border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+          <div style="font-size: 16px;">🚨</div>
+          <div style="flex: 1;">
+            <div style="font-weight: 700; font-size: 10px; color: #dc2626;">2 PO non validi — download bloccato</div>
+            <div style="font-size: 8px; color: #991b1b;">Correggi i PO nel file originale oppure inserisci il PIN nelle opzioni avanzate</div>
+          </div>
+        </div>
+
+        <!-- Download cards -->
+        <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+          <div style="flex: 1; background: #e5e7eb; color: #9ca3af; border-radius: 8px; padding: 10px; text-align: center;">
+            <div style="font-size: 14px; margin-bottom: 2px;">📄</div>
+            <div style="font-size: 10px; font-weight: 600;">File Corretto</div>
+            <div style="font-size: 7px; margin-top: 2px;">🔒 Sblocca con PO validi</div>
+          </div>
+          <div style="flex: 1; background: #e5e7eb; color: #9ca3af; border-radius: 8px; padding: 10px; text-align: center;">
+            <div style="font-size: 14px; margin-bottom: 2px;">📋</div>
+            <div style="font-size: 10px; font-weight: 600;">Report Revisione</div>
+            <div style="font-size: 7px; margin-top: 2px;">🔒 Sblocca con PO validi</div>
+          </div>
+        </div>
+
+        <!-- Clean results table -->
+        <div style="background: white; border-radius: 8px; border: 1px solid #e5e7eb; overflow: hidden;">
+          <div style="padding: 8px 12px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #f1f5f9;">
+            <div style="font-weight: 600; font-size: 10px;">Dettaglio</div>
+            <div style="display: flex; gap: 6px; font-size: 8px;">
+              <span style="background: #f1f5f9; padding: 2px 6px; border-radius: 3px; cursor: pointer;">Tutti</span>
+              <span style="background: #fef2f2; color: #dc2626; padding: 2px 6px; border-radius: 3px; cursor: pointer;">⚠️ Solo problemi</span>
+            </div>
+          </div>
+          <div style="padding: 6px 12px; font-size: 8px;">
+            <div style="display: flex; padding: 3px 0; font-weight: 600; color: #64748b; border-bottom: 1px solid #f1f5f9;">
+              <div style="width: 20px;"></div><div style="flex:1;">Città</div><div style="flex:2;">Via</div><div style="width: 40px;">CAP</div><div style="flex:1;">Correzione</div>
+            </div>
+            <div style="display: flex; padding: 4px 0; border-bottom: 1px solid #f8f9fc; align-items: center;">
+              <div style="width: 20px;"><span style="color: #22c55e;">●</span></div><div style="flex:1;">Roma</div><div style="flex:2;">Via Roma 1</div><div style="width: 40px;">00187</div><div style="flex:1; color: #9ca3af;">—</div>
+            </div>
+            <div style="display: flex; padding: 4px 0; border-bottom: 1px solid #f8f9fc; align-items: center; background: #fafaff;">
+              <div style="width: 20px;"><span style="color: #6366f1;">●</span></div><div style="flex:1;">Milano</div><div style="flex:2;">Via Turti → <span style="color:#6366f1; font-weight:600;">Via Turati</span></div><div style="width: 40px;">20100</div><div style="flex:1; color: #6366f1; font-size: 7px;">Auto</div>
+            </div>
+            <div style="display: flex; padding: 4px 0; align-items: center; background: #fffbeb;">
+              <div style="width: 20px;"><span style="color: #f59e0b;">●</span></div><div style="flex:1;">Napoli</div><div style="flex:2;">Via 24 Maggio</div><div style="width: 40px; color: #f59e0b; font-weight: 600;">801?</div><div style="flex:1; color: #f59e0b; font-size: 7px;">Verificare</div>
+            </div>
+          </div>
+          <div style="padding: 6px 12px; border-top: 1px solid #f1f5f9; font-size: 8px; color: #9ca3af; display: flex; justify-content: space-between;">
+            <span>3 di 100 righe</span>
+            <span style="color: #6366f1; cursor: pointer;">Mostra tutte ▾</span>
+          </div>
+        </div>
+
+        <div style="margin-top: 10px; text-align: center;">
+          <span style="background: white; border: 1px solid #e5e7eb; border-radius: 6px; padding: 6px 16px; font-size: 10px; color: #6366f1; cursor: pointer;">🔄 Nuova validazione</span>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 16px;">
+  <h3>Key improvements:</h3>
+  <ul>
+    <li><strong>7 metric boxes → 1 progress bar</strong> — single visual showing verified/corrected/review at a glance, with breakdown chips below</li>
+    <li><strong>PO warning is actionable</strong> — tells users exactly what to do (fix PO or use PIN), not just "download disabled"</li>
+    <li><strong>Table has filter tabs</strong> — "Tutti" vs "Solo problemi" so users can focus on what needs attention</li>
+    <li><strong>Inline corrections</strong> — "Via Turti → <strong>Via Turati</strong>" shows old/new directly in the table row</li>
+    <li><strong>Color-coded dots</strong> — green/indigo/amber replace emoji status, cleaner and more scannable</li>
+  </ul>
+</div>
+
+<div class="options" style="margin-top: 16px;">
+  <div class="option" data-choice="approve" onclick="toggleSelect(this)">
+    <div class="letter">✓</div>
+    <div class="content">
+      <h3>Looks good — continue to next section</h3>
+      <p>The consolidated results and filter approach work well</p>
+    </div>
+  </div>
+  <div class="option" data-choice="revise" onclick="toggleSelect(this)">
+    <div class="letter">✎</div>
+    <div class="content">
+      <h3>Needs changes</h3>
+      <p>I'll describe what to adjust in the terminal</p>
+    </div>
+  </div>
+</div>

@@ -25,7 +25,9 @@ client = TestClient(app)
 
 @pytest.fixture(autouse=True)
 def _cleanup_job_store():
-    """Clean up job store between tests to prevent cross-test contamination."""
+    """Clean up job store and rate limiter between tests."""
+    from app.limiter import limiter
+    limiter.reset()
     yield
     job_store.cleanup_all()
 

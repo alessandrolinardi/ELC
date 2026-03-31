@@ -25,7 +25,9 @@ function downloadBlob(blob: Blob, filename: string) {
   a.href = url
   a.download = filename
   a.click()
-  URL.revokeObjectURL(url)
+  // Revoke after a delay — the browser reads the blob asynchronously,
+  // so revoking immediately can cause silent download failures on slow devices.
+  setTimeout(() => URL.revokeObjectURL(url), 10_000)
 }
 
 interface PodSingleResult {
