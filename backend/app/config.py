@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     rates_webhook_url: str = ""
     rates_webhook_secret: str = ""
 
+    # Support (Crisp → Zapier → Trello)
+    support_zapier_url: str = ""
+
     # App
     bypass_pin: str = ""
     frontend_url: str = "http://localhost:5173"

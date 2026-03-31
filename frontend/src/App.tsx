@@ -1,10 +1,23 @@
 import { Routes, Route, Navigate } from "react-router-dom"
 import { NavBar } from "@/components/layout/NavBar"
+import { useCrispTicket } from "@/hooks/useCrispTicket"
 import PickupRequest from "@/pages/PickupRequest"
 import AddressValidator from "@/pages/AddressValidator"
 import LabelSorter from "@/pages/LabelSorter"
 import ShipmentsQuotation from "@/pages/ShipmentsQuotation"
 import ProofOfDelivery from "@/pages/ProofOfDelivery"
+
+function CrispToast() {
+  const { toast } = useCrispTicket()
+  if (!toast) return null
+  return (
+    <div className="fixed bottom-20 right-6 z-50 animate-in fade-in slide-in-from-bottom-2 duration-300">
+      <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-2.5 shadow-md">
+        <p className="text-sm text-emerald-800">Il team è stato notificato.</p>
+      </div>
+    </div>
+  )
+}
 
 export default function App() {
   return (
@@ -18,6 +31,7 @@ export default function App() {
         <Route path="/quotation" element={<ShipmentsQuotation />} />
         <Route path="/pod" element={<ProofOfDelivery />} />
       </Routes>
+      <CrispToast />
     </div>
   )
 }
