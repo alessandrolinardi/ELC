@@ -239,7 +239,7 @@ export default function AddressValidator() {
             <FileDropZone
               label="Carica file Excel"
               subtitle="Formato .xlsx o .xls con colonne indirizzo"
-              accept=".xlsx,.xls"
+              accept=".xlsx,.xls,.csv"
               icon={"\uD83D\uDCCA"}
               maxSizeMB={50}
               onFilesSelected={(files) => setExcelFile(files[0] || null)}

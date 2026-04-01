@@ -46,15 +46,23 @@ def _resolve_po(po_override: str, order_numbers: list[str]) -> str:
 _ZIP_COLUMN_NAMES = {'zip', 'cap', 'postal code', 'postcode', 'zip code'}
 
 
-def _read_excel_preserve_zip(source, **kwargs) -> pd.DataFrame:
-    """Read Excel, keeping ZIP columns as strings to preserve leading zeros."""
-    # First pass: read header only to find ZIP column
+def _read_excel_preserve_zip(source, filename: str = "", **kwargs) -> pd.DataFrame:
+    """Read Excel or CSV, keeping ZIP columns as strings to preserve leading zeros."""
+    fname = filename.lower() if filename else ""
+
+    if fname.endswith('.csv'):
+        # CSV: read all as string first to find ZIP columns, then re-read
+        if hasattr(source, 'seek'):
+            source.seek(0)
+        df = pd.read_csv(source, dtype=str)
+        return df
+
+    # Excel: two-pass read with ZIP dtype coercion
     df_head = pd.read_excel(source, nrows=0, **kwargs)
     str_cols = {
         col: str for col in df_head.columns
         if col.lower().strip() in _ZIP_COLUMN_NAMES
     }
-    # Re-read with ZIP columns forced to string
     if hasattr(source, 'seek'):
         source.seek(0)
     return pd.read_excel(source, dtype=str_cols, **kwargs)
@@ -78,8 +86,8 @@ def _process_parse(
     """Run AI address parsing in background thread (Phase 1)."""
     settings = get_settings()
     try:
-        # Parse Excel (preserve ZIP leading zeros)
-        df = _read_excel_preserve_zip(io.BytesIO(excel_bytes))
+        # Parse Excel/CSV (preserve ZIP leading zeros)
+        df = _read_excel_preserve_zip(io.BytesIO(excel_bytes), filename=original_filename)
         df = df.reset_index(drop=True)
 
         if len(df) == 0:
@@ -523,6 +531,7 @@ async def create_validator_job(
     settings = get_settings()
 
     # File size check
+    original_filename = sanitize_filename(excel_file.filename or "upload.xlsx")
     content = await excel_file.read()
     if len(content) / (1024 * 1024) > settings.max_file_size_mb:
         raise HTTPException(status_code=413, detail={
@@ -531,7 +540,7 @@ async def create_validator_job(
 
     # Quick-check: reject empty files before creating a job
     try:
-        quick_df = _read_excel_preserve_zip(io.BytesIO(content))
+        quick_df = _read_excel_preserve_zip(io.BytesIO(content), filename=original_filename)
         if len(quick_df) == 0:
             raise HTTPException(status_code=400, detail={
                 "ok": False, "error": {"code": "EMPTY_FILE", "message": "Il file non contiene righe di dati"}
@@ -540,7 +549,7 @@ async def create_validator_job(
         raise
     except Exception:
         raise HTTPException(status_code=400, detail={
-            "ok": False, "error": {"code": "INVALID_FILE", "message": "Unable to read Excel file"}
+            "ok": False, "error": {"code": "INVALID_FILE", "message": "Impossibile leggere il file. Formati supportati: Excel (.xlsx, .xls), CSV (.csv)"}
         })
 
     client_ip = request.client.host if request.client else "unknown"
@@ -549,7 +558,6 @@ async def create_validator_job(
     pin_valid = bool(settings.bypass_pin) and bypass_pin == settings.bypass_pin
 
     # Create job and run Phase 1 in background
-    original_filename = sanitize_filename(excel_file.filename or "upload.xlsx")
     job_id = job_store.create_job("validator")
     loop = asyncio.get_running_loop()
     loop.run_in_executor(

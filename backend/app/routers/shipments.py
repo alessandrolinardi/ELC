@@ -21,12 +21,13 @@ def _process_quotation(
     job_id: str,
     excel_bytes: bytes,
     from_address: dict,
+    filename: str = "upload.xlsx",
 ):
-    """Background task: parse Excel → call rates webhook → store result."""
+    """Background task: parse Excel/CSV → call rates webhook → store result."""
     try:
-        # Phase 1: Parse Excel
+        # Phase 1: Parse file
         job_store.update_progress(job_id, 0, 100, "Analisi file in corso...")
-        shipments = parse_shipments_excel(excel_bytes)
+        shipments = parse_shipments_excel(excel_bytes, filename)
 
         if not shipments:
             job_store.update_status(job_id, "failed", error="Nessuna spedizione trovata nel file.")
@@ -73,9 +74,10 @@ async def create_shipments_quotation(
     from_email: str = Form(""),
 ):
     # Validate file
-    if not file.filename or not file.filename.lower().endswith(('.xlsx', '.xls')):
+    fname = (file.filename or "").lower()
+    if not fname.endswith(('.xlsx', '.xls', '.csv')):
         raise HTTPException(status_code=400, detail={
-            "ok": False, "error": {"code": "INVALID_FILE", "message": "Il file deve essere in formato Excel (.xlsx)"}
+            "ok": False, "error": {"code": "INVALID_FILE", "message": "Il file deve essere Excel (.xlsx, .xls) o CSV (.csv)"}
         })
 
     content = await file.read()
@@ -93,7 +95,7 @@ async def create_shipments_quotation(
     job_id = job_store.create_job("shipments_quotation")
 
     loop = asyncio.get_running_loop()
-    loop.run_in_executor(None, _process_quotation, job_id, content, from_address)
+    loop.run_in_executor(None, _process_quotation, job_id, content, from_address, file.filename or "upload.xlsx")
 
     return {"ok": True, "data": {"job_id": job_id}}
 

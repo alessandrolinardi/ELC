@@ -97,8 +97,8 @@ export default function LabelSorter() {
               />
               <FileDropZone
                 label="Export Excel ShippyPro"
-                subtitle="File .xlsx con l'elenco ordini"
-                accept=".xlsx,.xls"
+                subtitle="File Excel o CSV con l'elenco ordini"
+                accept=".xlsx,.xls,.csv"
                 icon={"\uD83D\uDCCA"}
                 maxSizeMB={50}
                 onFilesSelected={(files) => setExcelFile(files[0] || null)}

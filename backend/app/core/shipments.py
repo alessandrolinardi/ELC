@@ -210,13 +210,13 @@ def _clean_num(val, default: float = 1.0) -> float:
         return default
 
 
-def parse_shipments_excel(excel_bytes: bytes) -> list[dict]:
-    """Parse Excel into a list of shipment dicts for the rates API.
+def parse_shipments_excel(excel_bytes: bytes, filename: str = "upload.xlsx") -> list[dict]:
+    """Parse Excel or CSV into a list of shipment dicts for the rates API.
 
     Returns a list of shipments ready for the webhook payload.
     Omits optional fields if empty rather than sending null.
     """
-    df = pd.read_excel(io.BytesIO(excel_bytes))
+    df = _read_file_as_dataframe(excel_bytes, filename)
     col_map = map_columns(df)
 
     shipments = []

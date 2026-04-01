@@ -44,9 +44,12 @@ def _process_labels(job_id: str, pdf_file_bytes_list: list[bytes], excel_bytes: 
         # Parse Excel
         excel_data = excel_parser.parse_excel(excel_bytes, excel_filename)
 
-        # Validate raw Excel content
+        # Validate raw file content
         import pandas as pd, io
-        df = pd.read_excel(io.BytesIO(excel_bytes))
+        if excel_filename.lower().endswith('.csv'):
+            df = pd.read_csv(io.BytesIO(excel_bytes))
+        else:
+            df = pd.read_excel(io.BytesIO(excel_bytes))
         content_valid, content_error = validate_excel_content(df)
         if not content_valid:
             job_store.update_status(job_id, "failed", error=f"Invalid content: {content_error}")

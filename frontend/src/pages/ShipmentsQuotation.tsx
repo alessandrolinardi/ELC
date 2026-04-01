@@ -262,8 +262,8 @@ export default function ShipmentsQuotation() {
 
             <FileDropZone
               label="File spedizioni"
-              subtitle="Excel con indirizzi e dimensioni colli"
-              accept=".xlsx,.xls"
+              subtitle="Excel o CSV con indirizzi e dimensioni colli"
+              accept=".xlsx,.xls,.csv"
               icon="📦"
               onFilesSelected={(files) => { setExcelFile(files[0] || null); setFromValidator(false) }}
               selectedFiles={excelFile ? [excelFile] : []}
