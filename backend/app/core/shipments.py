@@ -47,10 +47,51 @@ _RECIPIENT_COLUMNS = {
 }
 
 
+def _read_file_as_dataframe(excel_bytes: bytes, filename: str) -> pd.DataFrame:
+    """Read Excel or CSV file into a DataFrame.
+
+    Tries CSV first if the filename ends in .csv or .tsv.
+    Otherwise uses ExcelParser (handles XLS, XLSX, HTML-as-XLS).
+    Falls back to CSV if Excel parsing fails.
+    """
+    fname_lower = filename.lower()
+
+    # CSV/TSV: try multiple separators, pick the one that produces most columns
+    if fname_lower.endswith(('.csv', '.tsv')):
+        best_df = None
+        best_cols = 0
+        for sep in (['\t'] if fname_lower.endswith('.tsv') else [',', ';', '\t']):
+            try:
+                df = pd.read_csv(io.BytesIO(excel_bytes), sep=sep, dtype=str)
+                if len(df.columns) > best_cols:
+                    best_df = df
+                    best_cols = len(df.columns)
+            except Exception:
+                continue
+        if best_df is not None and best_cols > 1:
+            return best_df
+        if best_df is not None:
+            return best_df
+        raise ValueError("Impossibile leggere il file CSV.")
+
+    # Excel: use ExcelParser (handles format detection, encoding, etc.)
+    parser = ExcelParser()
+    try:
+        return parser._try_read_excel(io.BytesIO(excel_bytes), filename)
+    except Exception:
+        # Fallback: maybe it's actually a CSV with wrong extension
+        for sep in [',', ';', '\t']:
+            try:
+                return pd.read_csv(io.BytesIO(excel_bytes), sep=sep, dtype=str)
+            except Exception:
+                continue
+        raise ValueError(f"Impossibile leggere il file. Formati supportati: Excel (.xlsx, .xls), CSV (.csv)")
+
+
 def extract_identifiers_from_excel(
     excel_bytes: bytes, filename: str = "upload.xls",
 ) -> tuple[list[str], dict[str, dict]]:
-    """Extract POD identifiers and recipient metadata from an Excel file.
+    """Extract POD identifiers and recipient metadata from an Excel or CSV file.
 
     Searches for identifier columns in priority order:
     1. Numero ordine ShippyPro (most reliable)
@@ -58,16 +99,13 @@ def extract_identifiers_from_excel(
     3. ID Ordine Marketplace
 
     Also extracts recipient info (name, street, city) when available.
+    Supports: .xlsx, .xls, .csv, .tsv (and HTML-as-XLS from ShippyPro).
 
     Returns:
         (identifiers, metadata) where metadata maps identifier → {name, street, city}
     """
-    parser = ExcelParser()
-
-    try:
-        df = parser._try_read_excel(io.BytesIO(excel_bytes), filename)
-    except Exception as e:
-        raise ValueError(f"Impossibile leggere il file: {e}")
+    df = _read_file_as_dataframe(excel_bytes, filename)
+    parser = ExcelParser()  # For _find_column fallback
 
     df.columns = [str(col).strip().replace('\n', ' ') for col in df.columns]
     col_lower_map = {col.lower().strip(): col for col in df.columns}

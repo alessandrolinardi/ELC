@@ -290,9 +290,9 @@ async def get_pod_from_excel(
     request: Request,
     file: UploadFile = File(...),
 ):
-    """Extract identifiers from an Excel file and fetch PODs.
+    """Extract identifiers from an Excel or CSV file and fetch PODs.
 
-    Handles ShippyPro exports (HTML-as-XLS), standard XLSX. Searches for
+    Handles ShippyPro exports (HTML-as-XLS), XLSX, XLS, CSV, TSV. Searches for
     columns in priority order: Numero ordine ShippyPro (most reliable),
     Tracking, ID Ordine Marketplace.
 

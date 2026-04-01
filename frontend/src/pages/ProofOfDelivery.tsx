@@ -265,8 +265,8 @@ export default function ProofOfDelivery() {
             {/* Excel upload */}
             <FileDropZone
               label="Carica file Excel"
-              subtitle="Excel con colonna tracking (ShippyPro export, XLSX, XLS)"
-              accept=".xlsx,.xls"
+              subtitle="File con colonna tracking (XLSX, XLS, CSV)"
+              accept=".xlsx,.xls,.csv,.tsv"
               icon="&#128196;"
               onFilesSelected={(files) => { setExcelFile(files[0] || null); setTextInput("") }}
               selectedFiles={excelFile ? [excelFile] : []}
