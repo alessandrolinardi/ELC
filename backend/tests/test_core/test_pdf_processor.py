@@ -117,5 +117,47 @@ class TestTrackingValidation:
         assert self.processor._validate_tracking("633270", "DHL") is False
 
 
+class TestFedExSpacedTracking:
+    """Regression test: FedEx spaced tracking must be preferred over barcode fragments."""
+
+    def setup_method(self):
+        self.processor = PDFProcessor()
+
+    def test_spaced_tracking_preferred_over_barcode_fragment(self):
+        """Real FedEx label text: 8702 0996 5047 is the tracking, J261026012001uv is a barcode."""
+        text = """TRK#
+SHIP DATE: 01APR26
+ACTWGT: 1.00 KG
+EST…E LAUDER
+VIA TURATI 3
+MILANO, MI 20121
+BILL SENDER
+58KJ2/1172/484B
+8702 0996 5047
+           PRIORITY
+J261026012001uv"""
+        tracking, carrier = self.processor.extract_tracking_from_text(text)
+        assert tracking == "870209965047", f"Expected spaced tracking, got {tracking}"
+        assert carrier == "FedEx"
+
+    def test_barcode_fragment_not_extracted(self):
+        """261026012001 inside J261026012001uv should not be extracted as tracking."""
+        text = """FEDEX
+J261026012001uv
+Some other text"""
+        tracking, carrier = self.processor.extract_tracking_from_text(text)
+        # Should NOT extract 261026012001 (no word boundary)
+        assert tracking != "261026012001", f"Barcode fragment should not be extracted"
+
+    def test_standalone_12digit_still_works(self):
+        """A standalone 12-digit FedEx tracking (not inside a barcode) should still match."""
+        text = """FEDEX
+870210005500
+Recipient Name"""
+        tracking, carrier = self.processor.extract_tracking_from_text(text)
+        assert tracking == "870210005500"
+        assert carrier == "FedEx"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
