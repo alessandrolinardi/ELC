@@ -501,6 +501,14 @@ def _process_validate(
 # Endpoints
 # ---------------------------------------------------------------------------
 
+@router.post("/validate-pin")
+async def validate_pin(request: Request, pin: str = Form("")):
+    """Validate the bypass PIN. Used by Step 3 to unlock downloads when PO is invalid."""
+    settings = get_settings()
+    valid = bool(settings.bypass_pin) and pin == settings.bypass_pin
+    return {"ok": True, "data": {"valid": valid}}
+
+
 @router.post("/jobs/validator")
 @limiter.limit("10/hour")
 async def create_validator_job(

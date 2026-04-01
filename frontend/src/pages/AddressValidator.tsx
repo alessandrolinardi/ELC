@@ -58,6 +58,12 @@ export default function AddressValidator() {
   const [resultEdits, setResultEdits] = useState<Record<string, Record<string, string>>>({})
   const [filesReady, setFilesReady] = useState(false)
 
+  // PIN override for Step 3 (when PO invalid and PIN wasn't entered at upload)
+  const [step3Pin, setStep3Pin] = useState("")
+  const [step3PinValid, setStep3PinValid] = useState(false)
+  const [step3PinChecking, setStep3PinChecking] = useState(false)
+  const [step3PinTried, setStep3PinTried] = useState(false)
+
   // Job polling — result type varies by phase
   // During Phase 1 (parsing): result is ParsedJobResult
   // During Phase 2 (validation): result is ValidatorJobResult
@@ -214,6 +220,9 @@ export default function AddressValidator() {
     setCampaign("")
     setPoNumber("")
     setEditingPo(true)
+    setStep3Pin("")
+    setStep3PinValid(false)
+    setStep3PinTried(false)
   }
 
   return (
@@ -687,11 +696,48 @@ export default function AddressValidator() {
                 <p className="text-sm font-semibold text-red-800">
                   Attenzione: {validatorResult.po_invalid_count} PO non validi trovati
                 </p>
-                <p className="text-sm text-red-700 mt-1">
-                  {validatorResult.pin_valid
-                    ? "Download consentito grazie al PIN di override."
-                    : "Correggi i PO nel file originale oppure inserisci il PIN per scaricare comunque."}
-                </p>
+                {validatorResult.pin_valid || step3PinValid ? (
+                  <p className="text-sm text-emerald-700 mt-1">
+                    Download consentito grazie al PIN di override.
+                  </p>
+                ) : (
+                  <div className="mt-2 space-y-2">
+                    <p className="text-sm text-red-700">
+                      Inserisci il PIN per scaricare comunque:
+                    </p>
+                    <div className="flex gap-2 items-center">
+                      <Input
+                        type="password"
+                        value={step3Pin}
+                        onChange={(e) => setStep3Pin(e.target.value)}
+                        placeholder="PIN"
+                        className="w-32 h-8 text-sm"
+                      />
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={!step3Pin.trim() || step3PinChecking}
+                        onClick={async () => {
+                          setStep3PinChecking(true)
+                          try {
+                            const formData = new FormData()
+                            formData.append("pin", step3Pin)
+                            const resp = await api.postForm<{ valid: boolean }>("/api/v1/validate-pin", formData)
+                            setStep3PinValid(resp.valid)
+                            setStep3PinTried(true)
+                            if (!resp.valid) setStep3Pin("")
+                          } catch { /* ignore */ }
+                          setStep3PinChecking(false)
+                        }}
+                      >
+                        {step3PinChecking ? "..." : "Verifica"}
+                      </Button>
+                    </div>
+                    {step3PinTried && !step3PinValid && (
+                      <p className="text-xs text-red-600">PIN non valido. Riprova.</p>
+                    )}
+                  </div>
+                )}
               </div>
             )}
 
@@ -716,7 +762,7 @@ export default function AddressValidator() {
 
             {/* Download cards — blocked if PO invalid and no PIN override */}
             {(() => {
-              const downloadAllowed = validatorResult.po_invalid_count === 0 || validatorResult.pin_valid
+              const downloadAllowed = validatorResult.po_invalid_count === 0 || validatorResult.pin_valid || step3PinValid
               return filesReady && (
                 <>
                   {!downloadAllowed && (
@@ -747,7 +793,7 @@ export default function AddressValidator() {
             })()}
 
             {/* Quotation CTA — also gated by PO validity */}
-            {filesReady && (validatorResult.po_invalid_count === 0 || validatorResult.pin_valid) && (
+            {filesReady && (validatorResult.po_invalid_count === 0 || validatorResult.pin_valid || step3PinValid) && (
               <div className="elc-card text-center py-6 space-y-3">
                 <p className="text-sm font-semibold text-foreground">
                   Vuoi anche una quotazione?
