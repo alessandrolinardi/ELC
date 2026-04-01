@@ -47,7 +47,7 @@ def _process_labels(job_id: str, pdf_file_bytes_list: list[bytes], excel_bytes: 
         # Validate raw file content
         import pandas as pd, io
         if excel_filename.lower().endswith('.csv'):
-            df = pd.read_csv(io.BytesIO(excel_bytes))
+            df = pd.read_csv(io.BytesIO(excel_bytes), dtype=str)
         else:
             df = pd.read_excel(io.BytesIO(excel_bytes))
         content_valid, content_error = validate_excel_content(df)

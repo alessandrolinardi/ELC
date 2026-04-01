@@ -51,11 +51,20 @@ def _read_excel_preserve_zip(source, filename: str = "", **kwargs) -> pd.DataFra
     fname = filename.lower() if filename else ""
 
     if fname.endswith('.csv'):
-        # CSV: read all as string first to find ZIP columns, then re-read
+        # CSV: try comma then semicolon, read all as string to preserve ZIPs
+        for sep in [',', ';']:
+            try:
+                if hasattr(source, 'seek'):
+                    source.seek(0)
+                df = pd.read_csv(source, sep=sep, dtype=str)
+                if len(df.columns) > 1:
+                    return df
+            except Exception:
+                continue
+        # Fallback: single-column or last attempt
         if hasattr(source, 'seek'):
             source.seek(0)
-        df = pd.read_csv(source, dtype=str)
-        return df
+        return pd.read_csv(source, dtype=str)
 
     # Excel: two-pass read with ZIP dtype coercion
     df_head = pd.read_excel(source, nrows=0, **kwargs)

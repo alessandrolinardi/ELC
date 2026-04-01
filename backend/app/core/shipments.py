@@ -56,20 +56,25 @@ def _read_file_as_dataframe(excel_bytes: bytes, filename: str) -> pd.DataFrame:
     """
     fname_lower = filename.lower()
 
-    # CSV/TSV: try multiple separators, pick the one that produces most columns
+    # CSV/TSV: try multiple separators, pick the best one
     if fname_lower.endswith(('.csv', '.tsv')):
         best_df = None
-        best_cols = 0
-        for sep in (['\t'] if fname_lower.endswith('.tsv') else [',', ';', '\t']):
+        best_score = -1
+        seps = ['\t'] if fname_lower.endswith('.tsv') else [',', ';', '\t']
+        for sep in seps:
             try:
                 df = pd.read_csv(io.BytesIO(excel_bytes), sep=sep, dtype=str)
-                if len(df.columns) > best_cols:
+                # Score: prefer the separator that produces recognizable column names
+                # over the one that just produces more columns (avoids splitting
+                # commas inside data fields of a semicolon-separated file)
+                col_lower = {c.lower().strip() for c in df.columns}
+                known_hits = sum(1 for alias, _ in _POD_IDENTIFIER_COLUMNS if alias in col_lower)
+                score = known_hits * 100 + len(df.columns)
+                if score > best_score:
                     best_df = df
-                    best_cols = len(df.columns)
+                    best_score = score
             except Exception:
                 continue
-        if best_df is not None and best_cols > 1:
-            return best_df
         if best_df is not None:
             return best_df
         raise ValueError("Impossibile leggere il file CSV.")
