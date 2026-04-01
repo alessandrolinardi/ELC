@@ -62,14 +62,23 @@ async function request<T>(
 
   const json = await response.json()
 
-  // Handle FastAPI validation errors (422 with detail array)
+  // Handle FastAPI error responses that use the `detail` field
   if (!response.ok && json.detail) {
-    const detail = Array.isArray(json.detail)
-      ? json.detail.map((d: { msg?: string; loc?: string[] }) =>
-          `${d.loc?.slice(-1)[0] || "field"}: ${d.msg || "invalid"}`
-        ).join(", ")
-      : typeof json.detail === "string" ? json.detail : JSON.stringify(json.detail)
-    throw new ApiRequestError("VALIDATION_ERROR", detail, response.status)
+    const detail = json.detail
+    // Envelope-style detail: {"ok": false, "error": {"code": ..., "message": ...}}
+    if (typeof detail === "object" && !Array.isArray(detail) && detail.error?.message) {
+      throw new ApiRequestError(detail.error.code || "ERROR", detail.error.message, response.status)
+    }
+    // Pydantic validation errors (422 with detail array)
+    if (Array.isArray(detail)) {
+      const msg = detail.map((d: { msg?: string; loc?: string[] }) =>
+        `${d.loc?.slice(-1)[0] || "field"}: ${d.msg || "invalid"}`
+      ).join(", ")
+      throw new ApiRequestError("VALIDATION_ERROR", msg, response.status)
+    }
+    // Plain string detail
+    const msg = typeof detail === "string" ? detail : JSON.stringify(detail)
+    throw new ApiRequestError("ERROR", msg, response.status)
   }
 
   const typed = json as ApiResponse<T>
