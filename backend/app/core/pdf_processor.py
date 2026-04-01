@@ -52,11 +52,11 @@ class PDFProcessor:
             re.compile(r'1Z[A-Z0-9]{16}', re.IGNORECASE),
         ],
         'FedEx': [
-            # Pattern specifici FedEx
+            # Pattern specifici FedEx (order matters — most specific first)
             re.compile(r'TRK#\s*\[?\d*\]?\s*([\d\s]+?)(?:\s{2,}|\n|$)', re.IGNORECASE),
             re.compile(r'TRACKING\s*(?:ID|#|NUMBER)?\s*:?\s*(\d[\d\s]{10,}?)(?:\s{2,}|\n|$)', re.IGNORECASE),
-            re.compile(r'(\d{12,22})', re.IGNORECASE),  # FedEx 12-22 digits
-            re.compile(r'(\d{4}\s+\d{4}\s+\d{4}(?:\s+\d{4})?)', re.IGNORECASE),  # Spaced format
+            re.compile(r'(\d{4}\s+\d{4}\s+\d{4}(?:\s+\d{4})?)', re.IGNORECASE),  # Spaced format: 8702 0996 5047
+            re.compile(r'\b(\d{12,22})\b'),  # FedEx 12-22 digits (word boundary to avoid barcode fragments)
         ],
         'DHL': [
             # Pattern specifici DHL - più flessibili per catturare numeri con spazi
