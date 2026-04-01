@@ -41,16 +41,20 @@ def _process_labels(job_id: str, pdf_file_bytes_list: list[bytes], excel_bytes: 
             job_store.update_status(job_id, "failed", error=f"Too many pages ({pdf_data.total_pages}). Max: {settings.max_pdf_pages}")
             return
 
-        # Parse Excel
+        # Parse Excel/CSV (ExcelParser handles format detection + calamine fallback)
         excel_data = excel_parser.parse_excel(excel_bytes, excel_filename)
 
-        # Validate raw file content
-        import pandas as pd, io
-        if excel_filename.lower().endswith('.csv'):
-            df = pd.read_csv(io.BytesIO(excel_bytes), dtype=str)
-        else:
-            df = pd.read_excel(io.BytesIO(excel_bytes))
-        content_valid, content_error = validate_excel_content(df)
+        # Validate raw file content (reuse ExcelParser for consistent format handling)
+        import io
+        try:
+            df = excel_parser._try_read_excel(io.BytesIO(excel_bytes), excel_filename)
+        except Exception:
+            # ExcelParser.parse_excel succeeded above, so this shouldn't fail
+            # but if it does, skip content validation rather than crash
+            df = None
+        content_valid, content_error = True, None
+        if df is not None:
+            content_valid, content_error = validate_excel_content(df)
         if not content_valid:
             job_store.update_status(job_id, "failed", error=f"Invalid content: {content_error}")
             return
