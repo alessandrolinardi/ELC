@@ -73,12 +73,18 @@ from fastapi.exceptions import RequestValidationError
 @app.exception_handler(RequestValidationError)
 async def validation_error_handler(request: Request, exc: RequestValidationError):
     import logging
+    errors = exc.errors()
     logging.getLogger("elc.validation").error(
-        "422 on %s %s: %s", request.method, request.url.path, exc.errors()
+        "422 on %s %s: %s", request.method, request.url.path, errors
     )
+    # Strip non-serializable ctx.error (Pydantic model_validator puts raw ValueError there)
+    safe_errors = []
+    for err in errors:
+        clean = {k: v for k, v in err.items() if k != "ctx"}
+        safe_errors.append(clean)
     return JSONResponse(
         status_code=422,
-        content={"detail": exc.errors()},
+        content={"ok": False, "error": {"code": "VALIDATION_ERROR", "details": safe_errors}},
     )
 
 
