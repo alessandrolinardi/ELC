@@ -49,6 +49,7 @@ export default function AddressValidator() {
   const [newBrandName, setNewBrandName] = useState("")
   const [brandError, setBrandError] = useState("")
   const [poNumber, setPoNumber] = useState("")
+  const [editingPo, setEditingPo] = useState(true)
 
   // Edit state for the review step (Phase 1)
   const [edits, setEdits] = useState<Record<string, Record<string, string>>>({})
@@ -212,6 +213,7 @@ export default function AddressValidator() {
     setBrand("")
     setCampaign("")
     setPoNumber("")
+    setEditingPo(true)
   }
 
   return (
@@ -509,7 +511,7 @@ export default function AddressValidator() {
                         </Badge>
                       )}
                     </div>
-                    {!parsedResult.order_id_summary.detected_po && !poNumber && (
+                    {!parsedResult.order_id_summary.detected_po && editingPo && (
                       <div className="rounded-md bg-amber-50 border border-amber-200 px-4 py-3">
                         <p className="text-sm text-amber-800 font-medium">
                           PO non rilevato — inseriscilo per continuare
@@ -521,18 +523,27 @@ export default function AddressValidator() {
                             placeholder="Es. 3501494822"
                             className="w-48 h-8 text-sm"
                           />
+                          {poNumber.trim() && (
+                            <button
+                              type="button"
+                              onClick={() => setEditingPo(false)}
+                              className="text-xs text-primary font-medium hover:underline"
+                            >
+                              Conferma
+                            </button>
+                          )}
                         </div>
                         <p className="text-xs text-amber-600 mt-1">Necessario per il tracciamento ordini</p>
                       </div>
                     )}
-                    {!parsedResult.order_id_summary.detected_po && poNumber && (
+                    {!parsedResult.order_id_summary.detected_po && !editingPo && poNumber && (
                       <div className="flex gap-2 text-xs items-center">
                         <Badge variant="outline" className="px-2 py-0.5 border-blue-400 text-blue-700">
                           PO: {poNumber}
                         </Badge>
                         <button
                           type="button"
-                          onClick={() => setPoNumber("")}
+                          onClick={() => setEditingPo(true)}
                           className="text-xs text-muted-foreground underline hover:text-foreground"
                         >
                           Modifica
