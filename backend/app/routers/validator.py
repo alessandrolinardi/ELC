@@ -1,5 +1,6 @@
 """Address Validator endpoints."""
 import asyncio
+import hmac
 import io
 import math
 import re
@@ -212,7 +213,11 @@ def _process_parse(
             if raw_val is None or (isinstance(raw_val, float) and math.isnan(raw_val)):
                 order_numbers.append("")
             else:
-                order_numbers.append(str(raw_val).strip())
+                s = str(raw_val).strip()
+                if s.lower() in ('nan', 'none', ''):
+                    order_numbers.append("")
+                else:
+                    order_numbers.append(s)
 
         order_id_warnings = []
         valid_count = 0
@@ -530,7 +535,7 @@ def _process_validate(
 async def validate_pin(request: Request, pin: str = Form("")):
     """Validate the bypass PIN. Used by Step 3 to unlock downloads when PO is invalid."""
     settings = get_settings()
-    valid = bool(settings.bypass_pin) and pin == settings.bypass_pin
+    valid = bool(settings.bypass_pin) and hmac.compare_digest(pin, settings.bypass_pin)
     return {"ok": True, "data": {"valid": valid}}
 
 
@@ -572,7 +577,7 @@ async def create_validator_job(
     client_ip = request.client.host if request.client else "unknown"
 
     # Validate bypass_pin in request handler (not in background thread)
-    pin_valid = bool(settings.bypass_pin) and bypass_pin == settings.bypass_pin
+    pin_valid = bool(settings.bypass_pin) and hmac.compare_digest(bypass_pin, settings.bypass_pin)
 
     # Create job and run Phase 1 in background
     job_id = job_store.create_job("validator")

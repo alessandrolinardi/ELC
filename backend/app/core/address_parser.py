@@ -5,6 +5,7 @@ Parses raw address strings into structured ParsedAddress fields.
 import re
 import time
 import logging
+import threading
 from typing import Optional
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -107,6 +108,7 @@ class AddressParser:
             except Exception as e:
                 logger.warning(f"Could not init Anthropic client: {e}")
         self.metrics = ParsingMetrics(prompt_version=PROMPT_VERSION)
+        self._metrics_lock = threading.Lock()
 
     def parse_all(self, addresses: list[dict]) -> list[ParsedAddress]:
         """
@@ -156,15 +158,18 @@ class AddressParser:
                     batch_results = self._parse_batch_claude(batch, start_idx)
                     for i, parsed in enumerate(batch_results):
                         results[start_idx + i] = parsed
-                    self.metrics.batch_retries_succeeded += 1
+                    with self._metrics_lock:
+                        self.metrics.batch_retries_succeeded += 1
                 except Exception as e2:
                     logger.error(f"Batch at {start_idx} retry failed: {e2}, falling back to regex")
-                    self.metrics.batch_failures += 1
+                    with self._metrics_lock:
+                        self.metrics.batch_failures += 1
                     for i, addr in enumerate(batch):
                         results[start_idx + i] = self.parse_single_regex(
                             addr["street"], addr["city"], addr["zip"]
                         )
-                        self.metrics.regex_fallback += 1
+                        with self._metrics_lock:
+                            self.metrics.regex_fallback += 1
 
         # Fill any remaining None slots with regex
         for i, result in enumerate(results):
@@ -173,7 +178,8 @@ class AddressParser:
                 results[i] = self.parse_single_regex(
                     addr["street"], addr["city"], addr["zip"]
                 )
-                self.metrics.regex_fallback += 1
+                with self._metrics_lock:
+                    self.metrics.regex_fallback += 1
 
         return results
 
@@ -223,21 +229,25 @@ class AddressParser:
                 if self.verify_parsing(addr["street"], parsed):
                     parsed.parse_method = "ai"
                     results[i] = parsed
-                    self.metrics.claude_parsed += 1
+                    with self._metrics_lock:
+                        self.metrics.claude_parsed += 1
                 else:
                     logger.warning(
                         f"Verification failed for idx {global_idx}: {addr['street']}"
                     )
-                    self.metrics.claude_failed_verify += 1
+                    with self._metrics_lock:
+                        self.metrics.claude_failed_verify += 1
                     results[i] = self.parse_single_regex(
                         addr["street"], addr["city"], addr["zip"]
                     )
-                    self.metrics.regex_fallback += 1
+                    with self._metrics_lock:
+                        self.metrics.regex_fallback += 1
             else:
                 results[i] = self.parse_single_regex(
                     addr["street"], addr["city"], addr["zip"]
                 )
-                self.metrics.regex_fallback += 1
+                with self._metrics_lock:
+                    self.metrics.regex_fallback += 1
 
         return results
 
@@ -246,7 +256,8 @@ class AddressParser:
         results = []
         for addr in addresses:
             parsed = self.parse_single_regex(addr["street"], addr["city"], addr["zip"])
-            self.metrics.regex_fallback += 1
+            with self._metrics_lock:
+                self.metrics.regex_fallback += 1
             results.append(parsed)
         return results
 
@@ -384,12 +395,50 @@ class AddressParser:
         norm_original = self._normalize(original)
         norm_reconstructed = self._normalize(reconstructed)
 
+        # Normalize abbreviations in both strings before comparison
+        # so that e.g. "P.zza" (→ "p zza" after punctuation removal) matches "Piazza"
+        norm_original = self._normalize_abbreviations(norm_original)
+        norm_reconstructed = self._normalize_abbreviations(norm_reconstructed)
+
         original_words = set(norm_original.split())
         reconstructed_words = set(norm_reconstructed.split())
 
         missing = original_words - reconstructed_words
         extra = reconstructed_words - original_words
-        return len(missing) <= 1 and len(extra) <= 1
+        if len(missing) > 1 or len(extra) > 1:
+            return False
+
+        # House number must not be silently dropped
+        orig_numbers = set(re.findall(r'\b\d+\b', norm_original))
+        recon_numbers = set(re.findall(r'\b\d+\b', norm_reconstructed))
+        if orig_numbers and not orig_numbers.issubset(recon_numbers):
+            return False
+
+        return True
+
+    @staticmethod
+    def _normalize_abbreviations(text: str) -> str:
+        """Normalize common Italian address abbreviations to their full forms.
+
+        Operates on already-lowered, punctuation-stripped text (output of _normalize),
+        where e.g. "P.zza" has become "p zza" and "V.le" has become "v le".
+        """
+        # Mapping from normalized-abbreviation fragments to full forms (lowercase).
+        # Order matters: longer / more specific patterns first to avoid partial matches.
+        abbrev_map = [
+            (r'\bp\s*zza\b', 'piazza'),
+            (r'\bp\s*za\b', 'piazza'),
+            (r'\bpzza\b', 'piazza'),
+            (r'\bp\s*le\b', 'piazzale'),
+            (r'\bv\s*le\b', 'viale'),
+            (r'\bvle\b', 'viale'),
+            (r'\bc\s*so\b', 'corso'),
+            (r'\bl\s*go\b', 'largo'),
+            (r'\bv(?:\s|$)(?=[a-z])', 'via '),
+        ]
+        for pattern, replacement in abbrev_map:
+            text = re.sub(pattern, replacement, text)
+        return text
 
     @staticmethod
     def _normalize(text: str) -> str:
