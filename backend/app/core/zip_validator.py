@@ -8,18 +8,15 @@ Includes caching layer with Supabase for faster repeated validations.
 
 import re
 import json
-import hashlib
 from dataclasses import dataclass
 from typing import Optional, Callable
 from io import BytesIO
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
-import unicodedata
 
 import pandas as pd
 
 from .logging_config import get_logger
-from .config_compat import get_supabase_client
 from .models import ParsedAddress, ValidationOutcome, ParsingMetrics
 from .address_parser import AddressParser
 from .address_validator import AddressValidator
@@ -151,126 +148,19 @@ class ZipValidator:
         self.address_parser = AddressParser(api_key=anthropic_api_key)
         self.address_validator = AddressValidator(api_key=google_api_key)
         self._valid_po_numbers = self._load_valid_po_numbers()
-        self._supabase_client = get_supabase_client()
-        self._cache_hits = 0
-        self._cache_misses = 0
+        # Supabase client removed — address cache was write-only (read path
+        # was dead code), and cache key excluded ZIP, causing wrong results.
 
     # =========================================================================
     # Cache methods
     # =========================================================================
 
-    def _normalize_for_cache(self, text: str) -> str:
-        """Normalize text for cache key generation."""
-        if not text:
-            return ""
-        s = text.lower().strip()
-        s = ''.join(
-            c for c in unicodedata.normalize('NFD', s)
-            if unicodedata.category(c) != 'Mn'
-        )
-        s = re.sub(r'[,.\-\'\"()/]', ' ', s)
-        s = re.sub(r'\s+', ' ', s).strip()
-        return s
-
-    def _get_cache_key(self, street: str, city: str) -> str:
-        """Generate cache key from street and city."""
-        norm_street = self._normalize_for_cache(street)
-        norm_city = self._normalize_for_cache(city)
-        key_string = f"{norm_street}|{norm_city}"
-        return hashlib.md5(key_string.encode()).hexdigest()
-
-    def _lookup_cache(self, street: str, city: str) -> Optional[dict]:
-        """Look up address in cache. Returns cached result if found and not expired."""
-        if not self._supabase_client:
-            return None
-
-        try:
-            cache_key = self._get_cache_key(street, city)
-            response = self._supabase_client.table("address_cache").select("*").eq(
-                "street_hash", cache_key
-            ).eq("city_normalized", self._normalize_for_cache(city)).execute()
-
-            if response.data and len(response.data) > 0:
-                record = response.data[0]
-
-                # Check if expired
-                if record.get('expires_at'):
-                    expires = datetime.fromisoformat(
-                        record['expires_at'].replace('Z', '+00:00')
-                    )
-                    if datetime.now(timezone.utc) > expires:
-                        return None
-
-                self._cache_hits += 1
-                return record
-
-            self._cache_misses += 1
-            return None
-
-        except Exception as e:
-            logger.warning(f"Cache lookup error: {e}")
-            return None
-
-    def _write_cache(self, street: str, city: str, outcome: ValidationOutcome,
-                     parsed: ParsedAddress):
-        """Write validation result to cache. Only caches high-confidence results."""
-        if not self._supabase_client:
-            return
-
-        # Only cache valid or corrected results
-        if outcome.status == "review":
-            return
-
-        try:
-            cache_key = self._get_cache_key(street, city)
-            norm_city = self._normalize_for_cache(city)
-
-            record = {
-                "street_hash": cache_key,
-                "city_normalized": norm_city,
-                "original_street": street[:255] if street else None,
-                "original_city": city[:100] if city else None,
-                "validated_zip": outcome.output_zip,
-                "validated_street": outcome.output_street[:255] if outcome.output_street else None,
-                "confidence": 95 if outcome.status == "valid" else 90,
-                "times_used": 1,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-                "expires_at": (datetime.now(timezone.utc) + timedelta(days=90)).isoformat(),
-                # New columns for parsed data
-                "parsed_prefix": parsed.street_prefix,
-                "parsed_name": parsed.street_name,
-                "parsed_house_number": parsed.house_number,
-                "parsed_location_info": parsed.location_info,
-                "parsed_country_code": parsed.country_code,
-                "prompt_version": self.address_parser.metrics.prompt_version,
-                "api_status": outcome.status,
-                "api_formatted": outcome.formatted_address[:255] if outcome.formatted_address else None,
-                "api_granularity": outcome.granularity,
-                "api_reasons": json.dumps(outcome.reasons),
-            }
-
-            self._supabase_client.table("address_cache").upsert(
-                record,
-                on_conflict="street_hash,city_normalized"
-            ).execute()
-
-        except Exception as e:
-            logger.warning(f"Cache write error: {e}")
-
-    def get_cache_stats(self) -> dict:
-        """Get cache hit/miss statistics."""
-        total = self._cache_hits + self._cache_misses
-        hit_rate = (self._cache_hits / total * 100) if total > 0 else 0
-        return {
-            "hits": self._cache_hits,
-            "misses": self._cache_misses,
-            "total": total,
-            "hit_rate": f"{hit_rate:.1f}%"
-        }
+    # Address cache removed — was write-only (lookup never called),
+    # cache key excluded ZIP (wrong results for same street+city with different ZIP),
+    # and added Supabase dependency overhead for zero benefit.
 
     # =========================================================================
-    # PO validation (unchanged)
+    # PO validation
     # =========================================================================
 
     def _load_valid_po_numbers(self) -> set:
@@ -631,10 +521,6 @@ class ZipValidator:
             confidence = 50
 
         reason = "; ".join(outcome.reasons) if outcome.reasons else outcome.action
-
-        # Cache good results
-        if outcome.status in ("valid", "corrected"):
-            self._write_cache(street, city, outcome, parsed)
 
         # Handle Street 2 location info
         self._update_street2(df, idx, row, col_map, outcome, parsed)

@@ -20,8 +20,7 @@ from app.core.utils import map_columns
 
 
 def _make_validator():
-    with patch('app.core.zip_validator.get_supabase_client', return_value=None):
-        return ZipValidator(google_api_key="fake", anthropic_api_key=None)
+    return ZipValidator(google_api_key="fake", anthropic_api_key=None)
 
 
 def _make_report(n_rows: int) -> ValidationReport:

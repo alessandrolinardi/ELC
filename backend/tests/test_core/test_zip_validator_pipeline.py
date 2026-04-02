@@ -18,12 +18,11 @@ from app.core.models import ParsedAddress, ValidationOutcome
 
 def _make_validator(**kwargs):
     """Create a ZipValidator with mocked external dependencies."""
-    with patch('app.core.zip_validator.get_supabase_client', return_value=None):
-        return ZipValidator(
-            google_api_key="fake-key",
-            anthropic_api_key=None,
-            **kwargs
-        )
+    return ZipValidator(
+        google_api_key="fake-key",
+        anthropic_api_key=None,
+        **kwargs
+    )
 
 
 def _make_parsed(prefix="Via", name="Roma", number="10",
