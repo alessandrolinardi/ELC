@@ -686,11 +686,19 @@ class ZipValidator:
                 outcome.status = "review"
                 outcome.reasons.append(prov_msg)
 
+    MAX_STREET2_LENGTH = 35  # ShippyPro rejects Street 2 over 35 chars
+
     def _update_street2(self, df: pd.DataFrame, idx, row,
                          col_map: dict, outcome: ValidationOutcome,
                          parsed: ParsedAddress):
-        """Handle location info → Street 2 column (clean trailing dashes, merge)."""
+        """Handle location info → Street 2 column.
+
+        Moves location info (C.C., outlet names, etc.) from Street 1 to Street 2.
+        Removes the location info from Street 1 to avoid duplication.
+        Truncates Street 2 to MAX_STREET2_LENGTH for ShippyPro compatibility.
+        """
         street2_col = col_map.get('street2')
+        street_col = col_map.get('street')
         if not street2_col:
             return
 
@@ -700,13 +708,33 @@ class ZipValidator:
             existing_street2 = ''
 
         if location_info:
+            # Set Street 2
             if not existing_street2:
-                df.at[idx, street2_col] = location_info
+                new_street2 = location_info
             elif location_info.lower() not in existing_street2.lower():
-                df.at[idx, street2_col] = f"{existing_street2} - {location_info}"
+                new_street2 = f"{existing_street2} - {location_info}"
             else:
-                df.at[idx, street2_col] = existing_street2
+                new_street2 = existing_street2
+
+            # Truncate to ShippyPro limit
+            if len(new_street2) > self.MAX_STREET2_LENGTH:
+                new_street2 = new_street2[:self.MAX_STREET2_LENGTH].rstrip()
+
+            df.at[idx, street2_col] = new_street2
+
+            # Remove location info from Street 1 to avoid duplication
+            if street_col:
+                current_street1 = str(df.at[idx, street_col]).strip()
+                if location_info in current_street1:
+                    cleaned = current_street1.replace(location_info, '').strip()
+                    # Clean up extra whitespace left after removal
+                    cleaned = ' '.join(cleaned.split())
+                    if cleaned:
+                        df.at[idx, street_col] = cleaned
         elif existing_street2:
+            # Truncate existing Street 2 even if no location_info
+            if len(existing_street2) > self.MAX_STREET2_LENGTH:
+                existing_street2 = existing_street2[:self.MAX_STREET2_LENGTH].rstrip()
             df.at[idx, street2_col] = existing_street2
 
     # =========================================================================
