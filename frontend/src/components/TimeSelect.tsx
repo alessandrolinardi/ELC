@@ -62,6 +62,14 @@ export function TimeSelect({
   const listRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
+  // Refs for handleBlur to avoid stale closures in the 150ms timeout
+  const inputValueRef = useRef(inputValue)
+  const valueRef = useRef(value)
+  const onChangeRef = useRef(onChange)
+  inputValueRef.current = inputValue
+  valueRef.current = value
+  onChangeRef.current = onChange
+
   const slots = generateTimeSlots(min, max)
 
   // Sync inputValue when value prop changes externally
@@ -111,7 +119,8 @@ export function TimeSelect({
   )
 
   const handleBlur = useCallback(() => {
-    // Small delay to allow click on dropdown items
+    // Small delay to allow click on dropdown items.
+    // Uses refs to read current values — avoids stale closures.
     setTimeout(() => {
       if (
         containerRef.current &&
@@ -119,15 +128,15 @@ export function TimeSelect({
       ) {
         return
       }
-      // Validate input
-      if (isValidTime(inputValue)) {
-        onChange(inputValue)
+      const currentInput = inputValueRef.current
+      if (isValidTime(currentInput)) {
+        onChangeRef.current(currentInput)
       } else {
-        setInputValue(value)
+        setInputValue(valueRef.current)
       }
       setOpen(false)
     }, 150)
-  }, [inputValue, value, onChange])
+  }, []) // stable — reads from refs, no deps needed
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (!open) {
