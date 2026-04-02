@@ -104,6 +104,8 @@ class ValidationResult:
     original_phone: str = ""
     cod_changed: bool = False
     original_cod: str = ""
+    # Location info (C.C., outlet names, etc.) extracted by AI parser
+    location_info: str = ""
     # PO validation
     po_invalid: bool = False
     po_value: str = ""
@@ -654,6 +656,7 @@ class ZipValidator:
             original_phone=fields["original_phone"],
             cod_changed=fields["cod_changed"],
             original_cod=fields["original_cod"],
+            location_info=outcome.location_info or parsed.location_info or "",
             po_invalid=fields["po_invalid"],
             po_value=fields["po_value"],
             po_extracted=fields["po_extracted"],
@@ -782,14 +785,43 @@ class ZipValidator:
                 if pd.isna(current_phone) or not str(current_phone).strip() or str(current_phone).lower() == 'nan':
                     df.at[result.row_index, phone_col] = self.DEFAULT_PHONE
 
-            # Clean trailing dashes from Street 2 (common in import files)
+            # Handle Street 2: move location info, remove from Street 1, truncate
             street2_col = col_map.get('street2')
             if street2_col:
-                s2 = str(df.at[result.row_index, street2_col]).strip()
-                if s2 and s2.lower() != 'nan':
-                    cleaned = s2.rstrip('-').strip()
-                    if cleaned != s2:
-                        df.at[result.row_index, street2_col] = cleaned
+                s2 = str(df.at[result.row_index, street2_col]).strip().rstrip('-').strip()
+                if s2.lower() == 'nan':
+                    s2 = ''
+
+                loc = result.location_info
+                if loc:
+                    if not s2:
+                        new_s2 = loc
+                    elif loc.lower() not in s2.lower():
+                        new_s2 = f"{s2} - {loc}"
+                    else:
+                        new_s2 = s2
+
+                    # Truncate to ShippyPro limit (word-boundary aware)
+                    if len(new_s2) > self.MAX_STREET2_LENGTH:
+                        cut = new_s2[:self.MAX_STREET2_LENGTH]
+                        last_space = cut.rfind(' ')
+                        new_s2 = cut[:last_space] if last_space > 20 else cut.rstrip()
+
+                    df.at[result.row_index, street2_col] = new_s2
+
+                    # Remove location info from Street 1 to avoid duplication
+                    if street_col:
+                        s1 = str(df.at[result.row_index, street_col]).strip()
+                        if loc in s1:
+                            s1 = ' '.join(s1.replace(loc, '').split())
+                            if s1:
+                                df.at[result.row_index, street_col] = s1
+                elif s2:
+                    if len(s2) > self.MAX_STREET2_LENGTH:
+                        cut = s2[:self.MAX_STREET2_LENGTH]
+                        last_space = cut.rfind(' ')
+                        s2 = cut[:last_space] if last_space > 20 else cut.rstrip()
+                    df.at[result.row_index, street2_col] = s2
 
             # Set Cash on Delivery to 0 always (IT addresses only)
             if cod_col and result.country_code == 'IT':
