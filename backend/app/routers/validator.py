@@ -277,8 +277,10 @@ def _process_parse(
             "detected_po": detected_po,
         }
 
-        # Save original Excel to disk for Phase 2
-        job_store.save_file(job_id, "original.xlsx", excel_bytes)
+        # Save original file to disk for Phase 2 (preserve extension for CSV handling)
+        original_ext = original_filename.rsplit(".", 1)[-1] if "." in original_filename else "xlsx"
+        original_disk_name = f"original.{original_ext}"
+        job_store.save_file(job_id, original_disk_name, excel_bytes)
 
         # Build result with config for Phase 2
         result = {
@@ -300,6 +302,7 @@ def _process_parse(
                 "campaign": campaign,
                 "order_numbers": order_numbers,
                 "original_filename": original_filename,
+                "original_disk_name": original_disk_name,
             },
         }
 
@@ -357,12 +360,17 @@ def _process_validate(
                     pass  # Keep regex results
                 job_store.update_progress(job_id, 10, 100, "Re-parsing complete")
 
-        # Load original Excel — reset index to ensure 0-based alignment
-        excel_path = job_store.get_file_path(job_id, "original.xlsx")
+        # Load original file — reset index to ensure 0-based alignment
+        disk_name = original_filename.rsplit(".", 1)
+        original_disk_name = f"original.{disk_name[-1]}" if len(disk_name) > 1 else "original.xlsx"
+        excel_path = job_store.get_file_path(job_id, original_disk_name)
+        # Fallback for jobs created before this change
         if not excel_path:
-            job_store.update_status(job_id, "failed", error="Original Excel file not found")
+            excel_path = job_store.get_file_path(job_id, "original.xlsx")
+        if not excel_path:
+            job_store.update_status(job_id, "failed", error="Original file not found")
             return
-        df = _read_excel_preserve_zip(excel_path).reset_index(drop=True)
+        df = _read_excel_preserve_zip(excel_path, filename=original_disk_name).reset_index(drop=True)
 
         # Apply confirmed/edited values to the DataFrame so Google API
         # receives the AI-fixed + user-edited data, not the raw originals.
