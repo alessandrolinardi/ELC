@@ -103,7 +103,9 @@ export function TimeSelect({
       onChange(slot)
       setInputValue(slot)
       setOpen(false)
-      inputRef.current?.blur()
+      // Don't call blur() here — it triggers handleBlur with stale closure
+      // state, which resets the value back to the old one. The dropdown is
+      // already closed by setOpen(false).
     },
     [onChange]
   )
