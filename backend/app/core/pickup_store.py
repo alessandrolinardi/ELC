@@ -1,6 +1,6 @@
 """Pickup persistence — stores successful pickup requests in Supabase."""
 from typing import Optional
-from datetime import date
+from datetime import date, datetime, timezone
 
 from .logging_config import get_logger
 from .config_compat import get_supabase_client
@@ -38,7 +38,8 @@ def list_pickups(
         if client is None:
             return [], 0
 
-        today_str = date.today().isoformat()
+        from zoneinfo import ZoneInfo
+        today_str = datetime.now(ZoneInfo("Europe/Rome")).date().isoformat()
 
         query = client.table(TABLE).select("*", count="exact")
         if upcoming:
@@ -55,3 +56,57 @@ def list_pickups(
     except Exception as e:
         logger.exception("Error listing pickups: %s", e)
         return [], 0
+
+
+def get_pickup(pickup_id: str) -> dict | None:
+    """Fetch a single pickup record by ID. Returns None if not found."""
+    try:
+        client = get_supabase_client()
+        if client is None:
+            return None
+        response = client.table(TABLE).select("*").eq("id", pickup_id).execute()
+        if response.data and len(response.data) > 0:
+            return response.data[0]
+        return None
+    except Exception as e:
+        logger.exception("Error fetching pickup %s: %s", pickup_id, e)
+        return None
+
+
+def cancel_pickup(pickup_id: str, reason: str | None) -> dict | None:
+    """Atomically cancel a pickup if not already cancelled.
+    Uses conditional update (neq pickup_status cancelled) as concurrency safety net.
+    Returns the updated record, or None if the condition failed (already cancelled).
+    """
+    try:
+        client = get_supabase_client()
+        if client is None:
+            return None
+        response = (
+            client.table(TABLE)
+            .update({
+                "pickup_status": "cancelled",
+                "cancelled_at": datetime.now(timezone.utc).isoformat(),
+                "cancellation_reason": reason,
+            })
+            .eq("id", pickup_id)
+            .neq("pickup_status", "cancelled")
+            .execute()
+        )
+        if response.data and len(response.data) > 0:
+            return response.data[0]
+        return None
+    except Exception as e:
+        logger.exception("Error cancelling pickup %s: %s", pickup_id, e)
+        return None
+
+
+def update_zapier_status(pickup_id: str, notified: bool) -> None:
+    """Persist zapier_notified flag after webhook attempt."""
+    try:
+        client = get_supabase_client()
+        if client is None:
+            return
+        client.table(TABLE).update({"zapier_notified": notified}).eq("id", pickup_id).execute()
+    except Exception as e:
+        logger.exception("Error updating zapier status for pickup %s: %s", pickup_id, e)
