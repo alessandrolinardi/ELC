@@ -26,6 +26,7 @@ export function PickupHistory() {
   const [showAll, setShowAll] = useState(false)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [cancelTarget, setCancelTarget] = useState<PickupRecord | null>(null)
+  const [cancelMessage, setCancelMessage] = useState<{ text: string; warning: boolean } | null>(null)
   const cancelMutation = useCancelPickup()
 
   const isUpcoming = filter === "upcoming"
@@ -52,7 +53,15 @@ export function PickupHistory() {
     cancelMutation.mutate(
       { pickupId: cancelTarget.id, reason },
       {
-        onSuccess: () => setCancelTarget(null),
+        onSuccess: (data) => {
+          setCancelTarget(null)
+          const warning = data.zapier_notified === false
+          setCancelMessage({
+            text: warning ? "Ritiro annullato, ma notifica non inviata" : "Ritiro annullato",
+            warning,
+          })
+          setTimeout(() => setCancelMessage(null), 5000)
+        },
         onError: () => {},
       }
     )
@@ -142,6 +151,22 @@ export function PickupHistory() {
           </>
         )}
       </div>
+
+      {cancelMessage && (
+        <div className={cn(
+          "rounded-lg border px-4 py-3",
+          cancelMessage.warning
+            ? "bg-amber-50 border-amber-200"
+            : "bg-emerald-50 border-emerald-200"
+        )}>
+          <p className={cn(
+            "text-sm font-medium",
+            cancelMessage.warning ? "text-amber-800" : "text-emerald-800"
+          )}>
+            {cancelMessage.text}
+          </p>
+        </div>
+      )}
 
       {cancelTarget && (
         <CancelPickupDialog

@@ -7,6 +7,7 @@ from typing import Optional
 
 from .config_compat import get_secret
 from .logging_config import get_logger
+from .pickup_store import get_pickup, cancel_pickup, update_zapier_status, PickupStoreError
 
 logger = get_logger(__name__)
 
@@ -419,9 +420,6 @@ def send_pickup_request(
     return True, "Richiesta inviata", pickup_result
 
 
-from .pickup_store import get_pickup, cancel_pickup, update_zapier_status
-
-
 def send_cancellation_notification(pickup_record: dict, reason: str | None) -> bool:
     """Build cancellation Zapier payload and POST to webhook. Returns True if successful."""
     zapier_url = get_secret("zapier", "webhook_url")
@@ -448,32 +446,44 @@ def cancel_pickup_flow(pickup_id: str, reason: str | None) -> dict:
     from zoneinfo import ZoneInfo
 
     # Step 1: Fetch and validate
-    record = get_pickup(pickup_id)
+    try:
+        record = get_pickup(pickup_id)
+    except PickupStoreError:
+        return {"ok": False, "status_code": 503, "message": "Errore di sistema, riprova"}
+
     if record is None:
         return {"ok": False, "status_code": 404, "message": "Ritiro non trovato"}
 
-    if record.get("pickup_status") == "cancelled":
-        return {"ok": False, "status_code": 409, "message": "Pickup già annullato"}
-
-    # Date check — Europe/Rome timezone
+    # Date check first (per spec: 422 before 409)
     rome = ZoneInfo("Europe/Rome")
     today_rome = datetime.now(rome).date()
     pickup_date = date.fromisoformat(record["pickup_date"])
     if pickup_date < today_rome:
         return {"ok": False, "status_code": 422, "message": "Non è possibile annullare un ritiro passato"}
 
-    # Step 2: Atomic conditional update
+    if record.get("pickup_status") == "cancelled":
+        return {"ok": False, "status_code": 409, "message": "Pickup già annullato"}
+
+    # Step 2: Atomic conditional update (concurrency safety net)
     logger.info("Cancelling pickup %s (carrier=%s, date=%s, reason=%s)",
                 pickup_id, record["carrier"], record["pickup_date"], reason)
-    cancelled_record = cancel_pickup(pickup_id, reason)
+    try:
+        cancelled_record = cancel_pickup(pickup_id, reason)
+    except PickupStoreError:
+        return {"ok": False, "status_code": 503, "message": "Errore di sistema, riprova"}
+
     if cancelled_record is None:
+        # Race condition — another request cancelled it between get and update
         return {"ok": False, "status_code": 409, "message": "Pickup già annullato"}
 
     # Step 3: Notify via Zapier
     zapier_notified = send_cancellation_notification(cancelled_record, reason)
 
-    # Step 4: Persist notification status
-    update_zapier_status(pickup_id, zapier_notified)
+    # Step 4: Persist notification status (best-effort)
+    try:
+        update_zapier_status(pickup_id, zapier_notified)
+    except Exception:
+        logger.exception("Failed to persist zapier_notified for pickup %s", pickup_id)
 
     if not zapier_notified:
         logger.error("Zapier notification failed for pickup %s cancellation", pickup_id)

@@ -1,7 +1,6 @@
 """Pickup Request endpoints."""
 import asyncio
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
 
 from ..limiter import limiter
 from ..schemas.pickup import PickupRequest, CancelPickupRequest
@@ -119,10 +118,9 @@ async def cancel_pickup_request(request: Request, pickup_id: str, body: CancelPi
 
     if not result["ok"]:
         status_code = result.get("status_code", 500)
-        return JSONResponse(
-            status_code=status_code,
-            content={"ok": False, "error": {"code": "CANCEL_ERROR", "message": result["message"]}},
-        )
+        raise HTTPException(status_code=status_code, detail={
+            "ok": False, "error": {"code": "CANCEL_ERROR", "message": result["message"]}
+        })
 
     return {
         "ok": True,

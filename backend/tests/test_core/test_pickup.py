@@ -103,7 +103,7 @@ class TestCancelPickup:
         mock_client_fn.return_value = mock_client
         mock_response = MagicMock()
         mock_response.data = [{"id": "abc-123", "pickup_status": "cancelled", "cancelled_at": "2026-04-08T12:00:00Z"}]
-        mock_client.table.return_value.update.return_value.eq.return_value.neq.return_value.execute.return_value = mock_response
+        mock_client.table.return_value.update.return_value.eq.return_value.not_.eq.return_value.execute.return_value = mock_response
         result = cancel_pickup("abc-123", "cambio data")
         assert result is not None
         assert result["pickup_status"] == "cancelled"
@@ -114,7 +114,7 @@ class TestCancelPickup:
         mock_client_fn.return_value = mock_client
         mock_response = MagicMock()
         mock_response.data = []
-        mock_client.table.return_value.update.return_value.eq.return_value.neq.return_value.execute.return_value = mock_response
+        mock_client.table.return_value.update.return_value.eq.return_value.not_.eq.return_value.execute.return_value = mock_response
         result = cancel_pickup("abc-123", None)
         assert result is None
 
@@ -124,7 +124,7 @@ class TestCancelPickup:
         mock_client_fn.return_value = mock_client
         mock_response = MagicMock()
         mock_response.data = [{"id": "abc-123", "pickup_status": "cancelled"}]
-        mock_client.table.return_value.update.return_value.eq.return_value.neq.return_value.execute.return_value = mock_response
+        mock_client.table.return_value.update.return_value.eq.return_value.not_.eq.return_value.execute.return_value = mock_response
         result = cancel_pickup("abc-123", None)
         assert result is not None
         update_call = mock_client.table.return_value.update.call_args[0][0]
@@ -324,3 +324,49 @@ class TestCancelPickupFlow:
         assert result["ok"] is True
         assert result["zapier_notified"] is False
         mock_zapier_status.assert_called_once_with("abc-123", False)
+
+    @patch("app.core.pickup.get_pickup")
+    def test_rejected_status_can_be_cancelled(self, mock_get):
+        """Pickups with status 'rejected' should be cancellable."""
+        record = {**self.UPCOMING_RECORD, "pickup_status": "rejected"}
+        mock_get.return_value = record
+        with patch("app.core.pickup.cancel_pickup") as mock_cancel, \
+             patch("app.core.pickup.requests.post") as mock_post, \
+             patch("app.core.pickup.update_zapier_status"), \
+             patch("app.core.pickup.get_secret", return_value="https://hooks.zapier.com/test"):
+            mock_cancel.return_value = {**record, "pickup_status": "cancelled"}
+            mock_post.return_value = MagicMock(status_code=200)
+            result = cancel_pickup_flow("abc-123", None)
+            assert result["ok"] is True
+
+    @patch("app.core.pickup.get_pickup")
+    def test_null_status_can_be_cancelled(self, mock_get):
+        """Pickups with NULL pickup_status (no webhook response) should be cancellable."""
+        record = {**self.UPCOMING_RECORD, "pickup_status": None}
+        mock_get.return_value = record
+        with patch("app.core.pickup.cancel_pickup") as mock_cancel, \
+             patch("app.core.pickup.requests.post") as mock_post, \
+             patch("app.core.pickup.update_zapier_status"), \
+             patch("app.core.pickup.get_secret", return_value="https://hooks.zapier.com/test"):
+            mock_cancel.return_value = {**record, "pickup_status": "cancelled"}
+            mock_post.return_value = MagicMock(status_code=200)
+            result = cancel_pickup_flow("abc-123", None)
+            assert result["ok"] is True
+
+    @patch("app.core.pickup.get_pickup")
+    def test_past_cancelled_returns_422_not_409(self, mock_get):
+        """A past pickup that is also cancelled should return 422 (date check first)."""
+        record = {**self.UPCOMING_RECORD, "pickup_date": "2020-01-01", "pickup_status": "cancelled"}
+        mock_get.return_value = record
+        result = cancel_pickup_flow("abc-123", None)
+        assert result["ok"] is False
+        assert result["status_code"] == 422
+
+    @patch("app.core.pickup.get_pickup", side_effect=Exception("Supabase unavailable"))
+    def test_supabase_error_returns_503(self, mock_get):
+        """Infrastructure errors should return 503, not 404."""
+        from app.core.pickup_store import PickupStoreError
+        mock_get.side_effect = PickupStoreError("Supabase unavailable")
+        result = cancel_pickup_flow("abc-123", None)
+        assert result["ok"] is False
+        assert result["status_code"] == 503

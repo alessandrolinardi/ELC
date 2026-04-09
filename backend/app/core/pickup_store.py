@@ -59,29 +59,40 @@ def list_pickups(
 
 
 def get_pickup(pickup_id: str) -> dict | None:
-    """Fetch a single pickup record by ID. Returns None if not found."""
+    """Fetch a single pickup record by ID. Returns None if not found.
+    Raises PickupStoreError on infrastructure failures.
+    """
+    client = get_supabase_client()
+    if client is None:
+        raise PickupStoreError("Supabase client unavailable")
     try:
-        client = get_supabase_client()
-        if client is None:
-            return None
         response = client.table(TABLE).select("*").eq("id", pickup_id).execute()
         if response.data and len(response.data) > 0:
             return response.data[0]
         return None
     except Exception as e:
         logger.exception("Error fetching pickup %s: %s", pickup_id, e)
-        return None
+        raise PickupStoreError(f"Failed to fetch pickup: {e}") from e
+
+
+class PickupStoreError(Exception):
+    """Raised when a Supabase operation fails due to infrastructure errors."""
+    pass
 
 
 def cancel_pickup(pickup_id: str, reason: str | None) -> dict | None:
-    """Atomically cancel a pickup if not already cancelled.
-    Uses conditional update (neq pickup_status cancelled) as concurrency safety net.
-    Returns the updated record, or None if the condition failed (already cancelled).
+    """Cancel a pickup by updating its status.
+
+    Uses .is_("pickup_status", "cancelled") negative check as a concurrency safety net.
+    PostgREST's .neq() excludes NULL values (SQL NULL != 'x' is NULL, not TRUE),
+    so we use .not_.eq() which handles NULLs correctly via IS DISTINCT FROM semantics.
+    Returns the updated record, or None if already cancelled (race condition).
+    Raises PickupStoreError on infrastructure failures.
     """
+    client = get_supabase_client()
+    if client is None:
+        raise PickupStoreError("Supabase client unavailable")
     try:
-        client = get_supabase_client()
-        if client is None:
-            return None
         response = (
             client.table(TABLE)
             .update({
@@ -90,7 +101,7 @@ def cancel_pickup(pickup_id: str, reason: str | None) -> dict | None:
                 "cancellation_reason": reason,
             })
             .eq("id", pickup_id)
-            .neq("pickup_status", "cancelled")
+            .not_.eq("pickup_status", "cancelled")
             .execute()
         )
         if response.data and len(response.data) > 0:
@@ -98,7 +109,7 @@ def cancel_pickup(pickup_id: str, reason: str | None) -> dict | None:
         return None
     except Exception as e:
         logger.exception("Error cancelling pickup %s: %s", pickup_id, e)
-        return None
+        raise PickupStoreError(f"Failed to cancel pickup: {e}") from e
 
 
 def update_zapier_status(pickup_id: str, notified: bool) -> None:
