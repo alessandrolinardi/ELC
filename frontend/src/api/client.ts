@@ -141,7 +141,7 @@ export const api = {
 
 // --- Convenience wrappers ---
 
-import type { ConfirmRequest } from "@/lib/types"
+import type { ConfirmRequest, CancelPickupResponse } from "@/lib/types"
 
 /** Confirm validation: send edits and trigger Phase 2 (Google validation) */
 export async function confirmValidation(
@@ -157,4 +157,11 @@ export async function fetchBrands(): Promise<{ name: string }[]> {
 
 export async function createBrand(name: string): Promise<{ name: string }> {
   return api.post<{ name: string }>("/api/v1/brands", { name })
+}
+
+export async function cancelPickup(
+  pickupId: string,
+  reason?: string | null
+): Promise<CancelPickupResponse> {
+  return api.post<CancelPickupResponse>(`/api/v1/pickup/${pickupId}/cancel`, { reason: reason ?? null })
 }

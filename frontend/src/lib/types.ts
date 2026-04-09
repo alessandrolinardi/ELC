@@ -249,6 +249,9 @@ export interface PickupRecord {
   pickup_status: string | null
   pickup_id: string | null
   confirmation_id: string | null
+  cancelled_at: string | null
+  cancellation_reason: string | null
+  zapier_notified: boolean | null
   created_at: string
 }
 
@@ -257,6 +260,11 @@ export interface PickupListResponse {
   total: number
   limit: number
   offset: number
+}
+
+export interface CancelPickupResponse {
+  message: string
+  zapier_notified: boolean
 }
 
 // --- Shipments Quotation ---
