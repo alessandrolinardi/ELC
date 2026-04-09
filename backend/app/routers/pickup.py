@@ -1,10 +1,11 @@
 """Pickup Request endpoints."""
 import asyncio
 from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import JSONResponse
 
 from ..limiter import limiter
-from ..schemas.pickup import PickupRequest
-from ..core.pickup import send_pickup_request
+from ..schemas.pickup import PickupRequest, CancelPickupRequest
+from ..core.pickup import send_pickup_request, cancel_pickup_flow
 from ..core.pickup_store import save_pickup, list_pickups
 
 router = APIRouter()
@@ -107,5 +108,26 @@ async def get_pickup_history(
             "total": total,
             "limit": limit,
             "offset": offset,
+        },
+    }
+
+
+@router.post("/pickup/{pickup_id}/cancel")
+@limiter.limit("30/hour")
+async def cancel_pickup_request(request: Request, pickup_id: str, body: CancelPickupRequest):
+    result = await asyncio.to_thread(cancel_pickup_flow, pickup_id, body.reason)
+
+    if not result["ok"]:
+        status_code = result.get("status_code", 500)
+        return JSONResponse(
+            status_code=status_code,
+            content={"ok": False, "error": {"code": "CANCEL_ERROR", "message": result["message"]}},
+        )
+
+    return {
+        "ok": True,
+        "data": {
+            "message": result["message"],
+            "zapier_notified": result["zapier_notified"],
         },
     }
