@@ -1,7 +1,7 @@
 # Pickup Cancellation Feature — Design Spec
 
 **Date:** 2026-04-08
-**Status:** Approved (rev 3 — addresses final review)
+**Status:** Approved (rev 4 — addresses senior staff eng final review)
 
 ## Overview
 
@@ -67,20 +67,26 @@ Note: 422 for business-rule violations (past pickup), 409 for true conflict (alr
 4. Persist `zapier_notified` result to DB
 5. Return `{ ok: true, data: { message: "Pickup cancelled", zapier_notified: bool } }` (matches existing API envelope format used by `client.ts`)
 
-### Concurrency: Atomic Conditional Update
+### Validation and Concurrency
 
-The cancel operation uses a single conditional UPDATE to eliminate race conditions:
+The cancel flow uses a **two-step approach** because the Supabase Python client (PostgREST) returns an empty `data` array for both "row doesn't exist" and "condition not met" — it cannot distinguish the two cases.
 
-```sql
-UPDATE elc_pickups
-SET pickup_status = 'cancelled',
-    cancelled_at = now(),
-    cancellation_reason = $reason
-WHERE id = $id AND pickup_status != 'cancelled'
-RETURNING *
+**Step 1: `get_pickup()` — primary validation**
+- Fetch the record by ID → 404 if not found
+- Check `pickup_date >= today` (Europe/Rome) → 422 if past
+- Check `pickup_status != "cancelled"` → 409 if already cancelled
+
+**Step 2: Conditional UPDATE — concurrency safety net**
+
+```python
+supabase.table("elc_pickups").update({
+    "pickup_status": "cancelled",
+    "cancelled_at": datetime.now(UTC).isoformat(),
+    "cancellation_reason": reason
+}).eq("id", pickup_id).neq("pickup_status", "cancelled").execute()
 ```
 
-If zero rows are returned, the pickup was already cancelled (409). This eliminates the need for a separate fetch-then-validate-then-update sequence. A separate `get_pickup()` call is only needed before the UPDATE for the date validation check.
+The `.neq("pickup_status", "cancelled")` guard prevents a race where two concurrent requests both pass Step 1. If the update returns empty `data`, a concurrent request won the race — return 409. This is a safety net, not the primary validation path.
 
 ### New core functions
 
@@ -91,11 +97,20 @@ If zero rows are returned, the pickup was already cancelled (409). This eliminat
 
 **`pickup.py`:**
 - `cancel_pickup_flow(pickup_id: str, reason: str | None) -> dict` — orchestrates the full cancellation: validate → cancel → notify → persist notification status. Router calls this single function, matching the `send_pickup_request` pattern for creation.
-- `_build_zapier_payload(record: dict, event_type: str) -> dict` — **extracted shared helper** used by both `send_pickup_request` (creation) and `cancel_pickup_flow` (cancellation). This helper **recomputes all derived fields** from the raw DB columns stored in `elc_pickups`, since many Zapier payload fields are not persisted directly:
-  - `shipment_type` — recomputed from `num_packages * weight_per_package` (>70kg = FREIGHT)
+- `_build_zapier_payload(record: dict, event_type: str) -> dict` — **extracted shared helper** used by both `send_pickup_request` (creation) and `cancel_pickup_flow` (cancellation). This helper performs a **full payload reconstruction** from a DB record row (~30 columns), mapping stored columns to Zapier fields. This includes both direct pass-throughs and derived/computed fields:
+
+  **Direct pass-throughs from DB columns** (no computation, just renamed/formatted):
+  - `carrier`, `company`, `contact_name`, `phone`, `reference`, `address`, `zip_code`, `city`, `province`
+  - `pickup_date` (reformatted to `dd/mm/yyyy`), `time_start`, `time_end`
+  - `num_packages`, `weight_per_package`, `length`, `width`, `height`
+  - `use_pallet`, `num_pallets`, `pallet_length`, `pallet_width`, `pallet_height`
+  - `notes`
+
+  **Derived/computed fields** (not stored in DB, must be recomputed):
+  - `shipment_type` — from `num_packages * weight_per_package` (>70kg = FREIGHT)
   - `subject` — formatted from carrier, date, shipment_type (with "ANNULLAMENTO" prefix for cancellations)
   - `request_id` — new UUID for each webhook call
-  - `timestamp` — current time formatted as `dd/mm/yyyy HH:MM`
+  - `timestamp` — current time formatted as `dd/mm/yyyy HH:MM` (**using Europe/Rome timezone**, fixing existing bug where creation uses naive `datetime.now()`)
   - `time_window` — formatted from `time_start` + `time_end`
   - `full_address`, `address_line1`, `address_line2` — composed from address, city, province, zip
   - `total_weight`, `total_weight_str`, `weight_per_package_str` — computed from `num_packages` + `weight_per_package`
@@ -103,8 +118,10 @@ If zero rows are returned, the pickup was already cancelled (409). This eliminat
   - `pallet_dimensions`, `use_pallet_str` — formatted from pallet fields
   - `summary_packages`, `summary_dimensions`, `summary_pallet` — formatted summary strings
   - `has_notes` — derived from `notes` field presence
+
+  **Event-type-specific fields:**
   - For cancellation: adds `cancellation_reason`, `cancelled_at` (Europe/Rome formatted)
-  - `pickup_webhook` nested object is **omitted** for cancellation events (only relevant for creation)
+  - For creation: includes `pickup_webhook` nested object (omitted for cancellation)
   
   The existing inline payload dict in `send_pickup_request` will be refactored to call this helper, keeping creation behavior identical.
 - `send_cancellation_notification(pickup_record: dict, reason: str | None) -> bool` — calls `_build_zapier_payload` and POSTs to Zapier
@@ -120,7 +137,7 @@ If zero rows are returned, the pickup was already cancelled (409). This eliminat
 ### Router changes (`routers/pickup.py`)
 
 - New import: `CancelPickupRequest` from schemas, `cancel_pickup_flow` from `pickup.py`
-- New route: `@router.post("/{pickup_id}/cancel")` calling `cancel_pickup_flow`
+- New route: `@router.post("/{pickup_id}/cancel")` calling `cancel_pickup_flow`. **Route ordering:** this route must be defined after any literal path routes (e.g., `/request`, `/history`) to avoid `"cancel"` being captured as a `pickup_id` value.
 - Error responses use existing `JSONResponse` pattern with `{ "ok": false, "error": "..." }` envelope
 
 ### Frontend API client (`api/client.ts` or equivalent)
@@ -235,7 +252,7 @@ Props: `pickup: PickupRecord`, `onSuccess: () => void`, `onClose: () => void`
 
 ### Frontend
 - Cancel button visibility (shown for upcoming non-cancelled, hidden for cancelled/archive)
-- `STATUS_LABELS` renders "Annullato" with amber badge for cancelled status
+- `STATUS_LABELS` renders "Annullato" with slate badge for cancelled status
 - `<CancelPickupDialog>` opens with correct pickup details pre-filled
 - Successful cancellation dims row and updates badge
 - Warning toast shown when `zapier_notified: false`
