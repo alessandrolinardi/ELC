@@ -1,7 +1,7 @@
 import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query"
 import { api } from "@/api/client"
 import { cancelPickup } from "@/api/client"
-import type { PickupListResponse, CancelPickupResponse } from "@/lib/types"
+import type { PickupListResponse } from "@/lib/types"
 
 const PICKUPS_KEY = "pickups"
 
