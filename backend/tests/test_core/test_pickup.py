@@ -2,7 +2,7 @@
 from datetime import date, time
 from unittest.mock import patch, MagicMock
 
-from app.core.pickup import CARRIER_MAP, _generate_order_id, _split_time_window, _build_zapier_payload
+from app.core.pickup import CARRIER_MAP, _generate_order_id, _split_time_window, _build_zapier_payload, cancel_pickup_flow
 from app.core.pickup_store import get_pickup, cancel_pickup, update_zapier_status
 
 
@@ -227,3 +227,100 @@ class TestBuildZapierPayload:
         for key in creation:
             if key not in skip_keys:
                 assert creation[key] == cancellation[key], f"Field {key} differs"
+
+
+class TestCancelPickupFlow:
+    UPCOMING_RECORD = {
+        "id": "abc-123",
+        "carrier": "DHL",
+        "pickup_date": "2099-12-31",
+        "time_start": "09:00:00",
+        "time_end": "16:00:00",
+        "company": "Acme Srl",
+        "contact_name": "Mario Rossi",
+        "address": "Via Roma 1",
+        "zip_code": "20121",
+        "city": "Milano",
+        "province": "MI",
+        "phone": "0212345678",
+        "reference": "ORD-001",
+        "num_packages": 3,
+        "weight_per_package": 5.0,
+        "length": 30.0,
+        "width": 20.0,
+        "height": 10.0,
+        "use_pallet": False,
+        "num_pallets": 0,
+        "pallet_length": 0.0,
+        "pallet_width": 0.0,
+        "pallet_height": 0.0,
+        "notes": "",
+        "pickup_status": "booked",
+        "cancelled_at": None,
+        "cancellation_reason": None,
+        "created_at": "2026-04-08T10:00:00Z",
+    }
+
+    @patch("app.core.pickup.update_zapier_status")
+    @patch("app.core.pickup.requests.post")
+    @patch("app.core.pickup.cancel_pickup")
+    @patch("app.core.pickup.get_pickup")
+    @patch("app.core.pickup.get_secret", return_value="https://hooks.zapier.com/test")
+    def test_successful_cancellation(self, mock_secret, mock_get, mock_cancel, mock_post, mock_zapier_status):
+        mock_get.return_value = self.UPCOMING_RECORD
+        cancelled = {**self.UPCOMING_RECORD, "pickup_status": "cancelled", "cancelled_at": "2026-04-08T14:30:00Z"}
+        mock_cancel.return_value = cancelled
+        mock_post.return_value = MagicMock(status_code=200)
+        result = cancel_pickup_flow("abc-123", "cambio data")
+        assert result["ok"] is True
+        assert result["zapier_notified"] is True
+        mock_zapier_status.assert_called_once_with("abc-123", True)
+
+    @patch("app.core.pickup.get_pickup")
+    def test_not_found_raises_404(self, mock_get):
+        mock_get.return_value = None
+        result = cancel_pickup_flow("nonexistent", None)
+        assert result["ok"] is False
+        assert result["status_code"] == 404
+
+    @patch("app.core.pickup.get_pickup")
+    def test_already_cancelled_raises_409(self, mock_get):
+        record = {**self.UPCOMING_RECORD, "pickup_status": "cancelled"}
+        mock_get.return_value = record
+        result = cancel_pickup_flow("abc-123", None)
+        assert result["ok"] is False
+        assert result["status_code"] == 409
+
+    @patch("app.core.pickup.get_pickup")
+    def test_past_pickup_raises_422(self, mock_get):
+        record = {**self.UPCOMING_RECORD, "pickup_date": "2020-01-01"}
+        mock_get.return_value = record
+        result = cancel_pickup_flow("abc-123", None)
+        assert result["ok"] is False
+        assert result["status_code"] == 422
+
+    @patch("app.core.pickup.get_pickup")
+    def test_failed_status_can_be_cancelled(self, mock_get):
+        record = {**self.UPCOMING_RECORD, "pickup_status": "failed"}
+        mock_get.return_value = record
+        with patch("app.core.pickup.cancel_pickup") as mock_cancel, \
+             patch("app.core.pickup.requests.post") as mock_post, \
+             patch("app.core.pickup.update_zapier_status"), \
+             patch("app.core.pickup.get_secret", return_value="https://hooks.zapier.com/test"):
+            mock_cancel.return_value = {**record, "pickup_status": "cancelled"}
+            mock_post.return_value = MagicMock(status_code=200)
+            result = cancel_pickup_flow("abc-123", None)
+            assert result["ok"] is True
+
+    @patch("app.core.pickup.update_zapier_status")
+    @patch("app.core.pickup.requests.post", side_effect=Exception("connection error"))
+    @patch("app.core.pickup.cancel_pickup")
+    @patch("app.core.pickup.get_pickup")
+    @patch("app.core.pickup.get_secret", return_value="https://hooks.zapier.com/test")
+    def test_zapier_failure_still_succeeds(self, mock_secret, mock_get, mock_cancel, mock_post, mock_zapier_status):
+        mock_get.return_value = self.UPCOMING_RECORD
+        mock_cancel.return_value = {**self.UPCOMING_RECORD, "pickup_status": "cancelled"}
+        result = cancel_pickup_flow("abc-123", None)
+        assert result["ok"] is True
+        assert result["zapier_notified"] is False
+        mock_zapier_status.assert_called_once_with("abc-123", False)

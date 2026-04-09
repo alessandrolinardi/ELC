@@ -417,3 +417,69 @@ def send_pickup_request(
         return False, zapier_msg, None
 
     return True, "Richiesta inviata", pickup_result
+
+
+from .pickup_store import get_pickup, cancel_pickup, update_zapier_status
+
+
+def send_cancellation_notification(pickup_record: dict, reason: str | None) -> bool:
+    """Build cancellation Zapier payload and POST to webhook. Returns True if successful."""
+    zapier_url = get_secret("zapier", "webhook_url")
+    if not zapier_url:
+        logger.warning("No Zapier webhook URL configured — cancellation notification skipped")
+        return False
+
+    payload = _build_zapier_payload(pickup_record, "cancellation")
+    try:
+        resp = requests.post(zapier_url, json=payload, timeout=10)
+        if resp.status_code == 200:
+            return True
+        logger.error("Zapier cancellation webhook HTTP %s", resp.status_code)
+        return False
+    except Exception as e:
+        logger.error("Zapier cancellation webhook error: %s", e)
+        return False
+
+
+def cancel_pickup_flow(pickup_id: str, reason: str | None) -> dict:
+    """Orchestrate pickup cancellation: validate → cancel → notify.
+    Returns a result dict with ok, message, zapier_notified, and optionally status_code for errors.
+    """
+    from zoneinfo import ZoneInfo
+
+    # Step 1: Fetch and validate
+    record = get_pickup(pickup_id)
+    if record is None:
+        return {"ok": False, "status_code": 404, "message": "Ritiro non trovato"}
+
+    if record.get("pickup_status") == "cancelled":
+        return {"ok": False, "status_code": 409, "message": "Pickup già annullato"}
+
+    # Date check — Europe/Rome timezone
+    rome = ZoneInfo("Europe/Rome")
+    today_rome = datetime.now(rome).date()
+    pickup_date = date.fromisoformat(record["pickup_date"])
+    if pickup_date < today_rome:
+        return {"ok": False, "status_code": 422, "message": "Non è possibile annullare un ritiro passato"}
+
+    # Step 2: Atomic conditional update
+    logger.info("Cancelling pickup %s (carrier=%s, date=%s, reason=%s)",
+                pickup_id, record["carrier"], record["pickup_date"], reason)
+    cancelled_record = cancel_pickup(pickup_id, reason)
+    if cancelled_record is None:
+        return {"ok": False, "status_code": 409, "message": "Pickup già annullato"}
+
+    # Step 3: Notify via Zapier
+    zapier_notified = send_cancellation_notification(cancelled_record, reason)
+
+    # Step 4: Persist notification status
+    update_zapier_status(pickup_id, zapier_notified)
+
+    if not zapier_notified:
+        logger.error("Zapier notification failed for pickup %s cancellation", pickup_id)
+
+    return {
+        "ok": True,
+        "message": "Ritiro annullato" if zapier_notified else "Ritiro annullato, ma notifica non inviata",
+        "zapier_notified": zapier_notified,
+    }
