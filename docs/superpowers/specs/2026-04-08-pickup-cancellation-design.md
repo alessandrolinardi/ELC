@@ -1,7 +1,7 @@
 # Pickup Cancellation Feature — Design Spec
 
 **Date:** 2026-04-08
-**Status:** Approved (rev 2 — addresses staff eng / architect / QA review)
+**Status:** Approved (rev 3 — addresses final review)
 
 ## Overview
 
@@ -20,6 +20,8 @@ Allow users to cancel upcoming pickups from the storico (history view). Cancelle
 
 All date comparisons use **Europe/Rome** (CET/CEST) as the reference timezone, matching the user base. `cancelled_at` is stored as UTC `timestamptz` in the database but displayed in Europe/Rome format (`dd/mm/yyyy HH:MM`) in the Zapier payload and frontend.
 
+**Known issue:** The existing `list_pickups` in `pickup_store.py` uses `date.today()` (server-local time, typically UTC on Render) for the upcoming/past split. This has the same timezone bug. Fix `list_pickups` to use `datetime.now(ZoneInfo("Europe/Rome")).date()` in the same PR to maintain consistency with the new cancel flow.
+
 ## Database Changes
 
 Three new nullable columns on `elc_pickups`:
@@ -36,7 +38,7 @@ On cancellation:
 - `cancellation_reason` → user-provided text or `null`
 - `zapier_notified` → `true` or `false` depending on webhook outcome
 
-Migration file: `backend/data/supabase_migrations/add_cancellation_fields.sql`
+Migration file: `backend/data/supabase_migrations/005_add_cancellation_fields.sql` (follows existing numeric prefix convention)
 
 ## Backend API
 
@@ -63,7 +65,7 @@ Note: 422 for business-rule violations (past pickup), 409 for true conflict (alr
 2. Build Zapier payload using the shared `_build_zapier_payload()` helper
 3. POST to `ZAPIER_WEBHOOK_URL`
 4. Persist `zapier_notified` result to DB
-5. Return `{ success: true, message: "Pickup cancelled", zapier_notified: bool }`
+5. Return `{ ok: true, data: { message: "Pickup cancelled", zapier_notified: bool } }` (matches existing API envelope format used by `client.ts`)
 
 ### Concurrency: Atomic Conditional Update
 
@@ -89,7 +91,22 @@ If zero rows are returned, the pickup was already cancelled (409). This eliminat
 
 **`pickup.py`:**
 - `cancel_pickup_flow(pickup_id: str, reason: str | None) -> dict` — orchestrates the full cancellation: validate → cancel → notify → persist notification status. Router calls this single function, matching the `send_pickup_request` pattern for creation.
-- `_build_zapier_payload(record: dict, event_type: str) -> dict` — **extracted shared helper** used by both `send_pickup_request` (creation) and `cancel_pickup_flow` (cancellation). Builds the full Zapier payload from a pickup record dict. Cancellation adds `cancellation_reason`, `cancelled_at` fields; creation flow remains unchanged. This prevents payload drift between the two paths.
+- `_build_zapier_payload(record: dict, event_type: str) -> dict` — **extracted shared helper** used by both `send_pickup_request` (creation) and `cancel_pickup_flow` (cancellation). This helper **recomputes all derived fields** from the raw DB columns stored in `elc_pickups`, since many Zapier payload fields are not persisted directly:
+  - `shipment_type` — recomputed from `num_packages * weight_per_package` (>70kg = FREIGHT)
+  - `subject` — formatted from carrier, date, shipment_type (with "ANNULLAMENTO" prefix for cancellations)
+  - `request_id` — new UUID for each webhook call
+  - `timestamp` — current time formatted as `dd/mm/yyyy HH:MM`
+  - `time_window` — formatted from `time_start` + `time_end`
+  - `full_address`, `address_line1`, `address_line2` — composed from address, city, province, zip
+  - `total_weight`, `total_weight_str`, `weight_per_package_str` — computed from `num_packages` + `weight_per_package`
+  - `package_dimensions`, `package_volume_m3`, `total_volume_m3` — computed from length/width/height
+  - `pallet_dimensions`, `use_pallet_str` — formatted from pallet fields
+  - `summary_packages`, `summary_dimensions`, `summary_pallet` — formatted summary strings
+  - `has_notes` — derived from `notes` field presence
+  - For cancellation: adds `cancellation_reason`, `cancelled_at` (Europe/Rome formatted)
+  - `pickup_webhook` nested object is **omitted** for cancellation events (only relevant for creation)
+  
+  The existing inline payload dict in `send_pickup_request` will be refactored to call this helper, keeping creation behavior identical.
 - `send_cancellation_notification(pickup_record: dict, reason: str | None) -> bool` — calls `_build_zapier_payload` and POSTs to Zapier
 
 **Logging:** All cancellation operations log at `INFO` level (pickup ID, carrier, date, reason) and Zapier failures log at `ERROR` level — matching existing creation flow logging.
@@ -99,6 +116,20 @@ If zero rows are returned, the pickup was already cancelled (409). This eliminat
 **`schemas/pickup.py`:**
 - `CancelPickupRequest` — Pydantic model with `reason: str | None = None` (max_length=500)
 - `PickupRecord` — **updated** to include `cancelled_at: str | None`, `cancellation_reason: str | None`, `zapier_notified: bool | None` so cancelled records are returned with full data from `list_pickups`
+
+### Router changes (`routers/pickup.py`)
+
+- New import: `CancelPickupRequest` from schemas, `cancel_pickup_flow` from `pickup.py`
+- New route: `@router.post("/{pickup_id}/cancel")` calling `cancel_pickup_flow`
+- Error responses use existing `JSONResponse` pattern with `{ "ok": false, "error": "..." }` envelope
+
+### Frontend API client (`api/client.ts` or equivalent)
+
+Add a new exported function:
+```typescript
+export async function cancelPickup(pickupId: string, reason?: string | null): Promise<...>
+```
+Calls `POST /api/v1/pickup/{pickupId}/cancel` with `{ reason }` body. Used by `<CancelPickupDialog>`.
 
 ## Zapier Payload
 
@@ -129,7 +160,7 @@ Uses the same `ZAPIER_WEBHOOK_URL`. Payload follows the existing creation struct
 
 Add `cancelled` entry to the `STATUS_LABELS` map in `PickupHistory.tsx`:
 - Label: `"Annullato"`
-- Color: amber (`bg-amber-100 text-amber-800`)
+- Color: slate (`bg-slate-100 text-slate-700`) — distinct from `pending_review` which already uses amber
 
 ### Cancel button
 
@@ -151,7 +182,7 @@ Props: `pickup: PickupRecord`, `onSuccess: () => void`, `onClose: () => void`
 ### After cancellation
 
 - Row dims (opacity 0.6)
-- Status badge becomes amber "Annullato"
+- Status badge becomes slate "Annullato"
 - Cancel button replaced with "—"
 - Row stays in "Prossimi" until pickup date passes, then moves to "Archivio" naturally
 - Cache invalidated via `useInvalidatePickupHistory()`
