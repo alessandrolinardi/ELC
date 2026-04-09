@@ -83,9 +83,10 @@ class PickupStoreError(Exception):
 def cancel_pickup(pickup_id: str, reason: str | None) -> dict | None:
     """Cancel a pickup by updating its status.
 
-    Uses .is_("pickup_status", "cancelled") negative check as a concurrency safety net.
-    PostgREST's .neq() excludes NULL values (SQL NULL != 'x' is NULL, not TRUE),
-    so we use .not_.eq() which handles NULLs correctly via IS DISTINCT FROM semantics.
+    Concurrency safety net: only updates rows where pickup_status is NOT 'cancelled'.
+    PostgREST's .neq() and .not_.eq() both exclude NULL values (SQL three-valued logic),
+    so we use .or_() to explicitly include NULLs:
+      pickup_status != 'cancelled' OR pickup_status IS NULL
     Returns the updated record, or None if already cancelled (race condition).
     Raises PickupStoreError on infrastructure failures.
     """
@@ -101,7 +102,7 @@ def cancel_pickup(pickup_id: str, reason: str | None) -> dict | None:
                 "cancellation_reason": reason,
             })
             .eq("id", pickup_id)
-            .not_.eq("pickup_status", "cancelled")
+            .or_("pickup_status.neq.cancelled,pickup_status.is.null")
             .execute()
         )
         if response.data and len(response.data) > 0:

@@ -103,7 +103,7 @@ class TestCancelPickup:
         mock_client_fn.return_value = mock_client
         mock_response = MagicMock()
         mock_response.data = [{"id": "abc-123", "pickup_status": "cancelled", "cancelled_at": "2026-04-08T12:00:00Z"}]
-        mock_client.table.return_value.update.return_value.eq.return_value.not_.eq.return_value.execute.return_value = mock_response
+        mock_client.table.return_value.update.return_value.eq.return_value.or_.return_value.execute.return_value = mock_response
         result = cancel_pickup("abc-123", "cambio data")
         assert result is not None
         assert result["pickup_status"] == "cancelled"
@@ -114,7 +114,7 @@ class TestCancelPickup:
         mock_client_fn.return_value = mock_client
         mock_response = MagicMock()
         mock_response.data = []
-        mock_client.table.return_value.update.return_value.eq.return_value.not_.eq.return_value.execute.return_value = mock_response
+        mock_client.table.return_value.update.return_value.eq.return_value.or_.return_value.execute.return_value = mock_response
         result = cancel_pickup("abc-123", None)
         assert result is None
 
@@ -124,7 +124,7 @@ class TestCancelPickup:
         mock_client_fn.return_value = mock_client
         mock_response = MagicMock()
         mock_response.data = [{"id": "abc-123", "pickup_status": "cancelled"}]
-        mock_client.table.return_value.update.return_value.eq.return_value.not_.eq.return_value.execute.return_value = mock_response
+        mock_client.table.return_value.update.return_value.eq.return_value.or_.return_value.execute.return_value = mock_response
         result = cancel_pickup("abc-123", None)
         assert result is not None
         update_call = mock_client.table.return_value.update.call_args[0][0]
