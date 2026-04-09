@@ -1,6 +1,7 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query"
 import { api } from "@/api/client"
-import type { PickupListResponse } from "@/lib/types"
+import { cancelPickup } from "@/api/client"
+import type { PickupListResponse, CancelPickupResponse } from "@/lib/types"
 
 const PICKUPS_KEY = "pickups"
 
@@ -26,4 +27,16 @@ export function usePickupHistory(upcoming: boolean, limit: number = 50, offset: 
 export function useInvalidatePickupHistory() {
   const queryClient = useQueryClient()
   return () => queryClient.invalidateQueries({ queryKey: [PICKUPS_KEY] })
+}
+
+/** Mutation hook for cancelling a pickup. Invalidates history cache on success. */
+export function useCancelPickup() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ pickupId, reason }: { pickupId: string; reason?: string | null }) =>
+      cancelPickup(pickupId, reason),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: [PICKUPS_KEY] })
+    },
+  })
 }
