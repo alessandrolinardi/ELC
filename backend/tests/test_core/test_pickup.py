@@ -1,8 +1,8 @@
-"""Tests for app.core.pickup — CARRIER_MAP, _generate_order_id, _split_time_window."""
+"""Tests for app.core.pickup — CARRIER_MAP, _generate_order_id, _split_time_window, _build_zapier_payload."""
 from datetime import date, time
 from unittest.mock import patch, MagicMock
 
-from app.core.pickup import CARRIER_MAP, _generate_order_id, _split_time_window
+from app.core.pickup import CARRIER_MAP, _generate_order_id, _split_time_window, _build_zapier_payload
 from app.core.pickup_store import get_pickup, cancel_pickup, update_zapier_status
 
 
@@ -129,3 +129,101 @@ class TestCancelPickup:
         assert result is not None
         update_call = mock_client.table.return_value.update.call_args[0][0]
         assert update_call["cancellation_reason"] is None
+
+
+class TestBuildZapierPayload:
+    SAMPLE_RECORD = {
+        "id": "abc-123",
+        "carrier": "DHL",
+        "pickup_date": "2026-04-10",
+        "time_start": "09:00:00",
+        "time_end": "16:00:00",
+        "company": "Acme Srl",
+        "contact_name": "Mario Rossi",
+        "address": "Via Roma 1",
+        "zip_code": "20121",
+        "city": "Milano",
+        "province": "MI",
+        "phone": "0212345678",
+        "reference": "ORD-001",
+        "num_packages": 3,
+        "weight_per_package": 5.0,
+        "length": 30.0,
+        "width": 20.0,
+        "height": 10.0,
+        "use_pallet": False,
+        "num_pallets": 0,
+        "pallet_length": 0.0,
+        "pallet_width": 0.0,
+        "pallet_height": 0.0,
+        "notes": "Fragile",
+        "pickup_status": "booked",
+        "pickup_id": None,
+        "confirmation_id": None,
+        "created_at": "2026-04-08T10:00:00Z",
+    }
+
+    def test_creation_payload_has_event_type(self):
+        payload = _build_zapier_payload(self.SAMPLE_RECORD, "creation")
+        assert payload["event_type"] == "creation"
+
+    def test_cancellation_payload_has_event_type(self):
+        record = {**self.SAMPLE_RECORD, "cancellation_reason": "cambio data", "cancelled_at": "2026-04-08T14:30:00+00:00"}
+        payload = _build_zapier_payload(record, "cancellation")
+        assert payload["event_type"] == "cancellation"
+        assert payload["cancellation_reason"] == "cambio data"
+        assert "cancelled_at" in payload
+        assert payload["subject"].startswith("ANNULLAMENTO")
+
+    def test_creation_payload_has_no_cancellation_fields(self):
+        payload = _build_zapier_payload(self.SAMPLE_RECORD, "creation")
+        assert "cancellation_reason" not in payload
+        assert "cancelled_at" not in payload
+
+    def test_shipment_type_normal(self):
+        payload = _build_zapier_payload(self.SAMPLE_RECORD, "creation")
+        assert payload["shipment_type"] == "NORMAL"
+        assert payload["total_weight"] == 15.0
+
+    def test_shipment_type_freight(self):
+        record = {**self.SAMPLE_RECORD, "num_packages": 10, "weight_per_package": 8.0}
+        payload = _build_zapier_payload(record, "creation")
+        assert payload["shipment_type"] == "FREIGHT"
+        assert payload["total_weight"] == 80.0
+
+    def test_direct_passthrough_fields(self):
+        payload = _build_zapier_payload(self.SAMPLE_RECORD, "creation")
+        assert payload["carrier"] == "DHL"
+        assert payload["company"] == "Acme Srl"
+        assert payload["contact_name"] == "Mario Rossi"
+        assert payload["reference"] == "ORD-001"
+        assert payload["phone"] == "0212345678"
+        assert payload["zip_code"] == "20121"
+
+    def test_derived_fields(self):
+        payload = _build_zapier_payload(self.SAMPLE_RECORD, "creation")
+        assert payload["pickup_date"] == "10/04/2026"
+        assert payload["time_window"] == "09:00 - 16:00"
+        assert payload["full_address"] == "Via Roma 1, 20121 Milano (MI)"
+        assert payload["address_line1"] == "Acme Srl - Mario Rossi"
+        assert payload["package_dimensions"] == "30.0 x 20.0 x 10.0 cm"
+        assert payload["summary_packages"] == "3 colli x 5.0 kg = 15.0 kg totali"
+        assert payload["has_notes"] is True
+
+    def test_creation_includes_pickup_webhook(self):
+        payload = _build_zapier_payload(self.SAMPLE_RECORD, "creation")
+        assert "pickup_webhook" in payload
+
+    def test_cancellation_excludes_pickup_webhook(self):
+        record = {**self.SAMPLE_RECORD, "cancellation_reason": None, "cancelled_at": "2026-04-08T14:30:00+00:00"}
+        payload = _build_zapier_payload(record, "cancellation")
+        assert "pickup_webhook" not in payload
+
+    def test_both_event_types_share_base_fields(self):
+        record_cancel = {**self.SAMPLE_RECORD, "cancellation_reason": None, "cancelled_at": "2026-04-08T14:30:00+00:00"}
+        creation = _build_zapier_payload(self.SAMPLE_RECORD, "creation")
+        cancellation = _build_zapier_payload(record_cancel, "cancellation")
+        skip_keys = {"event_type", "subject", "request_id", "timestamp", "cancellation_reason", "cancelled_at", "pickup_webhook"}
+        for key in creation:
+            if key not in skip_keys:
+                assert creation[key] == cancellation[key], f"Field {key} differs"

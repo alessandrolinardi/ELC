@@ -143,6 +143,163 @@ def _split_time_window(
         }
 
 
+def _build_zapier_payload(record: dict, event_type: str) -> dict:
+    """Build the full Zapier webhook payload from a DB record.
+
+    Used by both creation and cancellation flows. Recomputes all derived
+    fields from the raw columns stored in elc_pickups.
+    """
+    from zoneinfo import ZoneInfo
+
+    # Parse stored values
+    carrier = record["carrier"]
+    pickup_date_str = record["pickup_date"]  # ISO "2026-04-10"
+    time_start_str = record["time_start"]     # ISO "09:00:00"
+    time_end_str = record["time_end"]
+    company = record["company"]
+    contact_name = record.get("contact_name", "")
+    address = record["address"]
+    zip_code = record["zip_code"]
+    city = record["city"]
+    province = record.get("province", "")
+    phone = record.get("phone", "")
+    reference = record.get("reference", "")
+    num_packages = record["num_packages"]
+    weight_per_package = float(record["weight_per_package"])
+    length = float(record["length"])
+    width = float(record["width"])
+    height = float(record["height"])
+    use_pallet = record.get("use_pallet", False)
+    num_pallets = record.get("num_pallets", 0)
+    pallet_length = float(record.get("pallet_length", 0))
+    pallet_width = float(record.get("pallet_width", 0))
+    pallet_height = float(record.get("pallet_height", 0))
+    notes = record.get("notes", "")
+
+    # Derived values
+    total_weight = num_packages * weight_per_package
+    shipment_type = "FREIGHT" if total_weight > 70 else "NORMAL"
+    package_volume = length * width * height / 1_000_000
+    total_volume = package_volume * num_packages
+
+    # Parse date for formatting
+    parts = pickup_date_str.split("-")  # "2026-04-10"
+    date_str = f"{parts[2]}/{parts[1]}/{parts[0]}"  # "10/04/2026"
+
+    # Time formatting — strip seconds if present
+    ts = time_start_str[:5]  # "09:00"
+    te = time_end_str[:5]    # "16:00"
+
+    # Timestamp in Europe/Rome
+    rome = ZoneInfo("Europe/Rome")
+    timestamp = datetime.now(rome).strftime("%d/%m/%Y %H:%M")
+
+    # Subject
+    if event_type == "cancellation":
+        subject = f"ANNULLAMENTO - {carrier} - {date_str} - {shipment_type}"
+    else:
+        subject = f"{carrier} - {date_str} - {shipment_type}"
+
+    # Dimensions strings
+    package_dimensions_str = f"{length} x {width} x {height} cm"
+    pallet_dimensions_str = f"{pallet_length} x {pallet_width} x {pallet_height} cm" if use_pallet else "-"
+
+    payload = {
+        # Dedup
+        "request_id": str(uuid.uuid4()),
+
+        # Meta
+        "event_type": event_type,
+        "subject": subject,
+        "timestamp": timestamp,
+        "shipment_type": shipment_type,
+
+        # Carrier
+        "carrier": carrier,
+
+        # Date/Time
+        "pickup_date": date_str,
+        "time_start": ts,
+        "time_end": te,
+        "time_window": f"{ts} - {te}",
+
+        # Address — individual
+        "company": company,
+        "contact_name": contact_name,
+        "address": address,
+        "zip_code": zip_code,
+        "city": city,
+        "province": province,
+        "phone": phone,
+        "reference": reference,
+        # Address — formatted
+        "full_address": f"{address}, {zip_code} {city} ({province})",
+        "address_line1": f"{company} - {contact_name}" if contact_name else company,
+        "address_line2": f"{address}, {zip_code} {city} ({province})",
+
+        # Packages — individual
+        "num_packages": num_packages,
+        "weight_per_package": weight_per_package,
+        "weight_per_package_str": f"{weight_per_package} kg",
+        "package_length": length,
+        "package_width": width,
+        "package_height": height,
+        # Packages — calculated
+        "total_weight": total_weight,
+        "total_weight_str": f"{total_weight:.1f} kg",
+        "package_dimensions": package_dimensions_str,
+        "package_volume_m3": round(package_volume, 3),
+        "total_volume_m3": round(total_volume, 3),
+
+        # Pallet
+        "use_pallet": use_pallet,
+        "use_pallet_str": "Si" if use_pallet else "No",
+        "num_pallets": num_pallets if use_pallet else 0,
+        "pallet_length": pallet_length if use_pallet else 0,
+        "pallet_width": pallet_width if use_pallet else 0,
+        "pallet_height": pallet_height if use_pallet else 0,
+        "pallet_dimensions": pallet_dimensions_str,
+
+        # Notes
+        "notes": notes if notes else "",
+        "has_notes": bool(notes),
+
+        # Summary
+        "summary_packages": f"{num_packages} colli x {weight_per_package} kg = {total_weight:.1f} kg totali",
+        "summary_dimensions": f"Dimensioni collo: {package_dimensions_str}",
+        "summary_pallet": f"{num_pallets} pallet ({pallet_dimensions_str})" if use_pallet else "Nessun pallet",
+    }
+
+    # Event-type-specific fields
+    if event_type == "creation":
+        t_start = time(*[int(x) for x in time_start_str.split(":")[:2]])
+        t_end = time(*[int(x) for x in time_end_str.split(":")[:2]])
+        d = date(*[int(x) for x in pickup_date_str.split("-")])
+
+        payload["pickup_webhook"] = _build_pickup_webhook_payload(
+            carrier=carrier, contact_name=contact_name, company=company,
+            address=address, city=city, province=province, zip_code=zip_code,
+            phone=phone, pickup_date=d, time_start=t_start, time_end=t_end,
+            num_packages=num_packages, weight_per_package=weight_per_package,
+            length=length, width=width, height=height, notes=notes,
+            use_pallet=use_pallet, num_pallets=num_pallets,
+            pallet_dimensions_str=pallet_dimensions_str,
+        )
+    elif event_type == "cancellation":
+        payload["cancellation_reason"] = record.get("cancellation_reason")
+        cancelled_at_raw = record.get("cancelled_at", "")
+        if cancelled_at_raw:
+            try:
+                dt = datetime.fromisoformat(cancelled_at_raw)
+                payload["cancelled_at"] = dt.astimezone(rome).strftime("%d/%m/%Y %H:%M")
+            except Exception:
+                payload["cancelled_at"] = cancelled_at_raw
+        else:
+            payload["cancelled_at"] = timestamp
+
+    return payload
+
+
 def send_pickup_request(
     carrier: str,
     pickup_date: date,
@@ -174,48 +331,12 @@ def send_pickup_request(
     Returns:
         Tuple of (success, message, pickup_webhook_response)
     """
-    # Calculate totals
-    total_weight = num_packages * weight_per_package
-    shipment_type = "FREIGHT" if total_weight > 70 else "NORMAL"
-    package_volume = length * width * height / 1000000  # in cubic meters
-    total_volume = package_volume * num_packages
-
-    # Format date/time
-    date_str = pickup_date.strftime("%d/%m/%Y")
-    time_start_str = time_start.strftime("%H:%M")
-    time_end_str = time_end.strftime("%H:%M")
-    timestamp = datetime.now().strftime("%d/%m/%Y %H:%M")
-
-    # Build subject for email
-    subject = f"{carrier} - {date_str} - {shipment_type}"
-
-    # Build dimensions strings
-    package_dimensions_str = f"{length} x {width} x {height} cm"
-    pallet_dimensions_str = f"{pallet_length} x {pallet_width} x {pallet_height} cm" if use_pallet else "-"
-
-    # Unique request ID for deduplication
-    request_id = str(uuid.uuid4())
-
-    # Prepare payload for Zapier - all fields exposed individually
-    payload = {
-        # === Dedup ===
-        "request_id": request_id,
-
-        # === Email/Meta fields ===
-        "subject": subject,
-        "timestamp": timestamp,
-        "shipment_type": shipment_type,
-
-        # === Carrier ===
+    # Build a record dict matching DB column format for the shared helper
+    record = {
         "carrier": carrier,
-
-        # === Date/Time ===
-        "pickup_date": date_str,
-        "time_start": time_start_str,
-        "time_end": time_end_str,
-        "time_window": f"{time_start_str} - {time_end_str}",
-
-        # === Address - Individual fields ===
+        "pickup_date": pickup_date.isoformat(),
+        "time_start": time_start.isoformat(),
+        "time_end": time_end.isoformat(),
         "company": company,
         "contact_name": contact_name,
         "address": address,
@@ -224,67 +345,19 @@ def send_pickup_request(
         "province": province,
         "phone": phone,
         "reference": reference,
-        # Address - Formatted
-        "full_address": f"{address}, {zip_code} {city} ({province})",
-        "address_line1": f"{company} - {contact_name}" if contact_name else company,
-        "address_line2": f"{address}, {zip_code} {city} ({province})",
-
-        # === Package Details - Individual fields ===
         "num_packages": num_packages,
         "weight_per_package": weight_per_package,
-        "weight_per_package_str": f"{weight_per_package} kg",
-        "package_length": length,
-        "package_width": width,
-        "package_height": height,
-        # Package - Calculated
-        "total_weight": total_weight,
-        "total_weight_str": f"{total_weight:.1f} kg",
-        "package_dimensions": package_dimensions_str,
-        "package_volume_m3": round(package_volume, 3),
-        "total_volume_m3": round(total_volume, 3),
-
-        # === Pallet Details ===
+        "length": length,
+        "width": width,
+        "height": height,
         "use_pallet": use_pallet,
-        "use_pallet_str": "Si" if use_pallet else "No",
-        "num_pallets": num_pallets if use_pallet else 0,
-        "pallet_length": pallet_length if use_pallet else 0,
-        "pallet_width": pallet_width if use_pallet else 0,
-        "pallet_height": pallet_height if use_pallet else 0,
-        "pallet_dimensions": pallet_dimensions_str,
-
-        # === Notes ===
-        "notes": notes if notes else "",
-        "has_notes": bool(notes),
-
-        # === Summary for email body ===
-        "summary_packages": f"{num_packages} colli x {weight_per_package} kg = {total_weight:.1f} kg totali",
-        "summary_dimensions": f"Dimensioni collo: {package_dimensions_str}",
-        "summary_pallet": f"{num_pallets} pallet ({pallet_dimensions_str})" if use_pallet else "Nessun pallet",
-
-        # === Pickup webhook payload (matches shipments-backend schema) ===
-        "pickup_webhook": _build_pickup_webhook_payload(
-            carrier=carrier,
-            contact_name=contact_name,
-            company=company,
-            address=address,
-            city=city,
-            province=province,
-            zip_code=zip_code,
-            phone=phone,
-            pickup_date=pickup_date,
-            time_start=time_start,
-            time_end=time_end,
-            num_packages=num_packages,
-            weight_per_package=weight_per_package,
-            length=length,
-            width=width,
-            height=height,
-            notes=notes,
-            use_pallet=use_pallet,
-            num_pallets=num_pallets,
-            pallet_dimensions_str=pallet_dimensions_str,
-        ),
+        "num_pallets": num_pallets,
+        "pallet_length": pallet_length,
+        "pallet_width": pallet_width,
+        "pallet_height": pallet_height,
+        "notes": notes,
     }
+    payload = _build_zapier_payload(record, "creation")
 
     # --- Send to Zapier (email + Trello) ---
     zapier_msg = ""
