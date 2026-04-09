@@ -1,5 +1,6 @@
 import { useState } from "react"
-import { usePickupHistory } from "@/hooks/usePickupHistory"
+import { usePickupHistory, useCancelPickup } from "@/hooks/usePickupHistory"
+import { CancelPickupDialog } from "@/components/CancelPickupDialog"
 import { Badge } from "@/components/ui/badge"
 import { cn, formatDateIT, formatTime } from "@/lib/utils"
 import { ChevronDown, ChevronRight } from "lucide-react"
@@ -17,12 +18,15 @@ const STATUS_LABELS: Record<string, { label: string; color: string }> = {
   scheduled: { label: "Programmato", color: "bg-blue-100 text-blue-700 border-blue-300" },
   failed: { label: "Errore", color: "bg-red-100 text-red-700 border-red-300" },
   rejected: { label: "Rifiutato", color: "bg-red-100 text-red-700 border-red-300" },
+  cancelled: { label: "Annullato", color: "bg-slate-100 text-slate-700 border-slate-300" },
 }
 
 export function PickupHistory() {
   const [filter, setFilter] = useState<"upcoming" | "archive">("upcoming")
   const [showAll, setShowAll] = useState(false)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [cancelTarget, setCancelTarget] = useState<PickupRecord | null>(null)
+  const cancelMutation = useCancelPickup()
 
   const isUpcoming = filter === "upcoming"
   const limit = showAll ? 500 : 20
@@ -41,6 +45,17 @@ export function PickupHistory() {
     setFilter(f)
     setShowAll(false)
     setExpanded(new Set())
+  }
+
+  const handleCancelConfirm = (reason: string | null) => {
+    if (!cancelTarget) return
+    cancelMutation.mutate(
+      { pickupId: cancelTarget.id, reason },
+      {
+        onSuccess: () => setCancelTarget(null),
+        onError: () => {},
+      }
+    )
   }
 
   return (
@@ -92,6 +107,7 @@ export function PickupHistory() {
                   <th className="pb-2 font-medium">Indirizzo</th>
                   <th className="pb-2 font-medium text-right">Colli</th>
                   <th className="pb-2 font-medium text-right">Peso tot.</th>
+                  <th className="pb-2 w-20"></th>
                   <th className="pb-2 w-8"></th>
                 </tr>
               </thead>
@@ -102,6 +118,8 @@ export function PickupHistory() {
                     pickup={p}
                     isExpanded={expanded.has(p.id)}
                     onToggle={() => toggleExpand(p.id)}
+                    showCancel={isUpcoming && p.pickup_status !== "cancelled"}
+                    onCancel={() => setCancelTarget(p)}
                   />
                 ))}
               </tbody>
@@ -124,6 +142,23 @@ export function PickupHistory() {
           </>
         )}
       </div>
+
+      {cancelTarget && (
+        <CancelPickupDialog
+          pickup={cancelTarget}
+          isLoading={cancelMutation.isPending}
+          onConfirm={handleCancelConfirm}
+          onClose={() => { setCancelTarget(null); cancelMutation.reset() }}
+        />
+      )}
+
+      {cancelMutation.error && !cancelTarget && (
+        <div className="rounded-lg bg-red-50 border border-red-200 px-4 py-3">
+          <p className="text-sm text-red-800">
+            {cancelMutation.error instanceof Error ? cancelMutation.error.message : "Errore durante l'annullamento"}
+          </p>
+        </div>
+      )}
     </div>
   )
 }
@@ -132,10 +167,14 @@ function PickupRow({
   pickup: p,
   isExpanded,
   onToggle,
+  showCancel,
+  onCancel,
 }: {
   pickup: PickupRecord
   isExpanded: boolean
   onToggle: () => void
+  showCancel: boolean
+  onCancel: () => void
 }) {
   const totalWeight = p.num_packages * p.weight_per_package
   const carrierColor = CARRIER_COLORS[p.carrier] || "bg-gray-100 text-gray-700 border-gray-300"
@@ -145,7 +184,10 @@ function PickupRow({
     <>
       <tr
         onClick={onToggle}
-        className="border-b border-border/50 cursor-pointer hover:bg-muted/30 transition-colors"
+        className={cn(
+          "border-b border-border/50 cursor-pointer hover:bg-muted/30 transition-colors",
+          p.pickup_status === "cancelled" && "opacity-60"
+        )}
       >
         <td className="py-2.5">{formatDateIT(p.pickup_date)}</td>
         <td className="py-2.5">
@@ -158,6 +200,18 @@ function PickupRow({
         </td>
         <td className="py-2.5 text-right">{p.num_packages}</td>
         <td className="py-2.5 text-right">{totalWeight.toFixed(1)} kg</td>
+        <td className="py-2.5">
+          {showCancel ? (
+            <button
+              onClick={(e) => { e.stopPropagation(); onCancel() }}
+              className="text-xs px-2.5 py-1 rounded-md bg-red-50 text-red-700 border border-red-200 hover:bg-red-100 transition-colors"
+            >
+              Annulla
+            </button>
+          ) : p.pickup_status === "cancelled" ? (
+            <span className="text-xs text-muted-foreground">—</span>
+          ) : null}
+        </td>
         <td className="py-2.5 text-right">
           {isExpanded ? (
             <ChevronDown className="h-4 w-4 text-muted-foreground" />
@@ -169,7 +223,7 @@ function PickupRow({
 
       {isExpanded && (
         <tr>
-          <td colSpan={6} className="py-0">
+          <td colSpan={7} className="py-0">
             <div className="bg-muted/30 border-l-2 border-primary px-4 py-3 mb-1">
               <div className="grid grid-cols-2 gap-6 text-sm">
                 {/* Left: Address */}
@@ -193,6 +247,9 @@ function PickupRow({
                   )}
                   {p.notes && (
                     <p className="text-muted-foreground mt-1">Note: {p.notes}</p>
+                  )}
+                  {p.pickup_status === "cancelled" && p.cancellation_reason && (
+                    <p className="text-muted-foreground mt-1">Motivo annullamento: {p.cancellation_reason}</p>
                   )}
                   <div className="mt-2">
                     {statusInfo ? (
