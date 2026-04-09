@@ -79,7 +79,21 @@ class PickupRecord(BaseModel):
     pickup_status: Optional[str] = None
     pickup_id: Optional[str] = None
     confirmation_id: Optional[str] = None
+    cancelled_at: Optional[str] = None
+    cancellation_reason: Optional[str] = None
+    zapier_notified: Optional[bool] = None
     created_at: str
+
+
+class CancelPickupRequest(BaseModel):
+    reason: Optional[str] = None
+
+    @field_validator("reason")
+    @classmethod
+    def validate_reason_length(cls, v):
+        if v is not None and len(v) > 500:
+            raise ValueError("Il motivo non può superare 500 caratteri")
+        return v
 
 
 class PickupListResponse(BaseModel):
