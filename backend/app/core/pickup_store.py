@@ -83,11 +83,9 @@ class PickupStoreError(Exception):
 def cancel_pickup(pickup_id: str, reason: str | None) -> dict | None:
     """Cancel a pickup by updating its status.
 
-    Concurrency safety net: only updates rows where pickup_status is NOT 'cancelled'.
-    PostgREST's .neq() and .not_.eq() both exclude NULL values (SQL three-valued logic),
-    so we use .or_() to explicitly include NULLs:
-      pickup_status != 'cancelled' OR pickup_status IS NULL
-    Returns the updated record, or None if already cancelled (race condition).
+    Validation (404, 422, 409) is handled by cancel_pickup_flow before this call.
+    This function does a plain update by ID — no conditional filter needed.
+    Returns the updated record, or None if the ID doesn't exist.
     Raises PickupStoreError on infrastructure failures.
     """
     client = get_supabase_client()
@@ -102,7 +100,6 @@ def cancel_pickup(pickup_id: str, reason: str | None) -> dict | None:
                 "cancellation_reason": reason,
             })
             .eq("id", pickup_id)
-            .or_("pickup_status.neq.cancelled,pickup_status.is.null")
             .execute()
         )
         if response.data and len(response.data) > 0:

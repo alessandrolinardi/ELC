@@ -464,7 +464,7 @@ def cancel_pickup_flow(pickup_id: str, reason: str | None) -> dict:
     if record.get("pickup_status") == "cancelled":
         return {"ok": False, "status_code": 409, "message": "Pickup già annullato"}
 
-    # Step 2: Atomic conditional update (concurrency safety net)
+    # Step 2: Update the record
     logger.info("Cancelling pickup %s (carrier=%s, date=%s, reason=%s)",
                 pickup_id, record["carrier"], record["pickup_date"], reason)
     try:
@@ -473,8 +473,7 @@ def cancel_pickup_flow(pickup_id: str, reason: str | None) -> dict:
         return {"ok": False, "status_code": 503, "message": "Errore di sistema, riprova"}
 
     if cancelled_record is None:
-        # Race condition — another request cancelled it between get and update
-        return {"ok": False, "status_code": 409, "message": "Pickup già annullato"}
+        return {"ok": False, "status_code": 500, "message": "Errore di sistema, riprova"}
 
     # Step 3: Notify via Zapier
     zapier_notified = send_cancellation_notification(cancelled_record, reason)
