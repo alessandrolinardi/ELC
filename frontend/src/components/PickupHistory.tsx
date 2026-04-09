@@ -115,8 +115,8 @@ export function PickupHistory() {
                   <th className="pb-2 font-medium">Corriere</th>
                   <th className="pb-2 font-medium">Indirizzo</th>
                   <th className="pb-2 font-medium text-right">Colli</th>
-                  <th className="pb-2 font-medium text-right">Peso tot.</th>
-                  <th className="pb-2 w-20"></th>
+                  <th className="pb-2 font-medium text-right pr-4">Peso tot.</th>
+                  <th className="pb-2 w-24 text-right"></th>
                   <th className="pb-2 w-8"></th>
                 </tr>
               </thead>
@@ -224,8 +224,8 @@ function PickupRow({
           {p.city}{p.province ? ` (${p.province})` : ""}
         </td>
         <td className="py-2.5 text-right">{p.num_packages}</td>
-        <td className="py-2.5 text-right">{totalWeight.toFixed(1)} kg</td>
-        <td className="py-2.5">
+        <td className="py-2.5 text-right pr-4">{totalWeight.toFixed(1)} kg</td>
+        <td className="py-2.5 text-right">
           {showCancel ? (
             <button
               onClick={(e) => { e.stopPropagation(); onCancel() }}
