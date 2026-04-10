@@ -295,6 +295,13 @@ export interface HealthData {
   version: string
 }
 
+// --- Freight Request ---
+
+export interface FreightRequestResponse {
+  message: string
+  reference_id: string
+}
+
 // --- Usage Stats (Address Validator) ---
 
 export interface UsageStats {
