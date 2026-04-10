@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useState, useRef } from "react"
 import { useMutation } from "@tanstack/react-query"
 import { submitFreightRequest } from "@/api/client"
 import { FileDropZone } from "@/components/FileDropZone"
@@ -31,6 +31,7 @@ export function FreightRequestTab({
   const [contactPhone, setContactPhone] = useState("")
   const [notes, setNotes] = useState("")
   const [successResult, setSuccessResult] = useState<FreightRequestResponse | null>(null)
+  const topRef = useRef<HTMLDivElement>(null)
 
   const mutation = useMutation({
     mutationFn: async () => {
@@ -59,98 +60,117 @@ export function FreightRequestTab({
       setContactEmail("")
       setContactPhone("")
       setNotes("")
+      topRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
     },
   })
 
+  const handleNewRequest = () => {
+    setSuccessResult(null)
+    mutation.reset()
+  }
+
   return (
     <div className="space-y-6">
-      {/* Success banner */}
-      {successResult && (
-        <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-5 py-4">
-          <p className="text-sm font-semibold text-emerald-800">Richiesta inviata al team</p>
-          <p className="text-sm text-emerald-700 mt-1">Riferimento: {successResult.reference_id}</p>
+      <div ref={topRef} />
+
+      {/* Success state */}
+      {successResult ? (
+        <div className="space-y-6">
+          <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-5 py-4">
+            <p className="text-sm font-semibold text-emerald-800">Richiesta inviata al team</p>
+            <p className="text-sm text-emerald-700 mt-1">Riferimento: {successResult.reference_id}</p>
+          </div>
+          <Button
+            onClick={handleNewRequest}
+            variant="outline"
+            className="w-full"
+          >
+            Nuova richiesta
+          </Button>
         </div>
-      )}
-
-      {/* File upload */}
-      <FileDropZone
-        label="File spedizioni freight"
-        subtitle="Excel o CSV con dettagli spedizioni"
-        accept=".xlsx,.xls,.csv"
-        icon="📦"
-        onFilesSelected={(files) => { setFile(files[0] || null); setSuccessResult(null) }}
-        selectedFiles={file ? [file] : []}
-      />
-
-      {/* Address */}
-      <div className="elc-card">
-        <div className="flex items-center justify-between mb-4">
-          <label className="text-sm font-semibold text-foreground">Indirizzo mittente</label>
-        </div>
-        <AddressCombobox
-          addresses={addresses}
-          selectedAddress={selectedAddress}
-          onSelect={onAddressSelect}
-          onManualEntry={onManualEntry}
-          onOpenDrawer={onOpenDrawer}
-          onSaveAndUse={onSaveAndUse}
-          isLoading={addressesLoading}
-        />
-      </div>
-
-      {/* Contact info */}
-      <div className="elc-card space-y-4">
-        <div>
-          <label className="block text-sm font-semibold text-foreground mb-2">Email di contatto</label>
-          <input
-            type="email"
-            value={contactEmail}
-            onChange={(e) => setContactEmail(e.target.value)}
-            placeholder="email@esempio.com"
-            className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
-            disabled={mutation.isPending}
+      ) : (
+        <>
+          {/* File upload */}
+          <FileDropZone
+            label="File spedizioni freight"
+            subtitle="Excel o CSV con dettagli spedizioni"
+            accept=".xlsx,.xls,.csv"
+            icon="📦"
+            onFilesSelected={(files) => { setFile(files[0] || null) }}
+            selectedFiles={file ? [file] : []}
           />
-        </div>
-        <div>
-          <label className="block text-sm font-semibold text-foreground mb-2">Telefono di contatto (opzionale)</label>
-          <input
-            type="tel"
-            value={contactPhone}
-            onChange={(e) => setContactPhone(e.target.value)}
-            placeholder="Es. 02 1234567"
-            className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
-            disabled={mutation.isPending}
-          />
-        </div>
-      </div>
 
-      {/* Notes */}
-      <div className="elc-card">
-        <label className="block text-sm font-semibold text-foreground mb-2">Note (opzionale)</label>
-        <textarea
-          value={notes}
-          onChange={(e) => setNotes(e.target.value.slice(0, 500))}
-          placeholder="Es. urgente, consegna con sponda..."
-          className="w-full border border-border rounded-lg px-3 py-2 text-sm resize-y min-h-[60px] bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
-          disabled={mutation.isPending}
-        />
-        <p className="text-xs text-muted-foreground mt-1 text-right">{notes.length}/500</p>
-      </div>
+          {/* Address */}
+          <div className="elc-card">
+            <div className="flex items-center justify-between mb-4">
+              <label className="text-sm font-semibold text-foreground">Indirizzo mittente</label>
+            </div>
+            <AddressCombobox
+              addresses={addresses}
+              selectedAddress={selectedAddress}
+              onSelect={onAddressSelect}
+              onManualEntry={onManualEntry}
+              onOpenDrawer={onOpenDrawer}
+              onSaveAndUse={onSaveAndUse}
+              isLoading={addressesLoading}
+            />
+          </div>
 
-      {/* Submit */}
-      <Button
-        onClick={() => mutation.mutate()}
-        disabled={!file || !selectedAddress || !contactEmail.trim() || mutation.isPending}
-        className="bg-primary hover:bg-primary/90 text-white w-full"
-      >
-        {mutation.isPending ? "Invio in corso..." : "Invia richiesta freight"}
-      </Button>
+          {/* Contact info */}
+          <div className="elc-card space-y-4">
+            <div>
+              <label className="block text-sm font-semibold text-foreground mb-2">Email di contatto</label>
+              <input
+                type="email"
+                value={contactEmail}
+                onChange={(e) => setContactEmail(e.target.value)}
+                placeholder="email@esempio.com"
+                className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
+                disabled={mutation.isPending}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-foreground mb-2">Telefono di contatto (opzionale)</label>
+              <input
+                type="tel"
+                value={contactPhone}
+                onChange={(e) => setContactPhone(e.target.value)}
+                placeholder="Es. 02 1234567"
+                className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
+                disabled={mutation.isPending}
+              />
+            </div>
+          </div>
 
-      {/* Error */}
-      {mutation.error && (
-        <p className="text-sm text-destructive text-center">
-          {mutation.error instanceof Error ? mutation.error.message : "Errore durante l'invio"}
-        </p>
+          {/* Notes */}
+          <div className="elc-card">
+            <label className="block text-sm font-semibold text-foreground mb-2">Note (opzionale)</label>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value.slice(0, 500))}
+              placeholder="Es. urgente, consegna con sponda..."
+              className="w-full border border-border rounded-lg px-3 py-2 text-sm resize-y min-h-[60px] bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
+              disabled={mutation.isPending}
+            />
+            <p className="text-xs text-muted-foreground mt-1 text-right">{notes.length}/500</p>
+          </div>
+
+          {/* Submit */}
+          <Button
+            onClick={() => mutation.mutate()}
+            disabled={!file || !selectedAddress || !contactEmail.trim() || mutation.isPending}
+            className="bg-primary hover:bg-primary/90 text-white w-full"
+          >
+            {mutation.isPending ? "Invio in corso..." : "Invia richiesta freight"}
+          </Button>
+
+          {/* Error */}
+          {mutation.error && (
+            <p className="text-sm text-destructive text-center">
+              {mutation.error instanceof Error ? mutation.error.message : "Errore durante l'invio"}
+            </p>
+          )}
+        </>
       )}
     </div>
   )
