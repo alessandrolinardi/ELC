@@ -25,7 +25,9 @@ def upload_freight_file(file_bytes: bytes, filename: str, reference_id: str) -> 
     if client is None:
         raise RuntimeError("Supabase client unavailable")
 
-    path = f"{reference_id}/{filename}"
+    # Sanitize filename — replace spaces and special chars for Storage compatibility
+    safe_filename = filename.replace(" ", "_")
+    path = f"{reference_id}/{safe_filename}"
     try:
         client.storage.from_(STORAGE_BUCKET).upload(path, file_bytes)
         result = client.storage.from_(STORAGE_BUCKET).create_signed_url(path, SIGNED_URL_EXPIRY)
