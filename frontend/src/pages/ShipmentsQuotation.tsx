@@ -6,6 +6,7 @@ import { PageShell } from "@/components/layout/PageShell"
 import { FileDropZone } from "@/components/FileDropZone"
 import { AddressCombobox } from "@/components/AddressCombobox"
 import { AddressDrawer } from "@/components/AddressDrawer"
+import { FreightRequestTab } from "@/components/FreightRequestTab"
 import { useAddresses } from "@/hooks/useAddresses"
 import { useJobPolling } from "@/hooks/useJobPolling"
 import { Button } from "@/components/ui/button"
@@ -37,6 +38,7 @@ export default function ShipmentsQuotation() {
   const [fromValidator, setFromValidator] = useState(false)
   const [isLoadingPreloadedFile, setIsLoadingPreloadedFile] = useState(false)
   const [preloadError, setPreloadError] = useState<string | null>(null)
+  const [activeTab, setActiveTab] = useState<"auto" | "freight">("auto")
 
   const progressRef = useRef<HTMLDivElement>(null)
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
@@ -93,6 +95,7 @@ export default function ShipmentsQuotation() {
     const state = location.state as { validatorJobId?: string; correctedFile?: string } | null
     const validatorJobId = state?.validatorJobId
     if (!validatorJobId) return
+    setActiveTab("auto")
 
     const filename = state?.correctedFile || "corrected.xlsx"
 
@@ -226,158 +229,195 @@ export default function ShipmentsQuotation() {
 
   return (
     <PageShell title="Quotazione Spedizioni" subtitle="Carica un file Excel per ottenere tariffe da DHL, UPS e FedEx.">
-      <div className="space-y-6">
-        {/* Upload + Address */}
-        {!quotationResult && (
-          <>
-            {isLoadingPreloadedFile && (
-              <div className="elc-card text-center py-6">
-                <div className="inline-block w-6 h-6 border-2 border-primary/20 border-t-primary rounded-full animate-spin mb-2" />
-                <p className="text-sm text-muted-foreground">Caricamento file dal validatore...</p>
-              </div>
-            )}
-
-            {preloadError && (
-              <div className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3">
-                <p className="text-sm text-amber-800">{preloadError}</p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Puoi comunque caricare un file manualmente.
-                </p>
-              </div>
-            )}
-
-            {fromValidator && excelFile && (
-              <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3 flex items-center gap-3">
-                <span className="text-lg">&#9989;</span>
-                <div>
-                  <p className="text-sm font-medium text-emerald-800">
-                    File caricato dal Validator
-                  </p>
-                  <p className="text-xs text-emerald-600">
-                    Seleziona un indirizzo mittente e avvia la quotazione.
-                  </p>
-                </div>
-              </div>
-            )}
-
-            <FileDropZone
-              label="File spedizioni"
-              subtitle="Excel o CSV con indirizzi e dimensioni colli"
-              accept=".xlsx,.xls,.csv"
-              icon="📦"
-              onFilesSelected={(files) => { setExcelFile(files[0] || null); setFromValidator(false) }}
-              selectedFiles={excelFile ? [excelFile] : []}
-            />
-
-            <div className="elc-card">
-              <div className="flex items-center justify-between mb-4">
-                <label className="text-sm font-semibold text-foreground">Indirizzo mittente</label>
-              </div>
-              <AddressCombobox
-                addresses={addresses}
-                selectedAddress={selectedAddress}
-                onSelect={selectAddress}
-                onManualEntry={handleManualEntry}
-                onOpenDrawer={() => setDrawerOpen(true)}
-                onSaveAndUse={handleSaveAndUse}
-                isLoading={addressesLoading}
-              />
-            </div>
-
-            <Button
-              onClick={handleSubmit}
-              disabled={!excelFile || !selectedAddress || submitMutation.isPending || isProcessing}
-              className="bg-primary hover:bg-primary/90 text-white w-full"
-            >
-              {submitMutation.isPending || isProcessing ? "Avvio..." : "Avvia Quotazione"}
-            </Button>
-
-            {submitMutation.error && (
-              <p className="text-sm text-destructive text-center">
-                {submitMutation.error instanceof Error ? submitMutation.error.message : "Errore durante l'invio"}
-              </p>
-            )}
-
-            {/* Progress with live timer (#1) */}
-            {isProcessing && (
-              <div ref={progressRef} className="elc-card text-center py-8">
-                <div className="inline-block w-8 h-8 border-4 border-primary/20 border-t-primary rounded-full animate-spin mb-3" />
-                <p className="text-sm font-semibold text-foreground">
-                  {progress?.message || "Elaborazione in corso..."}
-                </p>
-
-                {/* Pulsing progress bar — indeterminate during webhook call */}
-                <div className="mt-3 max-w-xs mx-auto">
-                  <div className="w-full bg-muted rounded-full h-2 overflow-hidden">
-                    <div className="bg-primary h-2 rounded-full animate-pulse" style={{ width: "100%" }} />
-                  </div>
-                </div>
-
-                {/* Live timer + estimated remaining */}
-                <div className="mt-3 space-y-1">
-                  <p className="text-sm font-medium text-foreground tabular-nums">
-                    {formatElapsed(elapsed)} trascorsi
-                  </p>
-                  {estimatedRemaining !== null && estimatedRemaining > 0 && (
-                    <p className="text-xs text-muted-foreground">
-                      ~{formatElapsed(estimatedRemaining)} rimanenti{estimatedCount ? ` per ${estimatedCount} spedizioni` : ""}
-                    </p>
-                  )}
-                  {!estimatedRemaining && (
-                    <p className="text-xs text-muted-foreground">
-                      Potrebbe richiedere alcuni minuti per file grandi
-                    </p>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Job error — retry preserves form state (#5) */}
-            {jobStatus === "failed" && (
-              <div className="elc-card text-center py-6 space-y-3">
-                <p className="text-sm font-semibold text-destructive">Errore</p>
-                <p className="text-sm text-muted-foreground">{jobError || "Errore sconosciuto"}</p>
-                <Button variant="outline" onClick={handleRetry}>Riprova</Button>
-              </div>
-            )}
-          </>
-        )}
-
-        {/* Results */}
-        {quotationResult && (
-          <div className="space-y-6">
-            {/* Summary */}
-            <div className="text-center text-sm text-muted-foreground">
-              {quotationResult.shipment_count} spedizioni analizzate in{" "}
-              {quotationResult.processing_time_seconds < 60
-                ? `${Math.round(quotationResult.processing_time_seconds)}s`
-                : `${Math.round(quotationResult.processing_time_seconds / 60)} min`}
-            </div>
-
-            {/* Carrier cards */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {Object.entries(quotationResult.carriers).map(([carrierKey, data]) => (
-                <CarrierCard
-                  key={carrierKey}
-                  carrierKey={carrierKey}
-                  data={data}
-                  totalShipments={quotationResult.shipment_count}
-                  isCheapest={carrierKey === cheapestCarrier}
-                />
-              ))}
-            </div>
-
-            {/* Actions (#4 — copy results) */}
-            <div className="flex justify-center gap-3">
-              <Button variant="outline" onClick={handleCopyResults}>
-                {copied ? "Copiato!" : "Copia risultati"}
-              </Button>
-              <Button variant="outline" onClick={handleReset}>Nuova quotazione</Button>
-            </div>
-          </div>
-        )}
+      {/* Tab pills */}
+      <div className="flex gap-2 mb-6">
+        {([
+          { key: "auto" as const, label: "Quotazione automatica" },
+          { key: "freight" as const, label: "Richiesta freight" },
+        ]).map((tab) => (
+          <button
+            key={tab.key}
+            onClick={() => setActiveTab(tab.key)}
+            className={`px-3 py-1 text-sm font-medium rounded-md transition-colors ${
+              activeTab === tab.key
+                ? "bg-primary/10 text-primary"
+                : "text-muted-foreground hover:bg-muted"
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
 
+      {/* Auto-quote tab — existing content */}
+      <div className={activeTab !== "auto" ? "hidden" : ""}>
+        <div className="space-y-6">
+          {/* Upload + Address */}
+          {!quotationResult && (
+            <>
+              {isLoadingPreloadedFile && (
+                <div className="elc-card text-center py-6">
+                  <div className="inline-block w-6 h-6 border-2 border-primary/20 border-t-primary rounded-full animate-spin mb-2" />
+                  <p className="text-sm text-muted-foreground">Caricamento file dal validatore...</p>
+                </div>
+              )}
+
+              {preloadError && (
+                <div className="rounded-lg bg-amber-50 border border-amber-200 px-4 py-3">
+                  <p className="text-sm text-amber-800">{preloadError}</p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Puoi comunque caricare un file manualmente.
+                  </p>
+                </div>
+              )}
+
+              {fromValidator && excelFile && (
+                <div className="rounded-lg bg-emerald-50 border border-emerald-200 px-4 py-3 flex items-center gap-3">
+                  <span className="text-lg">&#9989;</span>
+                  <div>
+                    <p className="text-sm font-medium text-emerald-800">
+                      File caricato dal Validator
+                    </p>
+                    <p className="text-xs text-emerald-600">
+                      Seleziona un indirizzo mittente e avvia la quotazione.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              <FileDropZone
+                label="File spedizioni"
+                subtitle="Excel o CSV con indirizzi e dimensioni colli"
+                accept=".xlsx,.xls,.csv"
+                icon="📦"
+                onFilesSelected={(files) => { setExcelFile(files[0] || null); setFromValidator(false) }}
+                selectedFiles={excelFile ? [excelFile] : []}
+              />
+
+              <div className="elc-card">
+                <div className="flex items-center justify-between mb-4">
+                  <label className="text-sm font-semibold text-foreground">Indirizzo mittente</label>
+                </div>
+                <AddressCombobox
+                  addresses={addresses}
+                  selectedAddress={selectedAddress}
+                  onSelect={selectAddress}
+                  onManualEntry={handleManualEntry}
+                  onOpenDrawer={() => setDrawerOpen(true)}
+                  onSaveAndUse={handleSaveAndUse}
+                  isLoading={addressesLoading}
+                />
+              </div>
+
+              <Button
+                onClick={handleSubmit}
+                disabled={!excelFile || !selectedAddress || submitMutation.isPending || isProcessing}
+                className="bg-primary hover:bg-primary/90 text-white w-full"
+              >
+                {submitMutation.isPending || isProcessing ? "Avvio..." : "Avvia Quotazione"}
+              </Button>
+
+              {submitMutation.error && (
+                <p className="text-sm text-destructive text-center">
+                  {submitMutation.error instanceof Error ? submitMutation.error.message : "Errore durante l'invio"}
+                </p>
+              )}
+
+              {/* Progress with live timer (#1) */}
+              {isProcessing && (
+                <div ref={progressRef} className="elc-card text-center py-8">
+                  <div className="inline-block w-8 h-8 border-4 border-primary/20 border-t-primary rounded-full animate-spin mb-3" />
+                  <p className="text-sm font-semibold text-foreground">
+                    {progress?.message || "Elaborazione in corso..."}
+                  </p>
+
+                  {/* Pulsing progress bar — indeterminate during webhook call */}
+                  <div className="mt-3 max-w-xs mx-auto">
+                    <div className="w-full bg-muted rounded-full h-2 overflow-hidden">
+                      <div className="bg-primary h-2 rounded-full animate-pulse" style={{ width: "100%" }} />
+                    </div>
+                  </div>
+
+                  {/* Live timer + estimated remaining */}
+                  <div className="mt-3 space-y-1">
+                    <p className="text-sm font-medium text-foreground tabular-nums">
+                      {formatElapsed(elapsed)} trascorsi
+                    </p>
+                    {estimatedRemaining !== null && estimatedRemaining > 0 && (
+                      <p className="text-xs text-muted-foreground">
+                        ~{formatElapsed(estimatedRemaining)} rimanenti{estimatedCount ? ` per ${estimatedCount} spedizioni` : ""}
+                      </p>
+                    )}
+                    {!estimatedRemaining && (
+                      <p className="text-xs text-muted-foreground">
+                        Potrebbe richiedere alcuni minuti per file grandi
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Job error — retry preserves form state (#5) */}
+              {jobStatus === "failed" && (
+                <div className="elc-card text-center py-6 space-y-3">
+                  <p className="text-sm font-semibold text-destructive">Errore</p>
+                  <p className="text-sm text-muted-foreground">{jobError || "Errore sconosciuto"}</p>
+                  <Button variant="outline" onClick={handleRetry}>Riprova</Button>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Results */}
+          {quotationResult && (
+            <div className="space-y-6">
+              {/* Summary */}
+              <div className="text-center text-sm text-muted-foreground">
+                {quotationResult.shipment_count} spedizioni analizzate in{" "}
+                {quotationResult.processing_time_seconds < 60
+                  ? `${Math.round(quotationResult.processing_time_seconds)}s`
+                  : `${Math.round(quotationResult.processing_time_seconds / 60)} min`}
+              </div>
+
+              {/* Carrier cards */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                {Object.entries(quotationResult.carriers).map(([carrierKey, data]) => (
+                  <CarrierCard
+                    key={carrierKey}
+                    carrierKey={carrierKey}
+                    data={data}
+                    totalShipments={quotationResult.shipment_count}
+                    isCheapest={carrierKey === cheapestCarrier}
+                  />
+                ))}
+              </div>
+
+              {/* Actions (#4 — copy results) */}
+              <div className="flex justify-center gap-3">
+                <Button variant="outline" onClick={handleCopyResults}>
+                  {copied ? "Copiato!" : "Copia risultati"}
+                </Button>
+                <Button variant="outline" onClick={handleReset}>Nuova quotazione</Button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Freight tab */}
+      <div className={activeTab !== "freight" ? "hidden" : ""}>
+        <FreightRequestTab
+          addresses={addresses}
+          selectedAddress={selectedAddress}
+          onAddressSelect={selectAddress}
+          onManualEntry={handleManualEntry}
+          onOpenDrawer={() => setDrawerOpen(true)}
+          onSaveAndUse={handleSaveAndUse}
+          addressesLoading={addressesLoading}
+        />
+      </div>
+
+      {/* AddressDrawer stays outside tabs, unchanged */}
       <AddressDrawer
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
