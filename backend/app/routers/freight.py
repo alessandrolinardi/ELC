@@ -26,6 +26,8 @@ async def create_freight_request(
     from_zip: str = Form(...),
     from_country: str = Form("IT"),
     from_phone: str = Form(""),
+    contact_email: str = Form(...),
+    contact_phone: Optional[str] = Form(None),
     notes: Optional[str] = Form(None),
 ):
     # Validate file
@@ -50,6 +52,8 @@ async def create_freight_request(
         from_zip=from_zip,
         from_country=from_country,
         from_phone=from_phone,
+        contact_email=contact_email,
+        contact_phone=contact_phone,
         notes=notes,
     )
 
@@ -68,9 +72,10 @@ async def create_freight_request(
     reference_id = generate_reference_id()
 
     # Send to Zapier with base64-encoded file
-    sender_address = form.model_dump(exclude={"notes"})
+    sender_address = form.model_dump(exclude={"notes", "contact_email", "contact_phone"})
     success, message = await asyncio.to_thread(
-        send_freight_request, file_bytes, file.filename, reference_id, sender_address, form.notes
+        send_freight_request, file_bytes, file.filename, reference_id, sender_address,
+        form.notes, form.contact_email, form.contact_phone
     )
 
     if not success:

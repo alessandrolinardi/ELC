@@ -27,6 +27,8 @@ export function FreightRequestTab({
   addressesLoading,
 }: FreightRequestTabProps) {
   const [file, setFile] = useState<File | null>(null)
+  const [contactEmail, setContactEmail] = useState("")
+  const [contactPhone, setContactPhone] = useState("")
   const [notes, setNotes] = useState("")
   const [successResult, setSuccessResult] = useState<FreightRequestResponse | null>(null)
 
@@ -45,6 +47,8 @@ export function FreightRequestTab({
       formData.append("from_zip", selectedAddress.zip)
       formData.append("from_country", "IT")
       formData.append("from_phone", selectedAddress.phone || "")
+      formData.append("contact_email", contactEmail.trim())
+      if (contactPhone.trim()) formData.append("contact_phone", contactPhone.trim())
       if (notes.trim()) formData.append("notes", notes.trim())
 
       return submitFreightRequest(formData)
@@ -52,6 +56,8 @@ export function FreightRequestTab({
     onSuccess: (data) => {
       setSuccessResult(data)
       setFile(null)
+      setContactEmail("")
+      setContactPhone("")
       setNotes("")
     },
   })
@@ -92,6 +98,32 @@ export function FreightRequestTab({
         />
       </div>
 
+      {/* Contact info */}
+      <div className="elc-card space-y-4">
+        <div>
+          <label className="block text-sm font-semibold text-foreground mb-2">Email di contatto</label>
+          <input
+            type="email"
+            value={contactEmail}
+            onChange={(e) => setContactEmail(e.target.value)}
+            placeholder="email@esempio.com"
+            className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
+            disabled={mutation.isPending}
+          />
+        </div>
+        <div>
+          <label className="block text-sm font-semibold text-foreground mb-2">Telefono di contatto (opzionale)</label>
+          <input
+            type="tel"
+            value={contactPhone}
+            onChange={(e) => setContactPhone(e.target.value)}
+            placeholder="Es. 02 1234567"
+            className="w-full border border-border rounded-lg px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/20"
+            disabled={mutation.isPending}
+          />
+        </div>
+      </div>
+
       {/* Notes */}
       <div className="elc-card">
         <label className="block text-sm font-semibold text-foreground mb-2">Note (opzionale)</label>
@@ -108,7 +140,7 @@ export function FreightRequestTab({
       {/* Submit */}
       <Button
         onClick={() => mutation.mutate()}
-        disabled={!file || !selectedAddress || mutation.isPending}
+        disabled={!file || !selectedAddress || !contactEmail.trim() || mutation.isPending}
         className="bg-primary hover:bg-primary/90 text-white w-full"
       >
         {mutation.isPending ? "Invio in corso..." : "Invia richiesta freight"}

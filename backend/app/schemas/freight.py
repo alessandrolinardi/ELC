@@ -13,6 +13,8 @@ class FreightRequestForm(BaseModel):
     from_zip: str
     from_country: str = "IT"
     from_phone: str = ""
+    contact_email: str
+    contact_phone: Optional[str] = None
     notes: Optional[str] = None
 
     @field_validator("from_zip")

@@ -23,6 +23,8 @@ def send_freight_request(
     reference_id: str,
     sender_address: dict,
     notes: Optional[str],
+    contact_email: str = "",
+    contact_phone: Optional[str] = None,
 ) -> tuple[bool, str]:
     """Build JSON payload with base64-encoded file and POST to Zapier.
 
@@ -52,6 +54,9 @@ def send_freight_request(
         "from_zip": sender_address.get("from_zip", ""),
         "from_country": sender_address.get("from_country", "IT"),
         "from_phone": sender_address.get("from_phone", ""),
+
+        "contact_email": contact_email,
+        "contact_phone": contact_phone or "",
 
         "notes": notes or "",
         "has_notes": bool(notes),
