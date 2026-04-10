@@ -4,7 +4,7 @@ import { submitFreightRequest } from "@/api/client"
 import { FileDropZone } from "@/components/FileDropZone"
 import { AddressCombobox } from "@/components/AddressCombobox"
 import { Button } from "@/components/ui/button"
-import type { Address, FreightRequestResponse } from "@/lib/types"
+import type { Address, AddressCreate, FreightRequestResponse } from "@/lib/types"
 import type { ManualAddressData } from "@/components/AddressCombobox"
 
 interface FreightRequestTabProps {
@@ -13,7 +13,7 @@ interface FreightRequestTabProps {
   onAddressSelect: (addr: Address) => void
   onManualEntry: (data: ManualAddressData) => void
   onOpenDrawer: () => void
-  onSaveAndUse: (data: { name: string; company: string; contact_name?: string; street: string; zip_code: string; city: string; province?: string; phone?: string; reference?: string; is_default?: boolean }) => void
+  onSaveAndUse: (data: AddressCreate) => Promise<void>
   addressesLoading: boolean
 }
 
