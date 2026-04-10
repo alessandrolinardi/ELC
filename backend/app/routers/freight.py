@@ -10,7 +10,7 @@ from ..core.freight import generate_reference_id, send_freight_request
 router = APIRouter()
 
 ALLOWED_EXTENSIONS = {".xlsx", ".xls", ".csv"}
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB (Zapier payload limit)
+MAX_FILE_SIZE = 7 * 1024 * 1024  # 7MB raw (~9.3MB base64, within Zapier's ~10MB limit)
 
 
 @router.post("/freight/request")
@@ -61,7 +61,7 @@ async def create_freight_request(
         })
     if len(file_bytes) > MAX_FILE_SIZE:
         raise HTTPException(status_code=422, detail={
-            "ok": False, "error": {"code": "VALIDATION_ERROR", "message": "File troppo grande (max 10MB)"}
+            "ok": False, "error": {"code": "VALIDATION_ERROR", "message": "File troppo grande (max 7MB)"}
         })
 
     # Generate reference ID
