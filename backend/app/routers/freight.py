@@ -5,12 +5,12 @@ from typing import Optional
 
 from ..limiter import limiter
 from ..schemas.freight import FreightRequestForm
-from ..core.freight import generate_reference_id, upload_freight_file, send_freight_request
+from ..core.freight import generate_reference_id, send_freight_request
 
 router = APIRouter()
 
 ALLOWED_EXTENSIONS = {".xlsx", ".xls", ".csv"}
-MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB (Zapier payload limit)
 
 
 @router.post("/freight/request")
@@ -61,26 +61,16 @@ async def create_freight_request(
         })
     if len(file_bytes) > MAX_FILE_SIZE:
         raise HTTPException(status_code=422, detail={
-            "ok": False, "error": {"code": "VALIDATION_ERROR", "message": "File troppo grande (max 50MB)"}
+            "ok": False, "error": {"code": "VALIDATION_ERROR", "message": "File troppo grande (max 10MB)"}
         })
 
     # Generate reference ID
     reference_id = generate_reference_id()
 
-    # Upload to Supabase Storage
-    try:
-        file_url = await asyncio.to_thread(
-            upload_freight_file, file_bytes, file.filename, reference_id
-        )
-    except Exception:
-        raise HTTPException(status_code=502, detail={
-            "ok": False, "error": {"code": "STORAGE_ERROR", "message": "Errore nel caricamento del file, riprova"}
-        })
-
-    # Send to Zapier
+    # Send to Zapier with base64-encoded file
     sender_address = form.model_dump(exclude={"notes"})
     success, message = await asyncio.to_thread(
-        send_freight_request, file_url, file.filename, reference_id, sender_address, form.notes
+        send_freight_request, file_bytes, file.filename, reference_id, sender_address, form.notes
     )
 
     if not success:

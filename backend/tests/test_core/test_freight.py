@@ -1,8 +1,9 @@
-"""Tests for app.core.freight — upload_freight_file, send_freight_request."""
+"""Tests for app.core.freight — send_freight_request with base64-encoded file."""
+import base64
 import re
 from unittest.mock import patch, MagicMock
 
-from app.core.freight import upload_freight_file, send_freight_request, generate_reference_id
+from app.core.freight import send_freight_request, generate_reference_id
 
 
 class TestGenerateReferenceId:
@@ -14,31 +15,6 @@ class TestGenerateReferenceId:
     def test_unique(self):
         ids = {generate_reference_id() for _ in range(100)}
         assert len(ids) == 100
-
-
-class TestUploadFreightFile:
-    @patch("app.core.freight.get_supabase_client")
-    def test_returns_signed_url(self, mock_client_fn):
-        mock_client = MagicMock()
-        mock_client_fn.return_value = mock_client
-        mock_client.storage.from_.return_value.upload.return_value = None
-        mock_client.storage.from_.return_value.create_signed_url.return_value = {
-            "signedURL": "https://xyz.supabase.co/storage/v1/object/sign/freight-requests/FRQ-abc12345/test.xlsx?token=abc"
-        }
-
-        url = upload_freight_file(b"fake-file-content", "test.xlsx", "FRQ-abc12345")
-        assert "supabase.co" in url
-        assert "FRQ-abc12345" in url
-        mock_client.storage.from_.assert_called_with("freight-requests")
-
-    @patch("app.core.freight.get_supabase_client")
-    def test_raises_on_client_none(self, mock_client_fn):
-        mock_client_fn.return_value = None
-        try:
-            upload_freight_file(b"content", "test.xlsx", "FRQ-abc12345")
-            assert False, "Should have raised"
-        except Exception as e:
-            assert "unavailable" in str(e).lower()
 
 
 class TestSendFreightRequest:
@@ -53,12 +29,14 @@ class TestSendFreightRequest:
         "from_phone": "0212345678",
     }
 
+    FILE_BYTES = b"fake-excel-content-here"
+
     @patch("app.core.freight.requests.post")
     @patch("app.core.freight.get_secret", return_value="https://hooks.zapier.com/test")
     def test_successful_request(self, mock_secret, mock_post):
         mock_post.return_value = MagicMock(status_code=200)
         success, message = send_freight_request(
-            file_url="https://storage.example.com/file.xlsx",
+            file_bytes=self.FILE_BYTES,
             filename="shipments.xlsx",
             reference_id="FRQ-abc12345",
             sender_address=self.SENDER,
@@ -70,7 +48,6 @@ class TestSendFreightRequest:
         assert payload["event_type"] == "freight_request"
         assert payload["reference_id"] == "FRQ-abc12345"
         assert payload["subject"] == "FREIGHT REQUEST - FRQ-abc12345"
-        assert payload["file_url"] == "https://storage.example.com/file.xlsx"
         assert payload["filename"] == "shipments.xlsx"
         assert payload["from_company"] == "Acme Srl"
         assert payload["notes"] == "urgente"
@@ -78,10 +55,26 @@ class TestSendFreightRequest:
 
     @patch("app.core.freight.requests.post")
     @patch("app.core.freight.get_secret", return_value="https://hooks.zapier.com/test")
+    def test_file_is_base64_encoded(self, mock_secret, mock_post):
+        mock_post.return_value = MagicMock(status_code=200)
+        send_freight_request(
+            file_bytes=self.FILE_BYTES,
+            filename="test.xlsx",
+            reference_id="FRQ-abc12345",
+            sender_address=self.SENDER,
+            notes=None,
+        )
+        payload = mock_post.call_args[1]["json"]
+        assert "file_base64" in payload
+        decoded = base64.b64decode(payload["file_base64"])
+        assert decoded == self.FILE_BYTES
+
+    @patch("app.core.freight.requests.post")
+    @patch("app.core.freight.get_secret", return_value="https://hooks.zapier.com/test")
     def test_null_notes(self, mock_secret, mock_post):
         mock_post.return_value = MagicMock(status_code=200)
         success, _ = send_freight_request(
-            file_url="https://example.com/f.xlsx", filename="f.xlsx",
+            file_bytes=self.FILE_BYTES, filename="f.xlsx",
             reference_id="FRQ-abc12345", sender_address=self.SENDER, notes=None,
         )
         assert success is True
@@ -93,7 +86,7 @@ class TestSendFreightRequest:
     @patch("app.core.freight.get_secret", return_value="https://hooks.zapier.com/test")
     def test_zapier_failure(self, mock_secret, mock_post):
         success, message = send_freight_request(
-            file_url="https://example.com/f.xlsx", filename="f.xlsx",
+            file_bytes=self.FILE_BYTES, filename="f.xlsx",
             reference_id="FRQ-abc12345", sender_address=self.SENDER, notes=None,
         )
         assert success is False
@@ -101,7 +94,7 @@ class TestSendFreightRequest:
     @patch("app.core.freight.get_secret", return_value=None)
     def test_no_webhook_url(self, mock_secret):
         success, message = send_freight_request(
-            file_url="https://example.com/f.xlsx", filename="f.xlsx",
+            file_bytes=self.FILE_BYTES, filename="f.xlsx",
             reference_id="FRQ-abc12345", sender_address=self.SENDER, notes=None,
         )
         assert success is False
@@ -112,7 +105,7 @@ class TestSendFreightRequest:
     def test_timestamp_format(self, mock_secret, mock_post):
         mock_post.return_value = MagicMock(status_code=200)
         send_freight_request(
-            file_url="https://example.com/f.xlsx", filename="f.xlsx",
+            file_bytes=self.FILE_BYTES, filename="f.xlsx",
             reference_id="FRQ-abc12345", sender_address=self.SENDER, notes=None,
         )
         payload = mock_post.call_args[1]["json"]
