@@ -84,3 +84,6 @@ Thumbs.db
 # Frontend overrides (un-ignore paths needed by React/TypeScript frontend)
 !frontend/src/lib/
 !frontend/src/lib/**
+
+# Superpowers artifacts
+.superpowers/
