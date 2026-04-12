@@ -1,4 +1,5 @@
 """Freight request business logic — upload file to Supabase Storage, notify via Zapier."""
+import re
 import uuid
 import requests
 from datetime import datetime
@@ -13,6 +14,12 @@ logger = get_logger(__name__)
 STORAGE_BUCKET = "freight-requests"
 SIGNED_URL_EXPIRY = 604800  # 7 days
 
+MIME_TYPES = {
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".xls": "application/vnd.ms-excel",
+    ".csv": "text/csv",
+}
+
 
 def generate_reference_id() -> str:
     """Generate a unique freight request reference ID."""
@@ -25,11 +32,18 @@ def upload_freight_file(file_bytes: bytes, filename: str, reference_id: str) -> 
     if client is None:
         raise RuntimeError("Supabase client unavailable")
 
-    # Sanitize filename — replace spaces and special chars for Storage compatibility
-    safe_filename = filename.replace(" ", "_")
+    # Sanitize filename — keep only safe chars for Storage paths
+    safe_filename = re.sub(r'[^\w.\-]', '_', filename)
     path = f"{reference_id}/{safe_filename}"
+
+    # Detect content-type from extension
+    ext = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    content_type = MIME_TYPES.get(ext, "application/octet-stream")
+
     try:
-        client.storage.from_(STORAGE_BUCKET).upload(path, file_bytes)
+        client.storage.from_(STORAGE_BUCKET).upload(
+            path, file_bytes, file_options={"content-type": content_type}
+        )
         result = client.storage.from_(STORAGE_BUCKET).create_signed_url(path, SIGNED_URL_EXPIRY)
         signed_url = result.get("signedURL") or result.get("signedUrl", "")
         if not signed_url:

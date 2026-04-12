@@ -17,6 +17,13 @@ class FreightRequestForm(BaseModel):
     contact_phone: Optional[str] = None
     notes: Optional[str] = None
 
+    @field_validator("contact_email")
+    @classmethod
+    def validate_email(cls, v):
+        if not v or "@" not in v:
+            raise ValueError("Email non valida")
+        return v.strip()
+
     @field_validator("from_zip")
     @classmethod
     def validate_zip(cls, v):
