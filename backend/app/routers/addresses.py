@@ -15,8 +15,12 @@ router = APIRouter()
 @router.get("/addresses")
 @limiter.limit("100/hour")
 async def list_addresses(request: Request):
-    loop = asyncio.get_running_loop()
-    addresses = await loop.run_in_executor(None, load_addresses)
+    try:
+        addresses = await asyncio.to_thread(load_addresses)
+    except Exception:
+        raise HTTPException(status_code=500, detail={
+            "ok": False, "error": {"code": "LOAD_ERROR", "message": "Errore nel caricamento degli indirizzi"}
+        })
     return {"ok": True, "data": [AddressResponse(
         id=a.id, name=a.name, company=a.company, contact_name=a.contact_name,
         street=a.street, zip=a.zip, city=a.city, province=a.province,
@@ -27,9 +31,8 @@ async def list_addresses(request: Request):
 @router.post("/addresses", status_code=201)
 @limiter.limit("100/hour")
 async def create_address(request: Request, body: AddressCreate):
-    loop = asyncio.get_running_loop()
     try:
-        result = await loop.run_in_executor(None, lambda: add_address(
+        result = await asyncio.to_thread(lambda: add_address(
             name=body.name, company=body.company, contact_name=body.contact_name,
             street=body.street, zip_code=body.zip_code, city=body.city,
             province=body.province, phone=body.phone, reference=body.reference,
@@ -48,13 +51,18 @@ async def update_address_endpoint(request: Request, address_id: str, body: Addre
     updates = body.model_dump(exclude_unset=True)
     if not updates:
         raise HTTPException(status_code=400, detail={
-            "ok": False, "error": {"code": "NO_FIELDS", "message": "No fields to update"}
+            "ok": False, "error": {"code": "NO_FIELDS", "message": "Nessun campo da aggiornare"}
         })
-    loop = asyncio.get_running_loop()
-    success = await loop.run_in_executor(None, lambda: update_address(address_id, **updates))
-    if not success:
+    addr = await asyncio.to_thread(get_address_by_id, address_id)
+    if addr is None:
         raise HTTPException(status_code=404, detail={
-            "ok": False, "error": {"code": "NOT_FOUND", "message": "Address not found"}
+            "ok": False, "error": {"code": "NOT_FOUND", "message": "Indirizzo non trovato"}
+        })
+    try:
+        await asyncio.to_thread(lambda: update_address(address_id, **updates))
+    except Exception:
+        raise HTTPException(status_code=500, detail={
+            "ok": False, "error": {"code": "UPDATE_ERROR", "message": "Errore nell'aggiornamento dell'indirizzo"}
         })
     return {"ok": True, "data": {"updated": True}}
 
@@ -62,21 +70,20 @@ async def update_address_endpoint(request: Request, address_id: str, body: Addre
 @router.delete("/addresses/{address_id}")
 @limiter.limit("100/hour")
 async def delete_address_endpoint(request: Request, address_id: str):
-    loop = asyncio.get_running_loop()
-    addr = await loop.run_in_executor(None, lambda: get_address_by_id(address_id))
+    addr = await asyncio.to_thread(get_address_by_id, address_id)
     if addr is None:
         raise HTTPException(status_code=404, detail={
-            "ok": False, "error": {"code": "NOT_FOUND", "message": "Address not found"}
+            "ok": False, "error": {"code": "NOT_FOUND", "message": "Indirizzo non trovato"}
         })
-    addresses = await loop.run_in_executor(None, load_addresses)
-    if len(addresses) <= 1:
+    try:
+        await asyncio.to_thread(lambda: delete_address(address_id))
+    except ValueError as e:
         raise HTTPException(status_code=409, detail={
-            "ok": False, "error": {"code": "LAST_ADDRESS", "message": "Cannot delete the last address"}
+            "ok": False, "error": {"code": "LAST_ADDRESS", "message": str(e)}
         })
-    success = await loop.run_in_executor(None, lambda: delete_address(address_id))
-    if not success:
+    except Exception:
         raise HTTPException(status_code=500, detail={
-            "ok": False, "error": {"code": "DELETE_FAILED", "message": "Failed to delete address"}
+            "ok": False, "error": {"code": "DELETE_ERROR", "message": "Errore nell'eliminazione dell'indirizzo"}
         })
     return {"ok": True, "data": {"deleted": True}}
 
@@ -84,15 +91,15 @@ async def delete_address_endpoint(request: Request, address_id: str):
 @router.put("/addresses/{address_id}/default")
 @limiter.limit("100/hour")
 async def set_default(request: Request, address_id: str):
-    loop = asyncio.get_running_loop()
-    addr = await loop.run_in_executor(None, lambda: get_address_by_id(address_id))
+    addr = await asyncio.to_thread(get_address_by_id, address_id)
     if addr is None:
         raise HTTPException(status_code=404, detail={
-            "ok": False, "error": {"code": "NOT_FOUND", "message": "Address not found"}
+            "ok": False, "error": {"code": "NOT_FOUND", "message": "Indirizzo non trovato"}
         })
-    success = await loop.run_in_executor(None, lambda: set_default_address(address_id))
-    if not success:
+    try:
+        await asyncio.to_thread(lambda: set_default_address(address_id))
+    except Exception:
         raise HTTPException(status_code=500, detail={
-            "ok": False, "error": {"code": "UPDATE_FAILED", "message": "Failed to set default"}
+            "ok": False, "error": {"code": "UPDATE_ERROR", "message": "Errore nell'impostazione dell'indirizzo predefinito"}
         })
     return {"ok": True, "data": {"default": True}}
