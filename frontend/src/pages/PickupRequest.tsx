@@ -483,7 +483,7 @@ export default function PickupRequest() {
               </div>
               <Button
                 onClick={handleSubmit}
-                disabled={submitMutation.isPending}
+                disabled={!selectedAddress || submitMutation.isPending}
                 className="bg-primary hover:bg-primary/90 text-white px-6"
               >
                 {submitMutation.isPending ? "Invio..." : "Invia Richiesta"}
