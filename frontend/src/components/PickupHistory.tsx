@@ -60,9 +60,8 @@ export function PickupHistory() {
             text: warning ? "Ritiro annullato, ma notifica non inviata" : "Ritiro annullato",
             warning,
           })
-          setTimeout(() => setCancelMessage(null), 5000)
+          setTimeout(() => setCancelMessage(null), warning ? 15000 : 5000)
         },
-        onError: () => {},
       }
     )
   }
@@ -172,6 +171,7 @@ export function PickupHistory() {
         <CancelPickupDialog
           pickup={cancelTarget}
           isLoading={cancelMutation.isPending}
+          error={cancelMutation.error instanceof Error ? cancelMutation.error.message : cancelMutation.error ? "Errore durante l'annullamento" : null}
           onConfirm={handleCancelConfirm}
           onClose={() => { setCancelTarget(null); cancelMutation.reset() }}
         />

@@ -6,11 +6,12 @@ import type { PickupRecord } from "@/lib/types"
 interface CancelPickupDialogProps {
   pickup: PickupRecord
   isLoading: boolean
+  error?: string | null
   onConfirm: (reason: string | null) => void
   onClose: () => void
 }
 
-export function CancelPickupDialog({ pickup, isLoading, onConfirm, onClose }: CancelPickupDialogProps) {
+export function CancelPickupDialog({ pickup, isLoading, error, onConfirm, onClose }: CancelPickupDialogProps) {
   const [reason, setReason] = useState("")
 
   return (
@@ -40,6 +41,12 @@ export function CancelPickupDialog({ pickup, isLoading, onConfirm, onClose }: Ca
             {reason.length}/500
           </p>
         </div>
+
+        {error && (
+          <div className="mt-3 rounded-lg bg-red-50 border border-red-200 px-3 py-2">
+            <p className="text-sm text-red-800">{error}</p>
+          </div>
+        )}
 
         <div className="flex gap-2 justify-end mt-4">
           <Button variant="outline" size="sm" onClick={onClose} disabled={isLoading}>

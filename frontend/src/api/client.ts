@@ -83,10 +83,18 @@ async function request<T>(
 
   const typed = json as ApiResponse<T>
   if (!typed.ok) {
-    const err = typed.error
+    const err = typed.error as Record<string, unknown> | undefined
+    const message =
+      (err?.message as string) ||
+      (Array.isArray(err?.details)
+        ? (err.details as Array<{ msg?: string; loc?: string[] }>)
+            .map((d) => `${d.loc?.slice(-1)[0] || "campo"}: ${d.msg || "non valido"}`)
+            .join(", ")
+        : null) ||
+      "Unknown error"
     throw new ApiRequestError(
-      err?.code || "UNKNOWN",
-      err?.message || "Unknown error",
+      (err?.code as string) || "UNKNOWN",
+      message,
       response.status
     )
   }

@@ -96,8 +96,9 @@ export function FreightRequestTab({
           {/* File upload */}
           <FileDropZone
             label="File spedizioni freight"
-            subtitle="Excel o CSV con dettagli spedizioni"
+            subtitle="Excel o CSV con dettagli spedizioni (max 50MB)"
             accept=".xlsx,.xls,.csv"
+            maxSizeMB={50}
             icon="📦"
             onFilesSelected={(files) => { setFile(files[0] || null) }}
             selectedFiles={file ? [file] : []}
