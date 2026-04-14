@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { useMutation } from "@tanstack/react-query"
 import { api } from "@/api/client"
 import { PageShell } from "@/components/layout/PageShell"
@@ -72,6 +72,7 @@ export default function PickupRequest() {
   const [pickupResult, setPickupResult] = useState<PickupResponse | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [manualEntryActive, setManualEntryActive] = useState(false)
+  const errorRef = useRef<HTMLDivElement>(null)
 
   const invalidateHistory = useInvalidatePickupHistory()
 
@@ -180,6 +181,9 @@ export default function PickupRequest() {
       setSuccessMessage(result.message)
       setPickupResult(result)
       invalidateHistory()
+    },
+    onError: () => {
+      setTimeout(() => errorRef.current?.scrollIntoView({ behavior: "smooth", block: "center" }), 100)
     },
   })
 
@@ -506,7 +510,7 @@ export default function PickupRequest() {
 
           {/* Error */}
           {submitMutation.error && (
-            <div className="rounded-lg bg-[#fef2f2] border border-destructive/20 px-5 py-4">
+            <div ref={errorRef} className="rounded-lg bg-[#fef2f2] border border-destructive/20 px-5 py-4">
               <p className="text-sm text-red-800">
                 {submitMutation.error instanceof Error
                   ? submitMutation.error.message
