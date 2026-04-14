@@ -24,6 +24,7 @@ interface AddressComboboxProps {
   onManualEntry: (data: ManualAddressData) => void
   onOpenDrawer: () => void
   onSaveAndUse?: (data: AddressCreate) => Promise<void>
+  onClearSelection?: () => void
   isLoading?: boolean
 }
 
@@ -45,6 +46,7 @@ export function AddressCombobox({
   onManualEntry,
   onOpenDrawer,
   onSaveAndUse,
+  onClearSelection,
   isLoading,
 }: AddressComboboxProps) {
   const [open, setOpen] = useState(false)
@@ -324,6 +326,7 @@ export function AddressCombobox({
                 setOpen(false)
                 setQuery("")
                 setManualMode(true)
+                onClearSelection?.()
               }}
             >
               Inserisci indirizzo manualmente

@@ -329,6 +329,7 @@ export default function PickupRequest() {
               onManualEntry={handleManualEntry}
               onOpenDrawer={() => setDrawerOpen(true)}
               onSaveAndUse={handleSaveAndUse}
+              onClearSelection={() => setSelectedAddress(null)}
               isLoading={addressesLoading}
             />
           </div>

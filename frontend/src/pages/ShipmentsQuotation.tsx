@@ -305,6 +305,7 @@ export default function ShipmentsQuotation() {
                   onManualEntry={handleManualEntry}
                   onOpenDrawer={() => setDrawerOpen(true)}
                   onSaveAndUse={handleSaveAndUse}
+                  onClearSelection={() => setSelectedAddress(null)}
                   isLoading={addressesLoading}
                 />
               </div>
@@ -413,6 +414,7 @@ export default function ShipmentsQuotation() {
           onManualEntry={handleManualEntry}
           onOpenDrawer={() => setDrawerOpen(true)}
           onSaveAndUse={handleSaveAndUse}
+          onClearAddress={() => setSelectedAddress(null)}
           addressesLoading={addressesLoading}
         />
       </div>

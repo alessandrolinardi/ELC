@@ -14,6 +14,7 @@ interface FreightRequestTabProps {
   onManualEntry: (data: ManualAddressData) => void
   onOpenDrawer: () => void
   onSaveAndUse: (data: AddressCreate) => Promise<void>
+  onClearAddress: () => void
   addressesLoading: boolean
 }
 
@@ -24,6 +25,7 @@ export function FreightRequestTab({
   onManualEntry,
   onOpenDrawer,
   onSaveAndUse,
+  onClearAddress,
   addressesLoading,
 }: FreightRequestTabProps) {
   const [file, setFile] = useState<File | null>(null)
@@ -112,6 +114,7 @@ export function FreightRequestTab({
               onManualEntry={onManualEntry}
               onOpenDrawer={onOpenDrawer}
               onSaveAndUse={onSaveAndUse}
+              onClearSelection={onClearAddress}
               isLoading={addressesLoading}
             />
           </div>
