@@ -55,6 +55,7 @@ export function AddressCombobox({
   const [manualForm, setManualForm] = useState<ManualAddressData>(EMPTY_MANUAL)
   const [manualName, setManualName] = useState("")
   const [isSaving, setIsSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
 
   const containerRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -106,6 +107,7 @@ export function AddressCombobox({
   const handleSaveAndUse = async () => {
     if (!onSaveAndUse) return
     setIsSaving(true)
+    setSaveError(null)
     try {
       await onSaveAndUse({
         name: manualName || manualForm.company || "Nuovo indirizzo",
@@ -122,6 +124,8 @@ export function AddressCombobox({
       setManualForm(EMPTY_MANUAL)
       setManualName("")
       onManualModeChange?.(false)
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : "Errore durante il salvataggio")
     } finally {
       setIsSaving(false)
     }
@@ -220,6 +224,12 @@ export function AddressCombobox({
             />
           </div>
         </div>
+
+        {saveError && (
+          <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2">
+            <p className="text-sm text-red-800">{saveError}</p>
+          </div>
+        )}
 
         <div className="flex items-center gap-3 pt-2">
           <Button

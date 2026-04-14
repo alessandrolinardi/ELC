@@ -205,10 +205,13 @@ def add_address(
 
         addresses = load_addresses()
 
-        # Check for duplicate name
-        for addr in addresses:
-            if addr.name.lower() == name.lower():
-                return None  # Duplicate name
+        # Auto-suffix name if duplicate exists
+        existing_names = {addr.name.lower() for addr in addresses}
+        original_name = name
+        suffix = 2
+        while name.lower() in existing_names:
+            name = f"{original_name} ({suffix})"
+            suffix += 1
 
         # Generate new ID
         new_id = f"addr_{uuid.uuid4().hex[:8]}"
