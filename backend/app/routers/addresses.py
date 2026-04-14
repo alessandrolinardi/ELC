@@ -38,9 +38,11 @@ async def create_address(request: Request, body: AddressCreate):
             province=body.province, phone=body.phone, reference=body.reference,
             is_default=body.is_default
         ))
-    except Exception:
+    except Exception as e:
+        import logging
+        logging.getLogger("addresses").exception("Address create failed: %s", e)
         raise HTTPException(status_code=500, detail={
-            "ok": False, "error": {"code": "SAVE_ERROR", "message": "Errore nel salvataggio dell'indirizzo"}
+            "ok": False, "error": {"code": "SAVE_ERROR", "message": f"Errore: {e}"}
         })
     return {"ok": True, "data": {"id": result}}
 
