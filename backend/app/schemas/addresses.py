@@ -18,6 +18,7 @@ class AddressCreate(BaseModel):
     @field_validator("zip_code")
     @classmethod
     def validate_zip(cls, v):
+        v = v.strip()
         if not v.isdigit() or len(v) != 5:
             raise ValueError("CAP must be 5 digits")
         return v
@@ -37,8 +38,10 @@ class AddressUpdate(BaseModel):
     @field_validator("zip_code")
     @classmethod
     def validate_zip(cls, v):
-        if v is not None and (not v.isdigit() or len(v) != 5):
-            raise ValueError("CAP must be 5 digits")
+        if v is not None:
+            v = v.strip()
+            if not v.isdigit() or len(v) != 5:
+                raise ValueError("CAP must be 5 digits")
         return v
 
 

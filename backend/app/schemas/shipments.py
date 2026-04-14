@@ -19,6 +19,7 @@ class ShipmentsQuotationForm(BaseModel):
     @field_validator("from_zip")
     @classmethod
     def validate_zip(cls, v):
+        v = v.strip()
         if not v.isdigit() or len(v) != 5:
             raise ValueError("CAP must be 5 digits")
         return v
