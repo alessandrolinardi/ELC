@@ -39,10 +39,13 @@ async def create_address(request: Request, body: AddressCreate):
             is_default=body.is_default
         ))
     except Exception as e:
-        import logging
-        logging.getLogger("addresses").exception("Address create failed: %s", e)
+        error_str = str(e)
+        if "unique" in error_str.lower() or "23505" in error_str:
+            raise HTTPException(status_code=409, detail={
+                "ok": False, "error": {"code": "DUPLICATE_NAME", "message": "Esiste già un indirizzo con questo nome"}
+            })
         raise HTTPException(status_code=500, detail={
-            "ok": False, "error": {"code": "SAVE_ERROR", "message": f"Errore: {e}"}
+            "ok": False, "error": {"code": "SAVE_ERROR", "message": "Errore nel salvataggio dell'indirizzo"}
         })
     return {"ok": True, "data": {"id": result}}
 

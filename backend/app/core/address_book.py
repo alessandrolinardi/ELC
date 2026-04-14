@@ -160,6 +160,10 @@ def update_address(address_id: str, **kwargs) -> None:
     kwargs.pop("id", None)
     kwargs.pop("created_at", None)
 
+    # Remap schema field names to DB column names
+    if "zip_code" in kwargs:
+        kwargs["zip"] = kwargs.pop("zip_code")
+
     # Handle default flag
     if kwargs.get("is_default", False):
         client.table(TABLE).update({"is_default": False}).eq("is_default", True).execute()
