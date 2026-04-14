@@ -85,7 +85,7 @@ export default function ShipmentsQuotation() {
   }, [])
 
   useEffect(() => {
-    if (addresses.length > 0 && !selectedAddress) {
+    if (addresses.length > 0 && !selectedAddress && !manualEntryActive) {
       const defaultAddr = addresses.find((a) => a.is_default) || addresses[0]
       selectAddress(defaultAddr)
     }

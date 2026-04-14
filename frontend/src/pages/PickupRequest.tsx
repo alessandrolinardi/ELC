@@ -102,7 +102,19 @@ export default function PickupRequest() {
 
   // Handle manual address entry (use without saving)
   const handleManualEntry = (data: ManualAddressData) => {
-    setSelectedAddress(null)
+    setSelectedAddress({
+      id: "__manual__",
+      name: "Manuale",
+      company: data.company,
+      contact_name: data.contact_name,
+      street: data.address,
+      zip: data.zip_code,
+      city: data.city,
+      province: data.province,
+      phone: data.phone,
+      reference: data.reference,
+      is_default: false,
+    })
     setForm((prev) => ({
       ...prev,
       company: data.company,
@@ -148,13 +160,13 @@ export default function PickupRequest() {
     }
   }
 
-  // Auto-select default address on load
+  // Auto-select default address on initial load only
   useEffect(() => {
-    if (addresses.length > 0 && !selectedAddress) {
+    if (addresses.length > 0 && !selectedAddress && !manualEntryActive) {
       const defaultAddr = addresses.find((a) => a.is_default) || addresses[0]
       selectAddress(defaultAddr)
     }
-  }, [addresses, selectedAddress, selectAddress])
+  }, [addresses, selectedAddress, selectAddress, manualEntryActive])
 
   // Computed summary
   const totalWeight = form.num_packages * form.weight_per_package
