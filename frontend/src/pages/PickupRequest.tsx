@@ -71,6 +71,7 @@ export default function PickupRequest() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
   const [pickupResult, setPickupResult] = useState<PickupResponse | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const [manualEntryActive, setManualEntryActive] = useState(false)
 
   const invalidateHistory = useInvalidatePickupHistory()
 
@@ -329,7 +330,7 @@ export default function PickupRequest() {
               onManualEntry={handleManualEntry}
               onOpenDrawer={() => setDrawerOpen(true)}
               onSaveAndUse={handleSaveAndUse}
-              onClearSelection={() => setSelectedAddress(null)}
+              onManualModeChange={(active) => setManualEntryActive(active)}
               isLoading={addressesLoading}
             />
           </div>
@@ -483,7 +484,7 @@ export default function PickupRequest() {
               </div>
               <Button
                 onClick={handleSubmit}
-                disabled={!selectedAddress || submitMutation.isPending}
+                disabled={!selectedAddress || manualEntryActive || submitMutation.isPending}
                 className="bg-primary hover:bg-primary/90 text-white px-6"
               >
                 {submitMutation.isPending ? "Invio..." : "Invia Richiesta"}

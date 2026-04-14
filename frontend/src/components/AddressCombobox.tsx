@@ -24,7 +24,7 @@ interface AddressComboboxProps {
   onManualEntry: (data: ManualAddressData) => void
   onOpenDrawer: () => void
   onSaveAndUse?: (data: AddressCreate) => Promise<void>
-  onClearSelection?: () => void
+  onManualModeChange?: (active: boolean) => void
   isLoading?: boolean
 }
 
@@ -46,7 +46,7 @@ export function AddressCombobox({
   onManualEntry,
   onOpenDrawer,
   onSaveAndUse,
-  onClearSelection,
+  onManualModeChange,
   isLoading,
 }: AddressComboboxProps) {
   const [open, setOpen] = useState(false)
@@ -100,6 +100,7 @@ export function AddressCombobox({
     setManualMode(false)
     setManualForm(EMPTY_MANUAL)
     setManualName("")
+    onManualModeChange?.(false)
   }
 
   const handleSaveAndUse = async () => {
@@ -120,6 +121,7 @@ export function AddressCombobox({
       setManualMode(false)
       setManualForm(EMPTY_MANUAL)
       setManualName("")
+      onManualModeChange?.(false)
     } finally {
       setIsSaving(false)
     }
@@ -135,7 +137,7 @@ export function AddressCombobox({
       <div className="space-y-4">
         <button
           type="button"
-          onClick={() => setManualMode(false)}
+          onClick={() => { setManualMode(false); onManualModeChange?.(false) }}
           className="text-sm text-primary font-medium hover:underline flex items-center gap-1"
         >
           <ChevronLeft className="size-4" />
@@ -326,7 +328,7 @@ export function AddressCombobox({
                 setOpen(false)
                 setQuery("")
                 setManualMode(true)
-                onClearSelection?.()
+                onManualModeChange?.(true)
               }}
             >
               Inserisci indirizzo manualmente

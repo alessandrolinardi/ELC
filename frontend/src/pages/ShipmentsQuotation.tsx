@@ -33,6 +33,7 @@ export default function ShipmentsQuotation() {
   const [jobId, setJobId] = useState<string | null>(null)
   const [selectedAddress, setSelectedAddress] = useState<Address | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const [manualEntryActive, setManualEntryActive] = useState(false)
   const [elapsed, setElapsed] = useState(0)
   const [copied, setCopied] = useState(false)
   const [fromValidator, setFromValidator] = useState(false)
@@ -305,14 +306,14 @@ export default function ShipmentsQuotation() {
                   onManualEntry={handleManualEntry}
                   onOpenDrawer={() => setDrawerOpen(true)}
                   onSaveAndUse={handleSaveAndUse}
-                  onClearSelection={() => setSelectedAddress(null)}
+                  onManualModeChange={(active) => setManualEntryActive(active)}
                   isLoading={addressesLoading}
                 />
               </div>
 
               <Button
                 onClick={handleSubmit}
-                disabled={!excelFile || !selectedAddress || submitMutation.isPending || isProcessing}
+                disabled={!excelFile || !selectedAddress || manualEntryActive || submitMutation.isPending || isProcessing}
                 className="bg-primary hover:bg-primary/90 text-white w-full"
               >
                 {submitMutation.isPending || isProcessing ? "Avvio..." : "Avvia Quotazione"}
@@ -414,7 +415,7 @@ export default function ShipmentsQuotation() {
           onManualEntry={handleManualEntry}
           onOpenDrawer={() => setDrawerOpen(true)}
           onSaveAndUse={handleSaveAndUse}
-          onClearAddress={() => setSelectedAddress(null)}
+          onManualModeChange={(active) => setManualEntryActive(active)}
           addressesLoading={addressesLoading}
         />
       </div>

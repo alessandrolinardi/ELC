@@ -14,7 +14,7 @@ interface FreightRequestTabProps {
   onManualEntry: (data: ManualAddressData) => void
   onOpenDrawer: () => void
   onSaveAndUse: (data: AddressCreate) => Promise<void>
-  onClearAddress: () => void
+  onManualModeChange: (active: boolean) => void
   addressesLoading: boolean
 }
 
@@ -25,7 +25,7 @@ export function FreightRequestTab({
   onManualEntry,
   onOpenDrawer,
   onSaveAndUse,
-  onClearAddress,
+  onManualModeChange,
   addressesLoading,
 }: FreightRequestTabProps) {
   const [file, setFile] = useState<File | null>(null)
@@ -33,6 +33,7 @@ export function FreightRequestTab({
   const [contactPhone, setContactPhone] = useState("")
   const [notes, setNotes] = useState("")
   const [successResult, setSuccessResult] = useState<FreightRequestResponse | null>(null)
+  const [isManualEntry, setIsManualEntry] = useState(false)
   const topRef = useRef<HTMLDivElement>(null)
 
   const mutation = useMutation({
@@ -114,7 +115,7 @@ export function FreightRequestTab({
               onManualEntry={onManualEntry}
               onOpenDrawer={onOpenDrawer}
               onSaveAndUse={onSaveAndUse}
-              onClearSelection={onClearAddress}
+              onManualModeChange={(active) => { setIsManualEntry(active); onManualModeChange(active) }}
               isLoading={addressesLoading}
             />
           </div>
@@ -161,7 +162,7 @@ export function FreightRequestTab({
           {/* Submit */}
           <Button
             onClick={() => mutation.mutate()}
-            disabled={!file || !selectedAddress || !contactEmail.trim() || mutation.isPending}
+            disabled={!file || !selectedAddress || isManualEntry || !contactEmail.trim() || mutation.isPending}
             className="bg-primary hover:bg-primary/90 text-white w-full"
           >
             {mutation.isPending ? "Invio in corso..." : "Invia richiesta freight"}
