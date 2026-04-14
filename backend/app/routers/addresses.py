@@ -28,15 +28,16 @@ async def list_addresses(request: Request):
 @limiter.limit("100/hour")
 async def create_address(request: Request, body: AddressCreate):
     loop = asyncio.get_running_loop()
-    result = await loop.run_in_executor(None, lambda: add_address(
-        name=body.name, company=body.company, contact_name=body.contact_name,
-        street=body.street, zip_code=body.zip_code, city=body.city,
-        province=body.province, phone=body.phone, reference=body.reference,
-        is_default=body.is_default
-    ))
-    if result is None:
-        raise HTTPException(status_code=409, detail={
-            "ok": False, "error": {"code": "DUPLICATE_NAME", "message": "Address name already exists"}
+    try:
+        result = await loop.run_in_executor(None, lambda: add_address(
+            name=body.name, company=body.company, contact_name=body.contact_name,
+            street=body.street, zip_code=body.zip_code, city=body.city,
+            province=body.province, phone=body.phone, reference=body.reference,
+            is_default=body.is_default
+        ))
+    except Exception:
+        raise HTTPException(status_code=500, detail={
+            "ok": False, "error": {"code": "SAVE_ERROR", "message": "Errore nel salvataggio dell'indirizzo"}
         })
     return {"ok": True, "data": {"id": result}}
 

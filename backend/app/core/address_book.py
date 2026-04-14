@@ -243,10 +243,11 @@ def add_address(
 
         client.table(TABLE).insert(new_address.to_dict()).execute()
 
-
         return new_id
-    except Exception:
-        return None
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).exception("Error adding address: %s", e)
+        raise
 
 
 def update_address(address_id: str, **kwargs) -> bool:
