@@ -89,7 +89,7 @@ export default function ShipmentsQuotation() {
       const defaultAddr = addresses.find((a) => a.is_default) || addresses[0]
       selectAddress(defaultAddr)
     }
-  }, [addresses, selectedAddress, selectAddress])
+  }, [addresses, selectedAddress, selectAddress, manualEntryActive])
 
   // Pre-load corrected file from Address Validator
   useEffect(() => {

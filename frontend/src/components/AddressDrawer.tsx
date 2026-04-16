@@ -42,6 +42,7 @@ export function AddressDrawer({
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState<AddressCreate>(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
 
@@ -61,6 +62,7 @@ export function AddressDrawer({
 
   const handleSave = async () => {
     setSaving(true)
+    setSaveError(null)
     try {
       if (mode === "add") {
         await onAdd(form)
@@ -70,6 +72,8 @@ export function AddressDrawer({
       setMode("list")
       setEditingId(null)
       setForm(EMPTY_FORM)
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : "Errore durante il salvataggio")
     } finally {
       setSaving(false)
     }
@@ -333,6 +337,12 @@ export function AddressDrawer({
               </div>
 
               <Separator />
+
+              {saveError && (
+                <div className="rounded-lg bg-red-50 border border-red-200 px-3 py-2">
+                  <p className="text-sm text-red-800">{saveError}</p>
+                </div>
+              )}
 
               <div className="flex items-center gap-3">
                 <Button
