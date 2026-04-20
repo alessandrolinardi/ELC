@@ -238,12 +238,12 @@ export default function ProofOfDelivery() {
             {/* Text input */}
             <div className="elc-card">
               <label className="text-sm font-semibold text-foreground block mb-2">
-                Tracking number o ID ordine
+                Tracking, ID ordine, o Numero ordine ShippyPro
               </label>
               <textarea
                 className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
                 rows={5}
-                placeholder={"Inserisci uno o più tracking number, uno per riga.\nEs: 870045464495\n1Z999AA10123456784\nTESTPLAT-ORDER-123"}
+                placeholder={"Inserisci uno o più identificativi, uno per riga.\nEs. tracking: 870045464495, 1Z999AA10123456784\nEs. ID ordine marketplace: TESTPLAT-ORDER-123\nEs. Numero ordine ShippyPro: 335325961"}
                 value={textInput}
                 onChange={(e) => { setTextInput(e.target.value); setExcelFile(null) }}
                 disabled={isProcessing || !!excelFile}

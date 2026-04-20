@@ -776,7 +776,16 @@ def fetch_single_pod(identifier: str) -> dict:
         detail = resp.text[:200]
 
     if resp.status_code == 404:
-        return {"status": "not_found", "error_message": detail or "Spedizione non trovata o POD non ancora disponibile."}
+        detail_lower = (detail or "").lower()
+        if "no shipment found" in detail_lower or "order not found" in detail_lower:
+            msg = (
+                "Tracking non trovato nel database. "
+                "Per spedizioni create direttamente in ShippyPro, inserisci il Numero ordine ShippyPro "
+                "(es. 335325961) invece del tracking number."
+            )
+        else:
+            msg = detail or "Spedizione non trovata o POD non ancora disponibile."
+        return {"status": "not_found", "error_message": msg}
     elif resp.status_code == 409:
         return {"status": "ambiguous", "error_message": detail or "Identificativo corrisponde a più spedizioni."}
     elif resp.status_code == 429:
